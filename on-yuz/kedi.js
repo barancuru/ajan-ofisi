@@ -10,7 +10,7 @@ export const DESENLER = {
   'siyah':     { govde:'#2b2828', gobek:'#322e2e', agiz:'#3a3434', yanak:'#302c2c', pati:'#2b2828', kulak:'#2b2828', kuyruk:'#2b2828', goz:'#dcc43a', biyik:'#f4f1ea', burun:'#b9767c', ic:'#8a5e62' },
   'smokin':    { govde:'#272424', gobek:'#f8f5ef', agiz:'#f8f5ef', yanak:'#f8f5ef', pati:'#f8f5ef', kulak:'#272424', kuyruk:'#272424', goz:'#b9cd3e', biyik:'#fffdf8', burun:'#e8999f', ic:'#e3a2a6', maske:1 },
   'gri-beyaz': { govde:'#8d9196', gobek:'#f7f5f1', agiz:'#f7f5f1', yanak:'#f7f5f1', pati:'#f7f5f1', kulak:'#8d9196', kuyruk:'#8d9196', goz:'#e3b548', biyik:'#fffdf8', burun:'#eaa0a6', ic:'#eeaab0', maske:1 },
-  'pembe':     { govde:'#f2a9c4', gobek:'#fde4ee', agiz:'#fde4ee', yanak:'#f7bcd2', pati:'#fbd3e2', kulak:'#ec92b3', kuyruk:'#f2a9c4', goz:'#7a5fd0', biyik:'#fffafc', burun:'#d9668f', ic:'#f7b3cb' },
+  'pembe':     { govde:'#ee6fa3', gobek:'#fbc4d9', agiz:'#fbc4d9', yanak:'#f48ab5', pati:'#f7a6c6', kulak:'#e55a93', kuyruk:'#ee6fa3', goz:'#7a5fd0', biyik:'#fffafc', burun:'#c23a6e', ic:'#f58cb4', sheen:.15 },
   'siyam':     { govde:'#efe3cd', uc:'#57402f', gobek:'#f6eedf', agiz:'#5f4635', yanak:'#a88a6e', pati:'#57402f', kulak:'#57402f', kuyruk:'#57402f', goz:'#5aa2e6', biyik:'#fffaf0', burun:'#5a3f36', ic:'#b08478', siyam:1 },
 };
 
@@ -119,20 +119,22 @@ function kurk(anahtar, ayar, saydam) {
 const DOKU = new Map();
 function doku(desen, tur, yap) { const k = desen + tur; if (!DOKU.has(k)) DOKU.set(k, yap()); return DOKU.get(k); }
 function desenMalzemeleri(desen, ton, saydam) {
+  if (!DESENLER[desen]) console.warn('bilinmeyen desen', desen);
   const d = DESENLER[desen] || DESENLER.tekir;
+  const sh = d.sheen !== undefined ? { sheen:d.sheen } : {}; // yalnız sheen tanımlı desenler (pembe) için
   const tk = Math.round(ton * 4) / 4; // ton farkını 9 kademeye yuvarla, malzeme paylaşılsın
   const ac = new THREE.Color(1, 1, 1).multiplyScalar(1 + tk * .08);
   const renkli = (r) => new THREE.Color(r).offsetHSL(0, 0, tk * .035);
   const k = desen + '|' + tk;
   const m = {
-    govde: kurk(k + 'g', { map:doku(desen, 'g', () => govdeDokusu(d)), color:ac }, saydam),
-    bas: kurk(k + 'b', { map:doku(desen, 'b', () => basDokusu(d)), color:ac }, saydam),
-    halka: kurk(k + 'h', { map:doku(desen, 'h', () => halkaDokusu(d)), color:ac }, saydam),
-    gobek: kurk(k + 'o', { color:renkli(d.gobek) }, saydam),
-    agiz: kurk(k + 'a', { color:renkli(d.agiz) }, saydam),
-    yanak: kurk(k + 'y', { color:renkli(d.yanak) }, saydam),
-    pati: kurk(k + 'p', { color:renkli(d.pati) }, saydam),
-    kulak: kurk(k + 'k', { color:renkli(d.kulak) }, saydam),
+    govde: kurk(k + 'g', { map:doku(desen, 'g', () => govdeDokusu(d)), color:ac, ...sh }, saydam),
+    bas: kurk(k + 'b', { map:doku(desen, 'b', () => basDokusu(d)), color:ac, ...sh }, saydam),
+    halka: kurk(k + 'h', { map:doku(desen, 'h', () => halkaDokusu(d)), color:ac, ...sh }, saydam),
+    gobek: kurk(k + 'o', { color:renkli(d.gobek), ...sh }, saydam),
+    agiz: kurk(k + 'a', { color:renkli(d.agiz), ...sh }, saydam),
+    yanak: kurk(k + 'y', { color:renkli(d.yanak), ...sh }, saydam),
+    pati: kurk(k + 'p', { color:renkli(d.pati), ...sh }, saydam),
+    kulak: kurk(k + 'k', { color:renkli(d.kulak), ...sh }, saydam),
     ic: kurk(desen + 'ic', { color:d.ic, roughness:.7, sheen:0 }, saydam),
     burun: kurk(desen + 'n', { color:d.burun, roughness:.45, sheen:0 }, saydam),
     goz: kurk(desen + 'gz', { color:d.goz, roughness:.15, sheen:0, clearcoat:1, emissive:d.goz, emissiveIntensity:.12 }, saydam),
