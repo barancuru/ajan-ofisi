@@ -1376,11 +1376,13 @@ function cayciSoz(a) {
 }
 function cayciSerit(c, s) { return s === 'U' ? c.zU : s === 'A' ? c.zA : c.zS; }
 function cayciPlanla(c) {
-  // her turda önce çay odası; sonra bulunduğu yere EN YAKIN 3 odadan biri, iki oda gezince yine çay odasına dönülür
+  // her turda önce çay odası; sonra her seferinde en yakın uğranmamış oda, hepsi gezilince yine çay odasına dönülür
   const cayaGit = c.kalan <= 0, p = c.g.position;
   const uzak = o => Math.hypot(o.cx - p.x, o.cz - p.z);
-  const adaylar = ODALAR.filter(o => o !== c.oda).sort((a, b) => uzak(a) - uzak(b)).slice(0, 3);
-  const hedef = cayaGit ? c.cOda : adaylar.length ? rastgele(adaylar) : ODALAR[0];
+  if (!c.gez) c.gez = new Set();
+  const adaylar = ODALAR.filter(o => o !== c.oda && !c.gez.has(o)).sort((a, b) => uzak(a) - uzak(b));
+  const hedef = cayaGit ? c.cOda : adaylar.length ? adaylar[0] : ODALAR[0];   // turda henüz uğranmamış en yakın oda
+  if (!cayaGit) c.gez.add(hedef);
   const sr = cayaGit ? 'S' : hedef.cz < -.01 ? 'U' : hedef.cz > .01 ? 'S' : 'A';   // ön kenarı hangi şeride bakıyor (alt sıra: güney şerit)
   const yol = [], V = (x, z) => new THREE.Vector3(x, .1, z);
   let x = c.x;
@@ -1410,8 +1412,8 @@ function cayBirak(a) {   // ajanın masasına bir bardak çay (ilk seferde kurul
 }
 function cayciVardi(c) {
   if (c.oda.cay) {   // çay odası: demlik doldu, arabaya iki tur bardak
-    c.iceride = true; c.durum = 'orada'; c.bekT = 4; c.adim = 1; c.ajan = null; c.kalan = 2;
-    c.soz = 'Demlik taze, bardaklar tepside. Yakın masalardan başlıyorum.';
+    c.iceride = true; c.durum = 'orada'; c.bekT = 4; c.adim = 1; c.ajan = null; c.kalan = ODALAR.length; c.gez = new Set([c.oda]);
+    c.soz = 'Demlik taze, bardaklar tepside. Yakından başlayıp bütün masalara bırakıyorum.';
     c.bardaklar.forEach(b => { b.visible = true; });
     c.kedi.tepki('selam');
     return;
