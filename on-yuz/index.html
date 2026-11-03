@@ -88,7 +88,13 @@ h3.kucuk{font-family:"Space Grotesk",sans-serif;font-size:11px;font-weight:600;l
 .bos{font-size:12.5px;color:var(--soluk);padding:6px 2px}
 .akis-kutu{flex:1 1 0}
 .canli-rozet{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--mercan-k)}
-.akis{list-style:none;display:flex;flex-direction:column;gap:2px;overflow:hidden;min-height:0}
+.akis{list-style:none;display:flex;flex-direction:column;gap:2px;overflow-x:hidden;overflow-y:auto;min-height:0}
+.akis li.tikla{cursor:pointer;min-height:44px}
+.akis li.tikla:hover{background:rgba(59,52,44,.04)}
+.akis li .akis-detay{display:none;margin-top:6px;padding:8px 10px;border-radius:8px;background:rgba(59,52,44,.06)}
+.akis li.acik .akis-detay{display:block}
+.akis li .akis-detay b{display:block;font-size:11.5px;color:#a3978a;font-weight:600;margin-bottom:4px}
+.akis li .akis-detay pre{font:inherit;font-size:12.5px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere;max-height:40vh;overflow-y:auto;color:var(--mürekkep,inherit)}
 .akis li{display:flex;gap:10px;padding:8px 4px;border-bottom:1px solid rgba(59,52,44,.06);animation:kaygir .35s ease}
 @keyframes kaygir{from{transform:translateY(-6px)}to{transform:none}}
 .akis li .avatar{margin-top:1px}
@@ -1177,9 +1183,18 @@ function avatar(ajanId, sinif = '') {
   if (foto) d.style.backgroundImage = 'url(' + foto + ')'; else d.style.background = ajanRenk(ajanId);
   return d;
 }
-function akisEkle(ajanId, metin, alt = '', tip = '', zaman = new Date()) {
+function akisEkle(ajanId, metin, alt = '', tip = '', zaman = new Date(), detay = '') {
   const li = el('li', tip);
   const d = el('div'); d.append(el('p', null, metin), el('small', null, [ajanBul(ajanId)?.ad, saatYazi(zaman), alt].filter(Boolean).join(' · ')));
+  const ayrinti = String(detay || '').trim();
+  const tam = ayrinti && ayrinti !== metin ? ayrinti : metin;
+  const kutu = el('div', 'akis-detay');
+  kutu.append(el('b', null, [ajanBul(ajanId)?.ad || ajanId || 'Ajan', saatYazi(zaman), alt].filter(Boolean).join(' · ')), el('pre', null, tam));
+  d.append(kutu);
+  li.classList.add('tikla'); li.tabIndex = 0; li.setAttribute('role', 'button'); li.setAttribute('aria-expanded', 'false');
+  const ac = () => li.setAttribute('aria-expanded', li.classList.toggle('acik') ? 'true' : 'false');
+  li.addEventListener('click', ac);
+  li.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); ac(); } });
   li.append(avatar(ajanId), d);
   const ul = $('akis'); ul.prepend(li);
   while (ul.children.length > 14) ul.lastChild.remove();
@@ -1335,14 +1350,14 @@ function olayIsle(o) {
         if ((o.arac === 'Task' || o.arac === 'Agent') && !tekrar) altAjanEkle(a, o.detay);
         ekranYenile(a); panelYenile();
       }
-      if (!tekrar) akisEkle(o.ajan, ad + ', ' + e.gecmis, '', '', zaman);
+      if (!tekrar) akisEkle(o.ajan, ad + ', ' + e.gecmis, '', '', zaman, [o.arac, o.detay].filter(Boolean).join(': '));
     },
     kosu_bitti() {
       const etiket = kosuEtiket.get(o.kosu_id);
       const sure = o.sure_sn != null ? Math.round(o.sure_sn) + ' sn' : '';
-      akisEkle(o.ajan, o.durum === 'hata' ? ad + ' işi bitiremedi' : ad + ' işi bitirdi' + (etiket ? ': ' + etiket : ''), sure, o.durum === 'hata' ? '' : 'ok', zaman);
+      akisEkle(o.ajan, o.durum === 'hata' ? ad + ' işi bitiremedi' : ad + ' işi bitirdi' + (etiket ? ': ' + etiket : ''), sure, o.durum === 'hata' ? '' : 'ok', zaman, o.ozet || o.detay || '');
       const hafiza = Array.isArray(o.hafiza_eklendi) ? o.hafiza_eklendi : [];
-      hafiza.forEach(m => akisEkle(o.ajan, 'Hafızaya eklendi: ' + kisa(m, 90), '', 'hafiza', zaman));
+      hafiza.forEach(m => akisEkle(o.ajan, 'Hafızaya eklendi: ' + kisa(m, 90), '', 'hafiza', zaman, 'Hafızaya eklendi: ' + m));
       if (o.durum !== 'hata') kartEkle(o);
       if (a) altAjanTemizle(a.id);
       if (a && !tekrar) {
@@ -1359,7 +1374,7 @@ function olayIsle(o) {
     ceo_bitti() {
       if (o.durum === 'hata') { if (!tekrar) akisEkle('ceo', 'CEO geçerli bir plan çıkaramadı, koşu başlatılmadı', '', '', zaman); }
       else {
-        akisEkle('ceo', 'CEO: ' + kisa(o.cevap || '', 140), '', '', zaman);
+        akisEkle('ceo', 'CEO: ' + kisa(o.cevap || '', 140), '', '', zaman, o.cevap || '');
         (o.reddedilen || []).forEach(r => akisEkle(r.ajan, 'CEO atamadı: ' + (ajanBul(r.ajan)?.ad || r.ajan) + ' · ' + (r.neden || ''), '', '', zaman));
       }
       if (tekrar || !a) return;
@@ -1373,7 +1388,7 @@ function olayIsle(o) {
       });
       sayacTazele();
     },
-    hata() { akisEkle(o.ajan, ad + ': hata · ' + kisa(o.detay || '', 80), '', '', zaman); },
+    hata() { akisEkle(o.ajan, ad + ': hata · ' + kisa(o.detay || '', 80), '', '', zaman, o.detay || ''); },
     terminal_durum() {
       if (tekrar || !o.oturum_adi) return;
       if (o.durum === 'kapandi') terminaller.delete(o.oturum_adi);
