@@ -297,6 +297,14 @@ def bitir(ajan, baglam, sonuc, hata, baslangic, log_yolu, cikti_dizini):
     print(f"\n■ bitti · {sure} sn · maliyet_usd={olay['maliyet_usd']} · {olay['cikti']}", flush=True)
     if eklenen:
         print(f"  hafızaya eklendi: {eklenen}", flush=True)
+    if basarili:
+        # e.g. Görevci handed a task to the development pipeline: start it without waiting for the 5 min timer.
+        # No model is called when nothing is ready (0 tokens); the lock has already been released.
+        try:
+            subprocess.run(["systemctl", "--user", "start", "--no-block", "beyin@gorev.service"],
+                           capture_output=True, timeout=10)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
 
 
 if __name__ == "__main__":
