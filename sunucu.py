@@ -598,7 +598,7 @@ def son_bolum(govde):
 
 
 def gorev_ozeti(yol, bitti=False):
-    with open(yol, encoding="utf-8") as f:
+    with open(yol, encoding="utf-8", errors="replace") as f:  # one bad byte must not hide the task or break the approval
         metin = f.read()
     fm, govde = on_bilgi(metin)
     if fm.get("tur") != "gelistirme":
@@ -688,7 +688,7 @@ def gelistirme_degistir(veri):
         if os.path.islink(yol) or not os.path.isfile(yol):
             raise IstekHatasi(404, "görev yok")
         with GELISTIRME_KILIDI:
-            with open(yol, encoding="utf-8") as f:
+            with open(yol, encoding="utf-8", errors="replace") as f:  # one bad byte must not hide the task or break the approval
                 metin = f.read()
             fm, _ = on_bilgi(metin)
             if fm.get("durum") != "uat":
@@ -711,7 +711,7 @@ def gelistirme_degistir(veri):
         if os.path.islink(yol) or not os.path.isfile(yol):
             raise IstekHatasi(404, "öneri yok")
         with GELISTIRME_KILIDI:
-            with open(yol, encoding="utf-8") as f:
+            with open(yol, encoding="utf-8", errors="replace") as f:  # one bad byte must not hide the task or break the approval
                 metin = f.read()
             fm, _ = on_bilgi(metin)
             if fm.get("durum") != "oneri":
