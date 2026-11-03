@@ -278,7 +278,10 @@ td.sayi,th.sayi{text-align:right}
 .gelistirme-izgara{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
 .rozet{font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:rgba(59,52,44,.08);color:var(--murekkep)}
 .rozet.uat{background:#ffe1d6;color:#b5401f}.rozet.calisiyor{background:#fff0c9;color:#8a5a14}
-.rozet.bitti{background:#dcefe1;color:#2f6e44}.rozet.takildi{background:#f7d4d1;color:#9c2f26}
+.rozet.bitti{background:#dcefe1;color:#2f6e44}.rozet.oneri{background:#e4e1fb;color:#4b3fa8}
+.oneri-metin{font-size:12.5px;line-height:1.45;color:#5d5348;margin-top:6px;max-height:220px;overflow:auto}
+.oneri-metin h1,.oneri-metin h2,.oneri-metin h3{font-size:12.5px;margin:8px 0 2px}
+.oneri-kart textarea{width:100%;margin-top:8px}.rozet.takildi{background:#f7d4d1;color:#9c2f26}
 .gelistirme-kart a.onizleme{display:inline-block;margin-top:6px;font-size:13px;font-weight:600;color:var(--mercan-k)}
 .gelistirme-kart .sha{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11.5px;color:var(--soluk);flex-wrap:wrap}
 .gelistirme-kart .sha code{font-size:11px;overflow-wrap:anywhere;flex:1;min-width:0;color:var(--murekkep)}
@@ -2068,7 +2071,7 @@ function odalarSayfasi() {
   });
   return [el('h2', null, 'Odalar'), el('p', 'alt', ODALAR.length + ' oda, ' + AJANLAR.length + ' ajan. Her oda iş gelince uyanır.'), iz];
 }
-const GDURUM = { hazir:['Sırada','sira'], calisiyor:['Ajan çalışıyor','calisiyor'], uat:['Onayını bekliyor','uat'], bitti:['Tamamlandı','bitti'], takildi:['Takıldı','takildi'], taslak:['Taslak','sira'] };
+const GDURUM = { hazir:['Sırada','sira'], calisiyor:['Ajan çalışıyor','calisiyor'], uat:['Onayını bekliyor','uat'], bitti:['Tamamlandı','bitti'], takildi:['Takıldı','takildi'], taslak:['Taslak','sira'], oneri:['Öneri','oneri'], reddedildi:['İstenmedi','takildi'] };
 let gelistirmeZaman = null;
 async function gelistirmeSayfasi() {
   clearInterval(gelistirmeZaman);
@@ -2097,7 +2100,8 @@ async function gelistirmeSayfasi() {
     if (durum !== 200) return tost(v.hata || ('hata ' + durum));
     tost('Görev açıldı; ajan birazdan başlar'); baslik.value = ''; istek.value = ''; sekmeAc('gelistirme');
   };
-  const aktif = veri.gorevler.filter(g => !g.bitti), bitti = veri.gorevler.filter(g => g.bitti);
+  const oneriler = veri.gorevler.filter(g => !g.bitti && g.durum === 'oneri');
+  const aktif = veri.gorevler.filter(g => !g.bitti && g.durum !== 'oneri'), bitti = veri.gorevler.filter(g => g.bitti);
   const sira = { uat:0, calisiyor:1, hazir:2, takildi:3 };
   aktif.sort((a, b) => (sira[a.durum] ?? 9) - (sira[b.durum] ?? 9));
   const iz = el('div', 'izgara gelistirme-izgara');
@@ -2105,7 +2109,12 @@ async function gelistirmeSayfasi() {
   if (!aktif.length) iz.append(el('p', 'bos', 'Açık geliştirme görevi yok.'));
   const parcalar = [el('h2', null, 'Geliştirme'),
     el('p', 'alt', 'Talimat ver → ajan ayrı bir dalda geliştirir → kontroller → önizleme/paket → sen onaylarsın → canlıya geçer. Boştayken 0 token; görevler 5 dakikada bir kontrol edilir.'),
-    form, el('h3', 'ara-baslik', 'Açık görevler'), iz];
+    form];
+  if (oneriler.length) {
+    const izO = el('div', 'izgara gelistirme-izgara'); oneriler.forEach(g => izO.append(oneriKarti(g)));
+    parcalar.push(el('h3', 'ara-baslik', 'Ofisin önerileri · ' + oneriler.length), izO);
+  }
+  parcalar.push(el('h3', 'ara-baslik', 'Açık görevler'), iz);
   if (bitti.length) {
     const iz2 = el('div', 'izgara gelistirme-izgara'); bitti.forEach(g => iz2.append(gelistirmeKarti(g)));
     parcalar.push(el('h3', 'ara-baslik', 'Son tamamlananlar'), iz2);
@@ -2136,6 +2145,29 @@ function gelistirmeKararKur(g, dug, kapat) {
     dug.replaceChildren(gon, vaz); dug.parentNode.insertBefore(t, dug); t.focus();
   };
   dug.append(onay, red);
+}
+function oneriKarti(g) {
+  const k = el('div', 'kart gelistirme-kart oneri-kart');
+  const ust = el('div', 'ust');
+  ust.append(el('span', 'rozet oneri', 'Öneri'), document.createTextNode((g.proje || '-') + ' · ' + (g.olusturma || '')));
+  const govde = el('div', 'oneri-metin'); mdCiz(govde, g.metin || '');
+  const dug = el('div', 'dugmeler');
+  const evet = el('button', 'onay', 'Geliştir'), hayir = el('button', 'sonra', 'İstemiyorum');
+  const gonder = async (karar, not_) => {
+    const { durum, veri } = await postJSON('/api/gelistirme', { islem:'oneri', dosya:g.dosya, karar, not: not_ || null });
+    tost(durum === 200 ? (karar === 'evet' ? 'Sıraya alındı; ajan birazdan başlar, sonra UAT için onayına gelir' : 'Arşivlendi; bir daha önerilmez') : (veri.hata || 'hata ' + durum));
+    sekmeAc('gelistirme');
+  };
+  const notlu = karar => {
+    const t = el('textarea'); t.rows = 2; t.placeholder = karar === 'evet' ? 'İstersen ek not (ör. "yalnız telefonda")' : 'Neden istemiyorsun? (isteğe bağlı; ajan bir daha önermez)';
+    const gon = el('button', 'onay', karar === 'evet' ? 'Geliştirmeye gönder' : 'Arşivle'), vaz = el('button', 'sonra', 'Vazgeç');
+    gon.onclick = () => gonder(karar, t.value.trim()); vaz.onclick = () => sekmeAc('gelistirme');
+    dug.replaceChildren(gon, vaz); k.insertBefore(t, dug); t.focus();
+  };
+  evet.onclick = () => notlu('evet'); hayir.onclick = () => notlu('hayir');
+  dug.append(evet, hayir);
+  k.append(ust, el('h4', null, g.baslik), govde, dug);
+  return k;
 }
 function gelistirmeKarti(g) {
   const k = el('div', 'kart gelistirme-kart');
@@ -2319,9 +2351,17 @@ async function dizinSayfasi() {
       const durum = el('span', 'alt'), kaydet = el('button', 'koyu-dugme', 'Kaydet'), vazgec = el('button', 'mini', 'Vazgeç');
       kaydet.onclick = async () => {
         kaydet.disabled = true; durum.textContent = 'Kaydediliyor…';
-        let r; try { r = await postJSON('/api/dizin/yaz', { yol: dizinDosya, metin: t.value }); } catch { r = { durum: 0, veri: {} }; }
+        let r; try { r = await postJSON('/api/dizin/yaz', { yol: dizinDosya, metin: t.value, surum: d.surum }); } catch { r = { durum: 0, veri: {} }; }
         if (r.durum === 200) { dizinDuzenle = false; sekmeAc('dizin'); return; }
-        kaydet.disabled = false; durum.textContent = 'Kaydedilemedi: ' + (r.veri.hata || r.durum);
+        kaydet.disabled = false;
+        if (r.durum === 409) {
+          // the file changed elsewhere: don't overwrite; keep your text on the clipboard
+          let kopya = false; try { await navigator.clipboard.writeText(t.value); kopya = true; } catch {}
+          durum.textContent = 'Kaydedilmedi: ' + (r.veri.hata || 'dosya değişmiş') + '. ' +
+            (kopya ? 'Metnin panoya kopyalandı; Vazgeç → yeniden aç → yapıştırıp birleştir.' : 'Metnini kaybetmemek için önce kopyala, sonra yeniden aç.');
+          return;
+        }
+        durum.textContent = 'Kaydedilemedi: ' + (r.veri.hata || r.durum);
       };
       vazgec.onclick = () => { if (t.value === d.metin || confirm('Değişiklikler atılsın mı?')) { dizinDuzenle = false; sekmeAc('dizin'); } };
       const dugmeler = el('div', 'dizin-dugmeler'); dugmeler.append(kaydet, vazgec, durum);

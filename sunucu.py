@@ -4,6 +4,7 @@
 python3 sunucu.py            # 8796, doluysa sonraki boş port
 """
 import base64
+import hashlib
 import json
 import os
 import re
@@ -516,8 +517,17 @@ def dizin_oku_yaniti(goreli):
         raise IstekHatasi(404, "dosya yok")
     with open(tam, "rb") as f:
         ham = f.read(DIZIN_MAKS_OKU + 1)
-    return {"ad": os.path.basename(tam), "kirpildi": len(ham) > DIZIN_MAKS_OKU,
+    return {"ad": os.path.basename(tam), "kirpildi": len(ham) > DIZIN_MAKS_OKU, "surum": dosya_surumu(tam),
             "metin": ham[:DIZIN_MAKS_OKU].decode("utf-8", errors="replace")}
+
+
+def dosya_surumu(tam):
+    """Content hash: on save, "has it changed since you opened it?" (Syncthing/agent/another tab)."""
+    h = hashlib.sha256()
+    with open(tam, "rb") as f:
+        for parca in iter(lambda: f.read(65536), b""):
+            h.update(parca)
+    return h.hexdigest()
 
 
 def dizin_yaz(veri):
@@ -532,9 +542,14 @@ def dizin_yaz(veri):
         raise IstekHatasi(413, f"dosya en fazla {DIZIN_MAKS_OKU // 1000} KB olabilir")
     if os.path.getsize(tam) > DIZIN_MAKS_OKU:
         raise IstekHatasi(413, "dosya büyük; web'den düzenlenemez")
+    surum = veri.get("surum")
+    if not isinstance(surum, str) or not re.fullmatch(r"[0-9a-f]{64}", surum):
+        raise IstekHatasi(409, "sürüm bilgisi yok: sayfayı yenileyip yeniden aç")
     with GELISTIRME_KILIDI:
+        if dosya_surumu(tam) != surum:
+            raise IstekHatasi(409, "dosya sen açtıktan sonra başka yerde değişti (telefon, PC ya da ajan); kaydedilmedi")
         atomik_yaz(tam, metin)
-    return {"ok": True, "boyut": len(metin.encode("utf-8"))}
+    return {"ok": True, "boyut": len(metin.encode("utf-8")), "surum": dosya_surumu(tam)}
 
 
 def gelistirme_projeleri():
@@ -597,6 +612,8 @@ def gorev_ozeti(yol, bitti=False):
             "son_bolum": son_bolum(govde)}
     if fm.get("proje") == "ajan-ofisi" and durum == "uat":
         ozet["onizleme"] = ":8444"
+    if durum == "oneri":
+        ozet["metin"] = govde.split("\n", 1)[1].strip()[:2500] if "\n" in govde else ""
     return ozet
 
 
@@ -681,7 +698,42 @@ def gelistirme_degistir(veri):
             atomik_yaz(yol, on_bilgi_yaz(metin, "onay", karar))
         kosucuyu_durt()
         return gelistirme_yaniti()
-    raise IstekHatasi(400, "islem: yeni | onay")
+    if islem == "oneri":
+        # suggestion decision: evet → durum: hazir (pipeline takes it); hayir → archived as reddedildi (not suggested again)
+        dosya, karar, not_ = veri.get("dosya"), veri.get("karar"), veri.get("not")
+        if not isinstance(dosya, str) or not DOSYA_DESENI.match(dosya) or dosya.startswith("."):
+            raise IstekHatasi(400, "geçersiz dosya")
+        if karar not in ("evet", "hayir"):
+            raise IstekHatasi(400, "karar: evet | hayir")
+        if not_ is not None and (not isinstance(not_, str) or len(not_) > ortak.MAKS_GIRDI):
+            raise IstekHatasi(400, "not en fazla 4000 karakter")
+        yol = os.path.join(GOREV_DIZINI, dosya)
+        if os.path.islink(yol) or not os.path.isfile(yol):
+            raise IstekHatasi(404, "öneri yok")
+        with GELISTIRME_KILIDI:
+            with open(yol, encoding="utf-8") as f:
+                metin = f.read()
+            fm, _ = on_bilgi(metin)
+            if fm.get("durum") != "oneri":
+                raise IstekHatasi(409, f"bu bir öneri değil (durum: {fm.get('durum') or '-'})")
+            if not_ and not_.strip():
+                baslik = "Kullanıcı notu" if karar == "evet" else "Neden istenmedi"
+                metin = metin.rstrip("\n") + f"\n\n## {baslik}\n{not_.strip()}\n"
+            if karar == "evet":
+                atomik_yaz(yol, on_bilgi_yaz(metin, "durum", "hazir"))
+            else:
+                metin = on_bilgi_yaz(on_bilgi_yaz(metin, "durum", "reddedildi"), "karar", f"{datetime.now():%Y-%m-%d %H:%M}")
+                hedef_dizin = os.path.join(GOREV_DIZINI, "bitti")
+                os.makedirs(hedef_dizin, exist_ok=True)
+                hedef = os.path.join(hedef_dizin, dosya)
+                if os.path.exists(hedef):
+                    hedef = os.path.join(hedef_dizin, f"{datetime.now():%m%d%H%M%S}-{dosya}")
+                atomik_yaz(yol, metin)
+                os.replace(yol, hedef)
+        if karar == "evet":
+            kosucuyu_durt()
+        return gelistirme_yaniti()
+    raise IstekHatasi(400, "islem: yeni | onay | oneri")
 
 
 # ---------- HTTP ----------
