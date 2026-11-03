@@ -137,6 +137,9 @@ h3.kucuk{font-family:"Space Grotesk",sans-serif;font-size:11px;font-weight:600;l
 .komut .ceo-ikon{font-family:"Space Grotesk",sans-serif;font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--mercan-k);background:rgba(255,122,89,.12);padding:6px 8px;border-radius:8px}
 .komut input{flex:1;border:none;outline:none;background:transparent;font:inherit;font-size:15px;color:var(--murekkep);padding:10px 4px;min-width:0}
 .komut input::placeholder{color:#a3978a}
+.komut .ata{flex:0 0 auto;padding:0 10px;border-radius:12px;background:rgba(255,255,255,.7);border:1px solid rgba(59,52,44,.12);font-size:15px;min-width:42px;min-height:40px}
+.komut-ek{position:absolute;left:0;right:0;bottom:calc(100% + 6px);margin:0}
+.komut-ek:empty{display:none}
 .gonder{background:var(--mercan);color:#fff;font-weight:600;font-size:14px;padding:11px 18px;border-radius:14px;box-shadow:0 4px 14px rgba(255,122,89,.35);transition:transform .15s,background .15s}
 .gonder:hover{background:var(--mercan-k)}.gonder:active{transform:scale(.96)}
 .gonder:disabled{opacity:.55;cursor:wait}
@@ -330,6 +333,7 @@ td.sayi,th.sayi{text-align:right}
   .panel{padding:16px}
   .komut{left:8px;right:8px;bottom:calc(10px + env(safe-area-inset-bottom));width:auto;transform:none}
   .komut input{font-size:16px;min-width:0}
+  .komut .ata{min-height:44px;min-width:44px}
   .tost{left:50%;bottom:calc(80px + env(safe-area-inset-bottom));max-width:calc(100% - 24px)}
   .mod{display:none}
   body.sahne-modu .sag{display:none}
@@ -384,7 +388,10 @@ td.sayi,th.sayi{text-align:right}
 
 <form class="komut cam" id="komut" autocomplete="off">
   <span class="ceo-ikon">CEO</span>
+  <div class="ekler komut-ek" id="komutEk"></div>
   <input id="komutGir" maxlength="600" placeholder="CEO'ya derdini anlat…">
+  <input id="komutDosya" type="file" multiple hidden>
+  <button class="ata" id="komutAta" type="button" title="Dosya ekle" aria-label="Dosya ekle">📎</button>
   <button class="gonder" id="komutGonder" type="submit">Gönder</button>
 </form>
 <div class="tost cam" id="tost"></div>
@@ -1695,8 +1702,25 @@ async function gorevVer(ajanId, govde) {
   } catch { tost('Sunucuya ulaşılamadı.'); }
 }
 let ceoBekliyor = false;
+/* CEO dosya eki: metin dosyaları okunur, istekle veri olarak gider (en fazla 3, her biri 40.000 karakter) */
+let ceoEkler = [];
+function ceoEkCiz() {
+  $('komutEk').replaceChildren(...ceoEkler.map((x, i) => { const b = el('button', null, x.ad + ' ×'); b.type = 'button'; b.onclick = () => { ceoEkler.splice(i, 1); ceoEkCiz(); }; return b; }));
+}
+$('komutAta').onclick = () => $('komutDosya').click();
+$('komutDosya').onchange = async function () {
+  for (const f of this.files) {
+    if (ceoEkler.length >= 3) { tost('En fazla 3 dosya eklenebilir.'); break; }
+    const t = await f.text().catch(() => null);
+    if (t == null || t.includes('\u0000')) tost(f.name + ': yalnız metin dosyaları eklenebilir.');
+    else if (t.length > 40000) tost(f.name + ': dosya çok büyük (en fazla 40.000 karakter).');
+    else ceoEkler.push({ ad:f.name, icerik:t });
+  }
+  this.value = ''; ceoEkCiz();
+};
 async function ceoyaSor(metin) {
   const temiz = metin.trim().slice(0, 600); if (!temiz || ceoBekliyor) return;
+  const ekler = ceoEkler; ceoEkler = []; ceoEkCiz();
   SES.tik(); akisEkle('ceo', SEN + ' → CEO: ' + kisa(temiz, 120));
   ceoBekliyor = true; $('komutGonder').disabled = true;
   const ceo = ajanBul('ceo');
@@ -1704,7 +1728,7 @@ async function ceoyaSor(metin) {
   try {
     if (DEMO) await demo.ceo(temiz);
     else {
-      const { durum, veri } = await postJSON('/api/ceo', { metin:temiz });
+      const { durum, veri } = await postJSON('/api/ceo', ekler.length ? { metin:temiz, ekler } : { metin:temiz });
       if (durum !== 200) { tost('CEO: ' + (veri.hata || 'hata ' + durum)); if (ceo) { cekirdek.dusun = false; ajanUyut(ceo); } }
     }
   } catch { tost('CEO’ya ulaşılamadı.'); if (ceo) { cekirdek.dusun = false; ajanUyut(ceo); } }

@@ -158,7 +158,7 @@ toplamda en büyük sayı odur. Maliyet sekmesi yalnız `claude -p`'nin bildirdi
 | `GET /api/ajanlar` | ajanlar + `kurulu`, `durum`, `son_kosu`, `odalar`, `ayarlar` (cwd ve görev prompt'ları gönderilmez) |
 | `POST /api/gorev` | `{"ajan": id, "etiket": "<hazır görev>"}` ya da `{"ajan": id, "prompt": "...", "ekler": [{"ad","icerik"}]}` → 202; çalışıyorsa 409. `ekler`: en fazla 3 metin dosyası, her biri 40.000 karakter; prompt'a veri olarak gömülür |
 | `GET /api/son-is?ajan=id` | ajanın son koşusunun tam çıktısı (`{metin, kirpildi}`) |
-| `POST /api/ceo` | `{"metin": "...", "kuru": false}` → `{cevap, atamalar, baslatilan, reddedilen}`; `kuru: true` yalnız plan |
+| `POST /api/ceo` | `{"metin": "...", "kuru": false, "ekler": [{"ad","icerik"}]}` (ekler isteğe bağlı, `/api/gorev` ile aynı sınırlar; CEO'ya ve atanan ajanlara veri olarak gider) → `{cevap, atamalar, baslatilan, reddedilen}`; `kuru: true` yalnız plan |
 | `GET /api/olaylar?son=N` | SSE; son N olayı tekrar oynatır, sonra canlı |
 | `GET /api/terminaller` | köprüdeki oturumlar (ajan, oda, oturum adı, durum, son araç, son hedef) |
 | `GET /api/token` | bugünkü ajan başına token |
