@@ -62,16 +62,62 @@ def ayarlar(veri):
     return {"kullanici": str(a.get("kullanici") or "")[:40], "marka": str(a.get("marka") or "Ajan Ofisi")[:40]}
 
 
+OLAY_MAKS_BAYT = 20 * 1024 * 1024  # bu boyutu aşınca olaylar.jsonl -> olaylar.jsonl.1
+
+
 def olay_yaz(olay):
-    """olaylar.jsonl'e tek satır ekler (süreçler arası kilitli)."""
+    """olaylar.jsonl'e tek satır ekler (süreçler arası kilitli). Dosya OLAY_MAKS_BAYT'ı aşarsa .1'e döndürür."""
     satir = json.dumps({"zaman": simdi_iso(), **olay}, ensure_ascii=False)
-    with open(OLAYLAR, "a", encoding="utf-8") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        try:
-            f.write(satir + "\n")
-            f.flush()
-        finally:
-            fcntl.flock(f, fcntl.LOCK_UN)
+    for _ in range(5):
+        with open(OLAYLAR, "a", encoding="utf-8") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            try:
+                try:
+                    if os.fstat(f.fileno()).st_ino != os.stat(OLAYLAR).st_ino:
+                        continue  # başka süreç bu arada döndürdü: yeni dosyayı açıp yeniden dene
+                except FileNotFoundError:
+                    continue
+                if os.fstat(f.fileno()).st_size >= OLAY_MAKS_BAYT:
+                    os.replace(OLAYLAR, OLAYLAR + ".1")
+                    continue
+                f.write(satir + "\n")
+                f.flush()
+                return
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
+    raise OSError("olaylar.jsonl yazılamadı (döndürme yarışı)")
+
+
+def _satir_tarihi(satir):
+    m = re.match(rb'\{"zaman": "(\d{4}-\d\d-\d\d)', satir)
+    return m.group(1).decode() if m else None
+
+
+def bugunun_satirlari(yol, tarih):
+    """Dosyayı sondan okuyup zaman'ı `tarih`ten (YYYY-MM-DD) önce olmayan satırları (bayt) döndürür.
+    Büyük dosyada yalnız sondaki parçaları okur. İkinci dönüş: dosyanın başına kadar inildi mi."""
+    try:
+        with open(yol, "rb") as f:
+            konum = f.seek(0, os.SEEK_END)
+            tampon = b""
+            while konum > 0:
+                oku = min(1 << 20, konum)
+                konum -= oku
+                f.seek(konum)
+                tampon = f.read(oku) + tampon
+                if konum > 0:
+                    satirlar = tampon.split(b"\n", 2)
+                    if len(satirlar) > 2:  # satirlar[0] yarım olabilir; ikincisi tam satır
+                        t = _satir_tarihi(satirlar[1])
+                        if t is not None and t < tarih:
+                            break
+    except FileNotFoundError:
+        return [], False
+    satirlar = tampon.split(b"\n")
+    if konum > 0:
+        satirlar = satirlar[1:]  # baştaki yarım satır
+    sonuc = [s for s in satirlar if s.strip() and (_satir_tarihi(s) or tarih) >= tarih]
+    return sonuc, konum == 0
 
 
 @contextlib.contextmanager

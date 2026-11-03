@@ -405,16 +405,33 @@ def _ceo_calistir(metin, kuru=False, ekler=None):
 
 # ---------- okuma uçları ----------
 
-def olaylari_oku():
-    try:
-        with open(ortak.OLAYLAR, encoding="utf-8") as f:
-            for satir in f:
-                try:
-                    yield json.loads(satir)
-                except json.JSONDecodeError:
-                    continue
-    except FileNotFoundError:
-        return
+def olaylari_oku(eski=False):
+    """Olayları eskiden yeniye verir. eski=True ise döndürülmüş olaylar.jsonl.1 de başa eklenir."""
+    yollar = [ortak.OLAYLAR + ".1", ortak.OLAYLAR] if eski else [ortak.OLAYLAR]
+    for yol in yollar:
+        try:
+            with open(yol, encoding="utf-8") as f:
+                for satir in f:
+                    try:
+                        yield json.loads(satir)
+                    except json.JSONDecodeError:
+                        continue
+        except FileNotFoundError:
+            continue
+
+
+def bugunun_olaylari():
+    """Yalnız bugünün olayları: dosyayı sondan okur (200 MB'lık dosyada da hızlı). Dosya başına inilirse .1 de bakılır."""
+    tarih = ortak.bugun()
+    satirlar, basa_indi = ortak.bugunun_satirlari(ortak.OLAYLAR, tarih)
+    if basa_indi:
+        onceki, _ = ortak.bugunun_satirlari(ortak.OLAYLAR + ".1", tarih)
+        satirlar = onceki + satirlar
+    for satir in satirlar:
+        try:
+            yield json.loads(satir)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            continue
 
 
 GECMIS_SAYFA = 20
@@ -424,7 +441,7 @@ def gecmis_yaniti(ajan_id=None, sayfa=0):
     """kosu_bitti/ceo_bitti olaylarından koşu geçmişi (yeniden eskiye). Eski kayıtlarda eksik alanlar None döner."""
     if ajan_id and not ortak.AJAN_ID_DESENI.match(ajan_id):
         raise IstekHatasi(400, "geçersiz ajan id")
-    biten = [o for o in olaylari_oku() if o.get("tur") in ("kosu_bitti", "ceo_bitti")
+    biten = [o for o in olaylari_oku(eski=True) if o.get("tur") in ("kosu_bitti", "ceo_bitti")
              and (not ajan_id or o.get("ajan") == ajan_id)]
     biten.reverse()
     sayfa = max(0, sayfa)
@@ -449,7 +466,7 @@ def ceo_kayit_yaniti(ceo_id):
                 return {"kayit": json.load(f), "eksik": False}
         except (OSError, json.JSONDecodeError):
             pass
-    for o in olaylari_oku():
+    for o in olaylari_oku(eski=True):
         if o.get("tur") == "ceo_bitti" and o.get("kosu_id") == ceo_id:
             return {"kayit": {"ceo_id": ceo_id, "zaman": o.get("zaman"), "istek": o.get("istek"), "ekler": None,
                               "kuru": o.get("kuru"), "durum": o.get("durum"), "hata": o.get("hata"),
@@ -485,7 +502,7 @@ def ajanlar_yaniti():
 
 def sayac_yaniti():
     bugun = ortak.bugun()
-    biten = [o for o in olaylari_oku()
+    biten = [o for o in bugunun_olaylari()
              if o.get("tur") in ("kosu_bitti", "ceo_bitti") and str(o.get("zaman", "")).startswith(bugun)]
     toplam = {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0,
               "cache_creation_input_tokens": 0}
@@ -1140,6 +1157,8 @@ class Isleyici(SimpleHTTPRequestHandler):
             nabiz = time.time()
             while True:
                 boyut = os.path.getsize(ortak.OLAYLAR) if os.path.exists(ortak.OLAYLAR) else 0
+                if boyut < konum:
+                    konum = 0  # dosya döndürüldü: yeni dosyayı baştan izle
                 if boyut > konum:
                     with open(ortak.OLAYLAR, "rb") as f:
                         f.seek(konum)
@@ -1184,7 +1203,7 @@ def main():
         ortak.ajanlari_yukle()  # bozuk ya da eksik ajanlar.json'da hemen düş
     except (ortak.YapilandirmaHatasi, ValueError, json.JSONDecodeError) as e:
         raise SystemExit(f"Ajan Ofisi başlatılamadı: {e}")
-    token_sayac.olaylardan_geri_kur(olaylari_oku())  # bugünkü eski koşuların usage'ı sayaçta yoksa ekle
+    token_sayac.olaylardan_geri_kur(bugunun_olaylari())  # bugünkü eski koşuların usage'ı sayaçta yoksa ekle
     sunucu, port = bos_port_ile_ac()
     with open(os.path.join(ortak.KOK, "port"), "w") as f:
         f.write(str(port))
