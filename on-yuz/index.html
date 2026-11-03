@@ -228,6 +228,25 @@ td.sayi,th.sayi{text-align:right}
 .hafiza-kart .madde-gir{flex:1;min-width:0;font:inherit;font-size:12.5px;padding:6px 8px;border-radius:8px;border:1px solid rgba(59,52,44,.18);background:#fffdf9;color:var(--murekkep)}
 .hafiza-kart .madde-ekle{display:flex;gap:6px;margin-top:10px}
 @media (max-width:768px){.hafiza-kart .madde-gir{font-size:16px}.hafiza-kart .mini{padding:8px 10px}}
+.gelistirme-form{display:flex;flex-direction:column;gap:8px;margin:4px 0 16px;max-width:720px}
+.gelistirme-form .satir2{display:flex;gap:8px;flex-wrap:wrap}
+.gelistirme-form select,.gelistirme-form input,.gelistirme-form textarea,.gelistirme-kart textarea{font:inherit;font-size:13.5px;padding:9px 10px;border-radius:10px;border:1px solid rgba(59,52,44,.18);background:#fffdf9;color:var(--murekkep);min-width:0;flex:1}
+.gelistirme-kart textarea{width:100%;margin-top:8px}
+.koyu-dugme{align-self:flex-start;background:var(--murekkep);color:#fff7ee;font-size:13px;font-weight:600;padding:9px 14px;border-radius:10px}
+.koyu-dugme:disabled{opacity:.5}
+.ara-baslik{font-family:"Space Grotesk",sans-serif;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--soluk);margin:14px 0 8px}
+.gelistirme-izgara{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+.rozet{font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:rgba(59,52,44,.08);color:var(--murekkep)}
+.rozet.uat{background:#ffe1d6;color:#b5401f}.rozet.calisiyor{background:#fff0c9;color:#8a5a14}
+.rozet.bitti{background:#dcefe1;color:#2f6e44}.rozet.takildi{background:#f7d4d1;color:#9c2f26}
+.gelistirme-kart a.onizleme{display:inline-block;margin-top:6px;font-size:13px;font-weight:600;color:var(--mercan-k)}
+.gelistirme-kart .sha{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11.5px;color:var(--soluk);flex-wrap:wrap}
+.gelistirme-kart .sha code{font-size:11px;overflow-wrap:anywhere;flex:1;min-width:0;color:var(--murekkep)}
+.gelistirme-kart .mini{font-size:12px;padding:5px 8px;border-radius:7px;border:1px solid rgba(59,52,44,.14)}
+.gelistirme-kart details{margin-top:8px}
+.gelistirme-kart summary{font-size:12.5px;font-weight:600;cursor:pointer;color:var(--soluk)}
+.gelistirme-kart pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11.5px;line-height:1.45;max-height:280px;overflow:auto;margin-top:6px;padding:8px;border-radius:8px;background:rgba(59,52,44,.05)}
+@media (max-width:768px){.gelistirme-form select,.gelistirme-form input,.gelistirme-form textarea,.gelistirme-kart textarea{font-size:16px}.gelistirme-izgara{grid-template-columns:1fr}.gelistirme-kart .dugmeler button{padding:10px 12px}}
 /* ---------- phone layout (≤768px): panel ↔ office scene toggle ---------- */
 .mobil-gecis{display:none}
 .dugme.cikis{text-decoration:none;color:inherit}
@@ -268,6 +287,7 @@ td.sayi,th.sayi{text-align:right}
   <nav class="sekmeler" id="sekmeler">
     <button data-sekme="ofis" class="secili">Ofis</button>
     <button data-sekme="odalar">Odalar</button>
+    <button data-sekme="gelistirme">Geliştirme</button>
     <button data-sekme="hafiza">Hafıza</button>
     <button data-sekme="maliyet">Maliyet</button>
   </nav>
@@ -1786,7 +1806,7 @@ async function sekmeAc(ad) {
   document.querySelectorAll('#sekmeler button').forEach(b => b.classList.toggle('secili', b.dataset.sekme === ad));
   if (ad === 'ofis') { sayfa.classList.remove('acik'); return; }
   panelKapat();
-  const icerik = ad === 'odalar' ? odalarSayfasi() : ad === 'hafiza' ? await hafizaSayfasi() : maliyetSayfasi();
+  const icerik = ad === 'odalar' ? odalarSayfasi() : ad === 'hafiza' ? await hafizaSayfasi() : ad === 'gelistirme' ? await gelistirmeSayfasi() : maliyetSayfasi();
   if (aktifSekme !== ad) return;
   sayfa.replaceChildren(...icerik); sayfa.classList.add('acik');
 }
@@ -1802,6 +1822,95 @@ function odalarSayfasi() {
     iz.append(k);
   });
   return [el('h2', null, 'Odalar'), el('p', 'alt', ODALAR.length + ' oda, ' + AJANLAR.length + ' ajan. Her oda iş gelince uyanır.'), iz];
+}
+const GDURUM = { hazir:['Sırada','sira'], calisiyor:['Ajan çalışıyor','calisiyor'], uat:['Onayını bekliyor','uat'], bitti:['Tamamlandı','bitti'], takildi:['Takıldı','takildi'], taslak:['Taslak','sira'] };
+let gelistirmeZaman = null;
+async function gelistirmeSayfasi() {
+  clearInterval(gelistirmeZaman);
+  let veri;
+  try { veri = DEMO ? { projeler:['ajan-ofisi'], gorevler:[] } : await getJSON('/api/gelistirme'); }
+  catch { return [el('h2', null, 'Geliştirme'), el('p', 'alt', 'Geliştirme listesi alınamadı.')]; }
+  // refresh every 20 s while open, but never wipe text you're typing
+  gelistirmeZaman = setInterval(() => {
+    if (aktifSekme !== 'gelistirme') return clearInterval(gelistirmeZaman);
+    const yaziyor = [...sayfa.querySelectorAll('textarea,input')].some(x => x.value.trim() && x.type !== 'hidden');
+    if (!yaziyor && !sayfa.querySelector('details[open]')) sekmeAc('gelistirme');
+  }, 20000);
+  const form = el('form', 'kart gelistirme-form'); form.autocomplete = 'off';
+  const proje = el('select'); veri.projeler.forEach(p => { const o = el('option', null, p === 'ajan-ofisi' ? 'Ajan Ofisi (bu arayüz)' : p === 'homeos' ? 'HomeOS' : p); o.value = p; proje.append(o); });
+  const model = el('select'); [['sonnet','Sonnet (varsayılan)'],['haiku','Haiku (basit iş, ucuz)'],['opus','Opus (zor iş, limiti hızlı yer)']].forEach(([v,t]) => { const o = el('option', null, t); o.value = v; model.append(o); });
+  const baslik = el('input'); baslik.placeholder = 'Başlık: ör. "Maliyet sayfasına haftalık grafik ekle"'; baslik.maxLength = 80; baslik.required = true;
+  const istek = el('textarea'); istek.placeholder = 'Ne istiyorsun? Ne olunca bitmiş sayılır? Telefonda nasıl görünmeli?'; istek.maxLength = 4000; istek.rows = 4; istek.required = true;
+  const gonder = el('button', 'koyu-dugme', 'Geliştirmeyi başlat'); gonder.type = 'submit';
+  const satir = el('div', 'satir2'); satir.append(proje, model);
+  form.append(el('h4', null, 'Yeni geliştirme'), satir, baslik, istek, gonder);
+  form.onsubmit = async e => {
+    e.preventDefault(); if (DEMO) return tost('Demo modunda görev açılamaz');
+    gonder.disabled = true;
+    const { durum, veri: v } = await postJSON('/api/gelistirme', { islem:'yeni', proje: proje.value, model: model.value, baslik: baslik.value, istek: istek.value });
+    gonder.disabled = false;
+    if (durum !== 200) return tost(v.hata || ('hata ' + durum));
+    tost('Görev açıldı; ajan birazdan başlar'); baslik.value = ''; istek.value = ''; sekmeAc('gelistirme');
+  };
+  const aktif = veri.gorevler.filter(g => !g.bitti), bitti = veri.gorevler.filter(g => g.bitti);
+  const sira = { uat:0, calisiyor:1, hazir:2, takildi:3 };
+  aktif.sort((a, b) => (sira[a.durum] ?? 9) - (sira[b.durum] ?? 9));
+  const iz = el('div', 'izgara gelistirme-izgara');
+  aktif.forEach(g => iz.append(gelistirmeKarti(g)));
+  if (!aktif.length) iz.append(el('p', 'bos', 'Açık geliştirme görevi yok.'));
+  const parcalar = [el('h2', null, 'Geliştirme'),
+    el('p', 'alt', 'Talimat ver → ajan ayrı bir dalda geliştirir → kontroller → önizleme/paket → sen onaylarsın → canlıya geçer. Boştayken 0 token; görevler 5 dakikada bir kontrol edilir.'),
+    form, el('h3', 'ara-baslik', 'Açık görevler'), iz];
+  if (bitti.length) {
+    const iz2 = el('div', 'izgara gelistirme-izgara'); bitti.forEach(g => iz2.append(gelistirmeKarti(g)));
+    parcalar.push(el('h3', 'ara-baslik', 'Son tamamlananlar'), iz2);
+  }
+  return parcalar;
+}
+function gelistirmeKarti(g) {
+  const k = el('div', 'kart gelistirme-kart');
+  const [etiket, sinif] = GDURUM[g.durum] || [g.durum || '?', 'sira'];
+  const ust = el('div', 'ust');
+  ust.append(el('span', 'rozet ' + sinif, etiket), document.createTextNode((g.proje || '-') + (g.surum ? ' · v' + g.surum : '') + ' · ' + (g.model || 'sonnet')));
+  k.append(ust, el('h4', null, g.baslik));
+  if (g.durum === 'uat') {
+    if (g.onizleme) {
+      const a = el('a', 'onizleme', 'Önizlemeyi aç ↗'); a.href = location.protocol + '//' + location.hostname + g.onizleme + '/'; a.target = '_blank'; a.rel = 'noopener';
+      k.append(a);
+    }
+    if (g.sha256) {
+      const sh = el('div', 'sha'); const kod = el('code', null, g.sha256);
+      const kop = el('button', 'mini', 'Kopyala'); kop.type = 'button';
+      kop.onclick = async () => { try { await navigator.clipboard.writeText(g.sha256); tost('SHA-256 kopyalandı'); } catch { tost('Kopyalanamadı; elle seç'); } };
+      sh.append(el('span', null, 'SHA-256 '), kod, kop); k.append(sh);
+    }
+  }
+  if (g.son_bolum) {
+    const d = el('details'); d.append(el('summary', null, 'Son rapor'), el('pre', null, g.son_bolum)); k.append(d);
+  }
+  if (g.durum === 'uat' && g.onay !== 'evet') {
+    const dug = el('div', 'dugmeler');
+    const onay = el('button', 'onay', 'Onayla ve canlıya al'), red = el('button', 'sonra', 'Reddet');
+    onay.onclick = async () => {
+      if (!confirm(g.proje === 'homeos' ? 'Onaylanınca dal main\'e alınır ve etiketlenir. Canlı kurulum için paketi panelden yüklemen gerekir. Devam?' : 'Onaylanınca değişiklik canlı ofise alınır ve servis yeniden başlar. Devam?')) return;
+      const { durum, veri } = await postJSON('/api/gelistirme', { islem:'onay', dosya:g.dosya, karar:'evet' });
+      tost(durum === 200 ? 'Onaylandı; birkaç dakika içinde işlenir' : (veri.hata || 'hata ' + durum)); sekmeAc('gelistirme');
+    };
+    red.onclick = () => {
+      const t = el('textarea'); t.rows = 3; t.placeholder = 'Ne yanlış, ne istiyorsun? Ajan aynı dalda buna göre düzeltecek.';
+      const gon = el('button', 'onay', 'Geri bildirimi gönder'), vaz = el('button', 'sonra', 'Vazgeç');
+      gon.onclick = async () => {
+        const { durum, veri } = await postJSON('/api/gelistirme', { islem:'onay', dosya:g.dosya, karar:'hayir', geri_bildirim:t.value });
+        tost(durum === 200 ? 'Gönderildi; ajan düzeltmeye başlayacak' : (veri.hata || 'hata ' + durum)); if (durum === 200) sekmeAc('gelistirme');
+      };
+      vaz.onclick = () => sekmeAc('gelistirme');
+      dug.replaceChildren(gon, vaz); k.insertBefore(t, dug); t.focus();
+    };
+    dug.append(onay, red); k.append(dug);
+  } else if (g.durum === 'uat') {
+    k.append(el('p', 'bos', 'Onaylandı; işleniyor…'));
+  }
+  return k;
 }
 async function hafizaSayfasi() {
   let liste = [];

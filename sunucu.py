@@ -362,6 +362,161 @@ def hafiza_degistir(veri):
 HAFIZA_KILIDI = threading.Lock()
 
 
+# ---------- development tasks (beyin pipeline): ~/beyin/gorevler ----------
+BEYIN = os.path.expanduser(os.environ.get("OFIS_BEYIN", "~/beyin"))
+GOREV_DIZINI = os.path.join(BEYIN, "gorevler")
+GELISTIRME_KILIDI = threading.Lock()
+DOSYA_DESENI = re.compile(r"^[^/\\\x00]{1,120}\.md$")
+MODELLER = ("sonnet", "haiku", "opus")
+
+
+def gelistirme_projeleri():
+    try:
+        return sorted(f[:-3] for f in os.listdir(os.path.join(BEYIN, "sistem", "gelistirme"))
+                      if f.endswith(".sh") and ortak.AJAN_ID_DESENI.match(f[:-3]))
+    except FileNotFoundError:
+        return []
+
+
+def on_bilgi(metin):
+    """Frontmatter → (dict, body). Simple 'key: value' lines only."""
+    if not metin.startswith("---\n"):
+        return {}, metin
+    son = metin.find("\n---", 4)
+    if son < 0:
+        return {}, metin
+    alanlar = {}
+    for satir in metin[4:son].splitlines():
+        k, ayr, v = satir.partition(":")
+        if ayr and k.strip():
+            alanlar[k.strip()] = v.strip()
+    return alanlar, metin[son + 4:].lstrip("\n")
+
+
+def on_bilgi_yaz(metin, anahtar, deger):
+    satirlar = metin.split("\n")
+    if not satirlar or satirlar[0] != "---":
+        raise IstekHatasi(409, "görev dosyasında frontmatter yok")
+    for i in range(1, len(satirlar)):
+        if satirlar[i] == "---":
+            satirlar.insert(i, f"{anahtar}: {deger}")
+            return "\n".join(satirlar)
+        if satirlar[i].startswith(anahtar + ":"):
+            satirlar[i] = f"{anahtar}: {deger}"
+            return "\n".join(satirlar)
+    raise IstekHatasi(409, "frontmatter kapanmamış")
+
+
+def son_bolum(govde):
+    """Last '## ' section (delivery, release etc.), shortened."""
+    i = govde.rfind("\n## ")
+    if i < 0:
+        return ""
+    return govde[i + 1:][:1800].strip()
+
+
+def gorev_ozeti(yol, bitti=False):
+    with open(yol, encoding="utf-8") as f:
+        metin = f.read()
+    fm, govde = on_bilgi(metin)
+    if fm.get("tur") != "gelistirme":
+        return None
+    baslik = next((s[2:].strip() for s in govde.splitlines() if s.startswith("# ")), os.path.basename(yol)[:-3])
+    durum = fm.get("durum", "")
+    ozet = {"dosya": os.path.basename(yol), "bitti": bitti, "baslik": baslik, "proje": fm.get("proje", ""),
+            "durum": durum, "onay": fm.get("onay", ""), "surum": fm.get("surum", ""), "sha256": fm.get("sha256", ""),
+            "model": fm.get("model", ""), "olusturma": fm.get("olusturma", ""),
+            "guncelleme": datetime.fromtimestamp(os.path.getmtime(yol)).isoformat(timespec="seconds"),
+            "son_bolum": son_bolum(govde)}
+    if fm.get("proje") == "ajan-ofisi" and durum == "uat":
+        ozet["onizleme"] = ":8444"
+    return ozet
+
+
+def gelistirme_yaniti():
+    gorevler = []
+    for alt, bitti in (("", False), ("bitti", True)):
+        dizin = os.path.join(GOREV_DIZINI, alt)
+        try:
+            adlar = [a for a in os.listdir(dizin) if a.endswith(".md")]
+        except FileNotFoundError:
+            continue
+        adlar.sort(key=lambda a: os.path.getmtime(os.path.join(dizin, a)), reverse=True)
+        for ad in adlar[: (8 if bitti else 50)]:
+            yol = os.path.join(dizin, ad)
+            if os.path.isfile(yol) and not os.path.islink(yol):
+                try:
+                    o = gorev_ozeti(yol, bitti)
+                except (OSError, UnicodeDecodeError):
+                    o = None
+                if o:
+                    gorevler.append(o)
+    return {"projeler": gelistirme_projeleri(), "gorevler": gorevler}
+
+
+def kosucuyu_durt():
+    """Start the pipeline without waiting for the 5 min timer (if it's already running, the lock skips it)."""
+    subprocess.run(["systemctl", "--user", "start", "--no-block", "beyin@gorev.service"],
+                   capture_output=True, timeout=10)
+
+
+def atomik_yaz(yol, metin):
+    gecici = yol + ".ofis.tmp"
+    with open(gecici, "w", encoding="utf-8") as f:
+        f.write(metin)
+    os.replace(gecici, yol)
+
+
+def gelistirme_degistir(veri):
+    islem = veri.get("islem")
+    if islem == "yeni":
+        proje, baslik, istek = veri.get("proje"), veri.get("baslik"), veri.get("istek")
+        model = veri.get("model") or "sonnet"
+        if proje not in gelistirme_projeleri():
+            raise IstekHatasi(400, "bilinmeyen proje")
+        if model not in MODELLER:
+            raise IstekHatasi(400, "model: sonnet | haiku | opus")
+        if not isinstance(baslik, str) or not 3 <= len(baslik.strip()) <= 80:
+            raise IstekHatasi(400, "başlık 3–80 karakter olmalı")
+        if not isinstance(istek, str) or not istek.strip() or len(istek) > ortak.MAKS_GIRDI:
+            raise IstekHatasi(400, f"istek gerekli (en fazla {ortak.MAKS_GIRDI} karakter)")
+        baslik = " ".join(baslik.split())
+        ad = re.sub(r"[^\w\s.-]", "", baslik, flags=re.U).strip(" .") or "Geliştirme"
+        with GELISTIRME_KILIDI:
+            os.makedirs(GOREV_DIZINI, exist_ok=True)
+            yol, n = os.path.join(GOREV_DIZINI, ad + ".md"), 2
+            while os.path.exists(yol) or os.path.exists(os.path.join(GOREV_DIZINI, "bitti", os.path.basename(yol))):
+                yol, n = os.path.join(GOREV_DIZINI, f"{ad} {n}.md"), n + 1
+            atomik_yaz(yol, f"---\ndurum: hazir\ntur: gelistirme\nproje: {proje}\nmodel: {model}\n"
+                            f"olusturma: {datetime.now():%Y-%m-%d %H:%M}\nkaynak: ofis\n---\n"
+                            f"# {baslik}\n\n## İstek\n{istek.strip()}\n")
+        kosucuyu_durt()
+        return gelistirme_yaniti()
+    if islem == "onay":
+        dosya, karar, not_ = veri.get("dosya"), veri.get("karar"), veri.get("geri_bildirim")
+        if not isinstance(dosya, str) or not DOSYA_DESENI.match(dosya) or dosya.startswith("."):
+            raise IstekHatasi(400, "geçersiz dosya")
+        if karar not in ("evet", "hayir"):
+            raise IstekHatasi(400, "karar: evet | hayir")
+        if karar == "hayir" and (not isinstance(not_, str) or not not_.strip() or len(not_) > ortak.MAKS_GIRDI):
+            raise IstekHatasi(400, "reddederken geri bildirim yaz (ajan buna göre düzeltecek)")
+        yol = os.path.join(GOREV_DIZINI, dosya)
+        if os.path.islink(yol) or not os.path.isfile(yol):
+            raise IstekHatasi(404, "görev yok")
+        with GELISTIRME_KILIDI:
+            with open(yol, encoding="utf-8") as f:
+                metin = f.read()
+            fm, _ = on_bilgi(metin)
+            if fm.get("durum") != "uat":
+                raise IstekHatasi(409, f"görev UAT'de değil (durum: {fm.get('durum') or '-'})")
+            if karar == "hayir":
+                metin = metin.rstrip("\n") + f"\n\n## Geri bildirim\n_{datetime.now():%Y-%m-%d %H:%M} · ofisten_\n\n{not_.strip()}\n"
+            atomik_yaz(yol, on_bilgi_yaz(metin, "onay", karar))
+        kosucuyu_durt()
+        return gelistirme_yaniti()
+    raise IstekHatasi(400, "islem: yeni | onay")
+
+
 # ---------- HTTP ----------
 
 class Isleyici(SimpleHTTPRequestHandler):
@@ -435,6 +590,8 @@ class Isleyici(SimpleHTTPRequestHandler):
             return self._json(200, token_sayac.api_yaniti())
         if yol.path == "/api/hafiza":
             return self._json(200, hafiza_yaniti())
+        if yol.path == "/api/gelistirme":
+            return self._json(200, gelistirme_yaniti())
         if yol.path == "/api/terminaller":
             return self._json(200, {"terminaller": KOPRU.liste()})
         if yol.path == "/api/olaylar":
@@ -460,6 +617,8 @@ class Isleyici(SimpleHTTPRequestHandler):
                 return self._json(202, gorev_baslat(ajan, etiket=etiket, prompt=prompt))
             if yol == "/api/hafiza":
                 return self._json(200, hafiza_degistir(veri))
+            if yol == "/api/gelistirme":
+                return self._json(200, gelistirme_degistir(veri))
             if yol == "/api/ceo":
                 metin = veri.get("metin")
                 if not isinstance(metin, str) or not metin.strip():
