@@ -430,6 +430,58 @@ DOSYA_DESENI = re.compile(r"^[^/\\\x00]{1,120}\.md$")
 MODELLER = ("sonnet", "haiku", "opus")
 
 
+# ---------- directory tab: read-only browsing of .md files under BEYIN ----------
+DIZIN_MAKS_OKU = 400_000
+DIZIN_ATLA = {"node_modules", "__pycache__", "venv", ".venv"}
+
+
+def dizin_coz(goreli):
+    """User-supplied relative path → real path inside BEYIN, or IstekHatasi."""
+    if not isinstance(goreli, str) or len(goreli) > 400 or "\x00" in goreli or "\\" in goreli:
+        raise IstekHatasi(400, "geçersiz yol")
+    parcalar = [p for p in goreli.split("/") if p not in ("", ".")]
+    if any(p == ".." or p.startswith(".") for p in parcalar):
+        raise IstekHatasi(400, "geçersiz yol")
+    kok = os.path.realpath(BEYIN)
+    tam = os.path.realpath(os.path.join(kok, *parcalar))
+    if tam != kok and not tam.startswith(kok + os.sep):
+        raise IstekHatasi(403, "dizin dışı")
+    return kok, tam
+
+
+def dizin_yaniti(goreli):
+    kok, tam = dizin_coz(goreli)
+    if not os.path.isdir(tam):
+        raise IstekHatasi(404, "dizin yok")
+    klasorler, dosyalar = [], []
+    try:
+        adlar = sorted(os.listdir(tam), key=str.lower)
+    except OSError:
+        raise IstekHatasi(404, "dizin okunamadı")
+    for ad in adlar:
+        if ad.startswith(".") or ad in DIZIN_ATLA:
+            continue
+        gercek = os.path.realpath(os.path.join(tam, ad))
+        if not gercek.startswith(kok + os.sep):
+            continue
+        if os.path.isdir(gercek):
+            klasorler.append(ad)
+        elif ad.lower().endswith(".md") and os.path.isfile(gercek):
+            dosyalar.append({"ad": ad, "boyut": os.path.getsize(gercek)})
+    yol = os.path.relpath(tam, kok)
+    return {"yol": "" if yol == "." else yol.replace(os.sep, "/"), "klasorler": klasorler, "dosyalar": dosyalar}
+
+
+def dizin_oku_yaniti(goreli):
+    kok, tam = dizin_coz(goreli)
+    if not tam.lower().endswith(".md") or not os.path.isfile(tam):
+        raise IstekHatasi(404, "dosya yok")
+    with open(tam, "rb") as f:
+        ham = f.read(DIZIN_MAKS_OKU + 1)
+    return {"ad": os.path.basename(tam), "kirpildi": len(ham) > DIZIN_MAKS_OKU,
+            "metin": ham[:DIZIN_MAKS_OKU].decode("utf-8", errors="replace")}
+
+
 def gelistirme_projeleri():
     try:
         return sorted(f[:-3] for f in os.listdir(os.path.join(BEYIN, "sistem", "gelistirme"))
@@ -658,6 +710,12 @@ class Isleyici(SimpleHTTPRequestHandler):
             return self._json(200, hafiza_yaniti())
         if yol.path == "/api/gelistirme":
             return self._json(200, gelistirme_yaniti())
+        if yol.path in ("/api/dizin", "/api/dizin/oku"):
+            try:
+                y = (parse_qs(yol.query).get("yol") or [""])[0]
+                return self._json(200, dizin_yaniti(y) if yol.path == "/api/dizin" else dizin_oku_yaniti(y))
+            except IstekHatasi as e:
+                return self._json(e.kod, {"hata": str(e)})
         if yol.path == "/api/terminaller":
             return self._json(200, {"terminaller": KOPRU.liste()})
         if yol.path == "/api/olaylar":

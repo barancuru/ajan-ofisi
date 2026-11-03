@@ -164,6 +164,8 @@ toplamda en büyük sayı odur. Maliyet sekmesi yalnız `claude -p`'nin bildirdi
 | `GET /api/token` | bugünkü ajan başına token |
 | `GET /api/sayac` | bugünkü koşu sayısı, aktif ajan, koşu başına süre/usage/maliyet |
 | `GET /api/hafiza` | `hafiza/<ajan>.md` başına madde sayısı ve son 3 madde |
+| `GET /api/dizin?yol=` | Dizin sekmesi: `~/beyin` (`OFIS_BEYIN`) altında klasörler ve `.md` dosyaları; salt okuma, `..` ve noktayla başlayan adlar reddedilir |
+| `GET /api/dizin/oku?yol=` | tek `.md` dosyasının metni (en fazla 400 KB) |
 
 ## Güvenlik notları
 - **Yalnız `127.0.0.1`.** `Host` ve `Origin` başlıkları yalnız localhost/127.0.0.1 kabul edilir (DNS rebinding ve

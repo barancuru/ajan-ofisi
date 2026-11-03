@@ -276,6 +276,23 @@ td.sayi,th.sayi{text-align:right}
 .gelistirme-kart summary{font-size:12.5px;font-weight:600;cursor:pointer;color:var(--soluk)}
 .gelistirme-kart pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11.5px;line-height:1.45;max-height:280px;overflow:auto;margin-top:6px;padding:8px;border-radius:8px;background:rgba(59,52,44,.05)}
 @media (max-width:768px){.gelistirme-form select,.gelistirme-form input,.gelistirme-form textarea,.gelistirme-kart textarea{font-size:16px}.gelistirme-izgara{grid-template-columns:1fr}.gelistirme-kart .dugmeler button{padding:10px 12px}}
+.dizin-yol{display:flex;flex-wrap:wrap;gap:2px 6px;align-items:center;font-size:13px;margin-bottom:12px}
+.dizin-yol button{font-size:13px;font-weight:600;color:var(--mercan-k);padding:4px 6px;min-height:32px}
+.dizin-liste{display:flex;flex-direction:column;gap:4px}
+.dizin-liste button{text-align:left;background:rgba(255,255,255,.72);border-radius:10px;padding:9px 12px;font-size:13.5px;min-height:40px;overflow-wrap:anywhere}
+.dizin-liste small{color:var(--soluk);margin-left:6px;font-size:11.5px}
+.md{max-width:820px;font-size:14px;line-height:1.6;overflow-wrap:anywhere}
+.md h1,.md h2,.md h3,.md h4{font-family:"Space Grotesk",sans-serif;margin:18px 0 6px;line-height:1.3;font-size:20px}
+.md h2{font-size:17px}.md h3,.md h4{font-size:15px}
+.md p{margin:8px 0}.md ul,.md ol{margin:8px 0 8px 22px}.md li{margin:2px 0}
+.md code{font-family:ui-monospace,monospace;font-size:12.5px;background:rgba(59,52,44,.07);padding:1px 4px;border-radius:4px}
+.md pre{white-space:pre-wrap;overflow:auto;background:rgba(59,52,44,.07);padding:10px;border-radius:8px;margin:10px 0}
+.md pre code{background:none;padding:0}
+.md blockquote{border-left:3px solid var(--mercan);padding-left:10px;color:#5d5348;margin:8px 0}
+.md hr{border:0;border-top:1px solid rgba(59,52,44,.15);margin:14px 0}
+.md .tablo-kap{overflow-x:auto;margin:10px 0}
+.md table{border-collapse:collapse;font-size:13px}.md th,.md td{border:1px solid rgba(59,52,44,.15);padding:4px 8px;text-align:left}
+@media (max-width:768px){.dizin-liste button{min-height:44px}.dizin-yol button{min-height:40px}.md{font-size:15px}}
 /* ---------- phone layout (≤768px): panel ↔ office scene toggle ---------- */
 .mobil-gecis{display:none}
 .dugme.cikis{text-decoration:none;color:inherit}
@@ -321,6 +338,7 @@ td.sayi,th.sayi{text-align:right}
     <button data-sekme="gelistirme">Geliştirme</button>
     <button data-sekme="hafiza">Hafıza</button>
     <button data-sekme="maliyet">Maliyet</button>
+    <button data-sekme="dizin">Dizin</button>
   </nav>
   <div class="bosluk"></div>
   <div class="hap"><span class="nokta" id="aktifNokta"></span><b id="aktif">0</b><span class="yazi"> ajan çalışıyor</span></div>
@@ -1957,7 +1975,7 @@ async function sekmeAc(ad) {
   document.querySelectorAll('#sekmeler button').forEach(b => b.classList.toggle('secili', b.dataset.sekme === ad));
   if (ad === 'ofis') { sayfa.classList.remove('acik'); return; }
   panelKapat();
-  const icerik = ad === 'odalar' ? odalarSayfasi() : ad === 'hafiza' ? await hafizaSayfasi() : ad === 'gelistirme' ? await gelistirmeSayfasi() : maliyetSayfasi();
+  const icerik = ad === 'odalar' ? odalarSayfasi() : ad === 'hafiza' ? await hafizaSayfasi() : ad === 'gelistirme' ? await gelistirmeSayfasi() : ad === 'dizin' ? await dizinSayfasi() : maliyetSayfasi();
   if (aktifSekme !== ad) return;
   sayfa.replaceChildren(...icerik); sayfa.classList.add('acik');
 }
@@ -2132,6 +2150,92 @@ function maliyetSayfasi() {
   });
   if (!k.length) { const tr = el('tr'); const td = el('td', null, 'Bugün henüz koşu yok.'); td.colSpan = 6; tr.append(td); tablo.append(tr); }
   return [el('h2', null, 'Maliyet'), el('p', 'alt', sayac.maliyet_notu || 'Ajanlar yalnız iş gelince çalışır; boştayken model çağrısı yok.'), ozet, tablo];
+}
+/* ---------- dizin sekmesi: ~/beyin altında gezin, .md dosyalarını oku (salt okuma) ---------- */
+let dizinYol = '', dizinDosya = null;
+function mdSatirici(kap, s) {
+  // inline: `kod`, **kalın**, *italik*, [metin](http/https bağlantı); everything via textContent
+  const re = /`([^`]+)`|\*\*([^*]+)\*\*|\*([^*\s][^*]*)\*|\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+  let son = 0, m;
+  while ((m = re.exec(s))) {
+    if (m.index > son) kap.append(document.createTextNode(s.slice(son, m.index)));
+    if (m[1] != null) kap.append(el('code', null, m[1]));
+    else if (m[2] != null) kap.append(el('strong', null, m[2]));
+    else if (m[3] != null) kap.append(el('em', null, m[3]));
+    else { const a = el('a', null, m[4]); a.href = m[5]; a.target = '_blank'; a.rel = 'noopener noreferrer'; kap.append(a); }
+    son = re.lastIndex;
+  }
+  if (son < s.length) kap.append(document.createTextNode(s.slice(son)));
+  return kap;
+}
+function dizinMdCiz(metin) {
+  const kok = el('div', 'md');
+  const satirlar = metin.replace(/\r\n?/g, '\n').split('\n');
+  if (satirlar[0] === '---') { const k = satirlar.indexOf('---', 1); if (k > 0) satirlar.splice(0, k + 1); } // frontmatter
+  const hucreler = l => l.trim().replace(/^\||\|$/g, '').split('|').map(x => x.trim());
+  let i = 0, par = [];
+  const parBit = () => { if (par.length) { kok.append(mdSatirici(el('p'), par.join(' '))); par = []; } };
+  while (i < satirlar.length) {
+    const l = satirlar[i];
+    let m;
+    if (/^\s*```/.test(l)) {
+      parBit(); const kod = []; i++;
+      while (i < satirlar.length && !/^\s*```/.test(satirlar[i])) kod.push(satirlar[i++]);
+      i++; const pre = el('pre'); pre.append(el('code', null, kod.join('\n'))); kok.append(pre); continue;
+    }
+    if (!l.trim()) { parBit(); i++; continue; }
+    if ((m = /^(#{1,6})\s+(.*)$/.exec(l))) { parBit(); kok.append(mdSatirici(el('h' + Math.min(m[1].length, 4)), m[2])); i++; continue; }
+    if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(l)) { parBit(); kok.append(el('hr')); i++; continue; }
+    if (/^\s*>/.test(l)) {
+      parBit(); const q = [];
+      while (i < satirlar.length && /^\s*>/.test(satirlar[i])) q.push(satirlar[i++].replace(/^\s*>\s?/, ''));
+      kok.append(mdSatirici(el('blockquote'), q.join(' '))); continue;
+    }
+    if (l.includes('|') && i + 1 < satirlar.length && /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(satirlar[i + 1])) {
+      parBit(); const kap = el('div', 'tablo-kap'), t = el('table'), tr = el('tr');
+      hucreler(l).forEach(h => tr.append(mdSatirici(el('th'), h))); t.append(tr); i += 2;
+      while (i < satirlar.length && satirlar[i].includes('|') && satirlar[i].trim()) {
+        const r = el('tr'); hucreler(satirlar[i++]).forEach(h => r.append(mdSatirici(el('td'), h))); t.append(r);
+      }
+      kap.append(t); kok.append(kap); continue;
+    }
+    if ((m = /^\s*([-*+]|\d+[.)])\s+/.exec(l))) {
+      parBit(); const sirali = /\d/.test(m[1]), liste = el(sirali ? 'ol' : 'ul');
+      while (i < satirlar.length && (m = /^\s*([-*+]|\d+[.)])\s+(.*)$/.exec(satirlar[i]))) { liste.append(mdSatirici(el('li'), m[2].replace(/^\[[ xX]\]\s+/, x => x.includes('[ ]') ? '☐ ' : '☑ '))); i++; }
+      kok.append(liste); continue;
+    }
+    par.push(l.trim()); i++;
+  }
+  parBit();
+  return kok;
+}
+async function dizinSayfasi() {
+  if (DEMO) return [el('h2', null, 'Dizin'), el('p', 'alt', 'Demo modunda dizin gezilemez.')];
+  const bas = [el('h2', null, 'Dizin')];
+  const git = (yol, dosya) => { dizinYol = yol; dizinDosya = dosya || null; sekmeAc('dizin'); };
+  const yolSatiri = (yol) => {
+    const s = el('div', 'dizin-yol'); const k = el('button', null, 'beyin'); k.onclick = () => git(''); s.append(k);
+    let birikim = '';
+    yol.split('/').filter(Boolean).forEach(p => { birikim += (birikim ? '/' : '') + p; const y = birikim; s.append(el('span', null, '/')); const b = el('button', null, p); b.onclick = () => git(y); s.append(b); });
+    return s;
+  };
+  if (dizinDosya) {
+    const ust = dizinDosya.slice(0, dizinDosya.lastIndexOf('/') + 1).replace(/\/$/, '');
+    let d;
+    try { d = await getJSON('/api/dizin/oku?yol=' + encodeURIComponent(dizinDosya)); }
+    catch { return [...bas, yolSatiri(ust), el('p', 'alt', 'Dosya okunamadı.')]; }
+    const cikti = [...bas, yolSatiri(ust), el('h4', null, d.ad), dizinMdCiz(d.metin)];
+    if (d.kirpildi) cikti.push(el('p', 'alt', 'Dosya büyük olduğu için baştan kırpıldı.'));
+    return cikti;
+  }
+  let d;
+  try { d = await getJSON('/api/dizin?yol=' + encodeURIComponent(dizinYol)); }
+  catch { if (dizinYol) { dizinYol = ''; return dizinSayfasi(); } return [...bas, el('p', 'alt', 'Dizin alınamadı.')]; }
+  const liste = el('div', 'dizin-liste');
+  d.klasorler.forEach(k => { const b = el('button', null, '📁 ' + k); b.onclick = () => git((d.yol ? d.yol + '/' : '') + k); liste.append(b); });
+  d.dosyalar.forEach(f => { const b = el('button', null, '📄 ' + f.ad); b.append(el('small', null, Math.max(1, Math.round(f.boyut / 1024)) + ' KB')); b.onclick = () => git(d.yol, (d.yol ? d.yol + '/' : '') + f.ad); liste.append(b); });
+  if (!d.klasorler.length && !d.dosyalar.length) liste.append(el('p', 'alt', 'Burada klasör ya da .md dosyası yok.'));
+  return [...bas, el('p', 'alt', 'Beynin içinde gez, .md dosyalarını oku. Salt okuma.'), yolSatiri(d.yol), liste];
 }
 document.querySelectorAll('#sekmeler button').forEach(b => { b.onclick = () => { SES.tik(); sekmeAc(b.dataset.sekme); }; b.onmouseenter = () => SES.uzerinde(); });
 
