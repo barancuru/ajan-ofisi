@@ -73,7 +73,7 @@ KURUL_VARSAYILAN = [
     {"id": "finans", "ad": "Ayla · Finans", "model": "sonnet",
      "uzmanlik": "maliyet, bütçe, nakit akışı, fiyatlama ve finansal risk",
      "tecrube": "15 yıl finans yöneticiliği ve CFO'luk; KOBİ'lerde maliyet kontrolü ve yatırım kararları."},
-    {"id": "pazarlama", "ad": "Pırpırsu · Pazarlama", "model": "sonnet",
+    {"id": "pazarlama", "ad": "Pırpırsu · İletişim", "model": "sonnet",
      "uzmanlik": "İletişim Uzmanı",
      "tecrube": "15 yıl ajans ve marka yöneticiliği; dijital içerik ve topluluk büyütme kampanyaları yönetti."},
     {"id": "hukuk", "ad": "Musmurat · Hukuk ve etik", "model": "sonnet",

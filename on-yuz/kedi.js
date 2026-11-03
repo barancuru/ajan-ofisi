@@ -10,6 +10,7 @@ export const DESENLER = {
   'siyah':     { govde:'#2b2828', gobek:'#322e2e', agiz:'#3a3434', yanak:'#302c2c', pati:'#2b2828', kulak:'#2b2828', kuyruk:'#2b2828', goz:'#dcc43a', biyik:'#f4f1ea', burun:'#b9767c', ic:'#8a5e62' },
   'smokin':    { govde:'#272424', gobek:'#f8f5ef', agiz:'#f8f5ef', yanak:'#f8f5ef', pati:'#f8f5ef', kulak:'#272424', kuyruk:'#272424', goz:'#b9cd3e', biyik:'#fffdf8', burun:'#e8999f', ic:'#e3a2a6', maske:1 },
   'gri-beyaz': { govde:'#8d9196', gobek:'#f7f5f1', agiz:'#f7f5f1', yanak:'#f7f5f1', pati:'#f7f5f1', kulak:'#8d9196', kuyruk:'#8d9196', goz:'#e3b548', biyik:'#fffdf8', burun:'#eaa0a6', ic:'#eeaab0', maske:1 },
+  'pembe':     { govde:'#f2a9c4', gobek:'#fde4ee', agiz:'#fde4ee', yanak:'#f7bcd2', pati:'#fbd3e2', kulak:'#ec92b3', kuyruk:'#f2a9c4', goz:'#7a5fd0', biyik:'#fffafc', burun:'#d9668f', ic:'#f7b3cb' },
   'siyam':     { govde:'#efe3cd', uc:'#57402f', gobek:'#f6eedf', agiz:'#5f4635', yanak:'#a88a6e', pati:'#57402f', kulak:'#57402f', kuyruk:'#57402f', goz:'#5aa2e6', biyik:'#fffaf0', burun:'#5a3f36', ic:'#b08478', siyam:1 },
 };
 

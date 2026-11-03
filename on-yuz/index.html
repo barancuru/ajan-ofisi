@@ -1239,7 +1239,7 @@ if (kurulOda) {
     kutu(sg, .74, .12, .66, '#8d8276', 0, .5, 0, .05);
     kutu(sg, .74, .7, .1, '#8d8276', 0, .92, -.33, .05);
     kutu(sg, .1, .42, .1, '#6f665c', 0, .26, 0, .03);
-    const kedi = createCat({ desen:DESEN[i % DESEN.length], ton:0 });
+    const kedi = createCat({ desen:u.id === 'pazarlama' ? 'pembe' : DESEN[i % DESEN.length], ton:0 });
     kedi.group.position.set(0, .56, 0); sg.add(kedi.group);
     const halka = new THREE.Mesh(new THREE.RingGeometry(.55, .72, 32), new THREE.MeshBasicMaterial({ color:'#ff7a59', transparent:true, opacity:0, depthWrite:false }));
     halka.rotation.x = -Math.PI / 2; halka.position.y = .03; sg.add(halka);
@@ -1286,6 +1286,44 @@ function kurulAnimasyon(t, dt) {
     m.halka.material.opacity = m.durum === 'dinliyor' ? .25 + (Math.sin(t * 4 + m.faz) * .5 + .5) * .35 : m.parla * .8;
   });
   kurulOda.merkezMat.emissiveIntensity = aktif ? .4 + (Math.sin(t * 3) * .5 + .5) * .9 : .15;
+}
+
+/* ---------- çaycı kedi bot: koridorlarda tekerlekli, tepsisinde çay taşıyarak tüm odaların önünden geçer ---------- */
+const cayci = (() => {
+  if (!ODALAR.length) return null;
+  const dOrta = Math.max(...ODALAR.filter(o => Math.abs(o.cz) < .01).map(o => o.d), 0);
+  const zU = -(dOrta / 2 + KORIDOR / 2), zA = dOrta / 2 + KORIDOR / 2;   // üst ve alt koridorun orta çizgisi
+  const xMin = Math.min(...ODALAR.map(o => o.cx - o.w / 2)) - 1.2, xMax = Math.max(...ODALAR.map(o => o.cx + o.w / 2)) + 1.2;
+  const yol = [new THREE.Vector3(xMin, .1, zU), new THREE.Vector3(xMax, .1, zU), new THREE.Vector3(xMax, .1, zA), new THREE.Vector3(xMin, .1, zA)];
+  const g = new THREE.Group(); g.scale.setScalar(.7); scene.add(g);
+  kutu(g, .8, .16, .7, '#5b6470', 0, .2, 0, .06);
+  [[-.38, -.28], [.38, -.28], [-.38, .28], [.38, .28]].forEach(([x, z]) => {
+    const t = new THREE.Mesh(new THREE.CylinderGeometry(.11, .11, .1, 16), mat('#2b2828'));
+    t.rotation.z = Math.PI / 2; t.position.set(x, .11, z); t.castShadow = true; g.add(t);
+  });
+  const kedi = createCat({ desen:'sarman', ton:0, aksesuar:{ papyon:true } });
+  kedi.group.position.set(0, .28, -.05); kedi.setDurum('calisiyor'); g.add(kedi.group);
+  const tepsi = new THREE.Mesh(new THREE.CylinderGeometry(.22, .22, .03, 24), mat('#d6ad52')); tepsi.position.set(0, .78, .5); tepsi.castShadow = true; g.add(tepsi);
+  const bardak = new THREE.Mesh(new THREE.CylinderGeometry(.07, .05, .13, 14), new THREE.MeshStandardMaterial({ color:'#b8501e', transparent:true, opacity:.85, roughness:.2 }));
+  bardak.position.set(.06, .865, .5); g.add(bardak);
+  const bardak2 = bardak.clone(); bardak2.position.set(-.08, .865, .46); g.add(bardak2);
+  return { g, kedi, yol, hedef:1, hiz:1.5 };
+})();
+function cayciAnimasyon(t, dt) {
+  if (!cayci) return;
+  const { g, yol } = cayci, h = yol[cayci.hedef];
+  if (!g.userData.basladi) { g.position.copy(yol[0]); g.userData.basladi = true; }
+  const fark = h.clone().sub(g.position), uz = fark.length(), adim = cayci.hiz * dt;
+  if (uz <= adim) { g.position.copy(h); cayci.hedef = (cayci.hedef + 1) % yol.length; }
+  else { fark.multiplyScalar(adim / uz); g.position.add(fark); }
+  const yon = yol[cayci.hedef].clone().sub(g.position);
+  if (yon.lengthSq() > 1e-4) {
+    let d = Math.atan2(yon.x, yon.z) - g.rotation.y;
+    d = Math.atan2(Math.sin(d), Math.cos(d));
+    g.rotation.y += d * Math.min(1, dt * 6);
+  }
+  g.position.y = .1 + Math.abs(Math.sin(t * 6)) * .012;
+  cayci.kedi.update(dt);
 }
 
 /* ---------- arayüz durumu ---------- */
@@ -2911,7 +2949,7 @@ function dongu() {
     new Set(AJANLAR.filter(a => a.durum === 'calisiyor').map(a => a.oda)).forEach(id => isikAkit(id));
     if (KURUL.some(m => m.durum === 'dinliyor')) isikAkit('kurul', false, '#d6ad52');
   }
-  kurulAnimasyon(t, dt);
+  kurulAnimasyon(t, dt); cayciAnimasyon(t, dt);
   altMasalar.forEach(m => { if (t - m.zaman > .5) { m.zaman = t; altMasaCiz(m); m.ekran.t.needsUpdate = true; } });
   if (t - panelZaman > .5) { panelZaman = t; if (panelAjan && ajanBul(panelAjan)?.durum !== 'uyku') panelYenile(); }
   controls.update();
