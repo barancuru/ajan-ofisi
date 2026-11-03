@@ -2,7 +2,10 @@
 <html lang="tr">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#efe7da">
+<link rel="manifest" href="manifest.json" crossorigin="use-credentials">
+<link rel="apple-touch-icon" href="ikon-192.png">
 <title>Ajan Ofisi</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%228%22 fill=%22%23ff7a59%22/%3E%3Crect x=%229%22 y=%2211%22 width=%2214%22 height=%2210%22 rx=%223%22 fill=%22%23fff7f2%22/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -214,6 +217,31 @@ td.sayi,th.sayi{text-align:right}
 .mod.kopuk .nokta{background:#d0554a}
 .tost{position:fixed;left:calc((100% - var(--sag) - 16px) / 2);bottom:92px;transform:translateX(-50%);padding:10px 16px;font-size:13.5px;font-weight:500;border-radius:12px;z-index:6;opacity:0;transition:opacity .25s;pointer-events:none}
 .tost.goster{opacity:1}
+
+/* ---------- phone layout (≤768px): panel ↔ office scene toggle ---------- */
+.mobil-gecis{display:none}
+@media (max-width:768px){
+  :root{--sag:auto}
+  .ustbar{height:52px;gap:8px;padding:0 10px;padding-top:env(safe-area-inset-top)}
+  .marka b,.marka small,.saat,#genel,.hap .yazi{display:none}
+  .sekmeler{overflow-x:auto;scrollbar-width:none;flex:1;min-width:0}
+  .sekmeler::-webkit-scrollbar{display:none}
+  .sekmeler button{flex:0 0 auto;padding:0 10px}
+  .ustbar .bosluk{display:none}
+  .hap{padding:6px 10px}
+  .mobil-gecis{display:inline-block;flex:0 0 auto}
+  .selam{display:none}
+  .sag,.panel,.sayfa{top:60px;left:8px;right:8px;bottom:calc(76px + env(safe-area-inset-bottom));width:auto}
+  .sag{gap:8px}
+  .ceo-kutu{max-height:45%}
+  .sayfa{padding:16px}
+  .panel{padding:16px}
+  .komut{left:8px;right:8px;bottom:calc(10px + env(safe-area-inset-bottom));width:auto;transform:none}
+  .komut input{font-size:16px;min-width:0}
+  .tost{left:50%;bottom:calc(80px + env(safe-area-inset-bottom));max-width:calc(100% - 24px)}
+  .mod{display:none}
+  body.sahne-modu .sag{display:none}
+}
 </style>
 <script type="importmap">
 {"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}
@@ -233,9 +261,10 @@ td.sayi,th.sayi{text-align:right}
     <button data-sekme="maliyet">Maliyet</button>
   </nav>
   <div class="bosluk"></div>
-  <div class="hap"><span class="nokta" id="aktifNokta"></span><b id="aktif">0</b> ajan çalışıyor</div>
+  <div class="hap"><span class="nokta" id="aktifNokta"></span><b id="aktif">0</b><span class="yazi"> ajan çalışıyor</span></div>
   <span class="saat" id="saat"></span>
   <button class="dugme" id="genel">Genel bakış</button>
+  <button class="dugme mobil-gecis" id="mobilGecis" type="button" aria-pressed="true">Sahne</button>
 </header>
 
 <section class="selam cam" id="selam">
@@ -266,6 +295,24 @@ td.sayi,th.sayi{text-align:right}
 <div class="tost cam" id="tost"></div>
 <div class="mod" id="mod"><span class="nokta"></span><span id="modYazi">Canlı</span></div>
 
+
+<script>
+/* Phone: toggle between panel and office scene; choice remembered per device */
+(function () {
+  var b = document.getElementById('mobilGecis'), k = 'ofis-mobil-sahne';
+  function uygula(sahne) {
+    document.body.classList.toggle('sahne-modu', sahne);
+    b.textContent = sahne ? 'Pano' : 'Sahne';
+    b.setAttribute('aria-pressed', String(!sahne));
+  }
+  var ilk = false; try { ilk = localStorage.getItem(k) === '1'; } catch (e) {}
+  uygula(ilk);
+  b.addEventListener('click', function () {
+    var sahne = !document.body.classList.contains('sahne-modu');
+    uygula(sahne); try { localStorage.setItem(k, sahne ? '1' : '0'); } catch (e) {}
+  });
+})();
+</script>
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
