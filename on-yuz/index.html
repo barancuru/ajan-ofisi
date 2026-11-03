@@ -218,6 +218,16 @@ td.sayi,th.sayi{text-align:right}
 .tost{position:fixed;left:calc((100% - var(--sag) - 16px) / 2);bottom:92px;transform:translateX(-50%);padding:10px 16px;font-size:13.5px;font-weight:500;border-radius:12px;z-index:6;opacity:0;transition:opacity .25s;pointer-events:none}
 .tost.goster{opacity:1}
 
+.hafiza-kart li.madde{display:flex;align-items:flex-start;gap:4px}
+.hafiza-kart li.madde .metin{flex:1;min-width:0;overflow-wrap:anywhere}
+.hafiza-kart li.bos-madde{color:var(--soluk)}
+.hafiza-kart li.bos-madde::before{display:none}
+.hafiza-kart .mini{flex:0 0 auto;font-size:12px;line-height:1;padding:5px 7px;border-radius:7px;border:1px solid rgba(59,52,44,.12);color:var(--soluk);background:rgba(255,255,255,.6)}
+.hafiza-kart .mini:hover{color:var(--murekkep)}
+.hafiza-kart .mini.koyu{background:var(--murekkep);color:#fff7ee;border-color:var(--murekkep);font-weight:600}
+.hafiza-kart .madde-gir{flex:1;min-width:0;font:inherit;font-size:12.5px;padding:6px 8px;border-radius:8px;border:1px solid rgba(59,52,44,.18);background:#fffdf9;color:var(--murekkep)}
+.hafiza-kart .madde-ekle{display:flex;gap:6px;margin-top:10px}
+@media (max-width:768px){.hafiza-kart .madde-gir{font-size:16px}.hafiza-kart .mini{padding:8px 10px}}
 /* ---------- phone layout (≤768px): panel ↔ office scene toggle ---------- */
 .mobil-gecis{display:none}
 @media (max-width:768px){
@@ -1795,18 +1805,51 @@ async function hafizaSayfasi() {
   let liste = [];
   try { liste = DEMO ? demoVeri.hafiza : (await getJSON('/api/hafiza')).hafiza; }
   catch { return [el('h2', null, 'Hafıza'), el('p', 'alt', 'Hafıza listesi alınamadı.')]; }
-  const sirali = [...liste].sort((x, y) => String(y.guncelleme).localeCompare(String(x.guncelleme)));
+  const sirali = [...liste].sort((x, y) => (y.madde_sayisi > 0) - (x.madde_sayisi > 0) || String(y.guncelleme).localeCompare(String(x.guncelleme)));
   const iz = el('div', 'izgara');
-  sirali.forEach(h => {
-    const k = el('div', 'kart');
-    const ust = el('div', 'ust'); ust.append(avatar(h.ajan), document.createTextNode('hafiza/' + h.ajan + '.md · ' + h.madde_sayisi + ' madde'));
-    const ul = el('ul'); (h.son_maddeler || []).slice().reverse().forEach(m => ul.append(el('li', null, kisa(m, 160))));
-    if (!(h.son_maddeler || []).length) ul.append(el('li', null, 'henüz madde yok'));
-    k.append(ust, el('h4', null, ajanBul(h.ajan)?.ad || h.ajan), ul);
-    iz.append(k);
-  });
+  sirali.forEach(h => iz.append(hafizaKarti(h)));
   const toplam = liste.reduce((t, h) => t + (h.madde_sayisi || 0), 0);
-  return [el('h2', null, 'Hafıza'), el('p', 'alt', 'Her ajanın kalıcı hafızası: senin tercih ve revizelerin. Ajan işi bir kez öğrenir, koşu sonunda yeni madde ekler. Toplam ' + toplam + ' madde, son güncellenen önde.'), iz];
+  return [el('h2', null, 'Hafıza'), el('p', 'alt', 'Her ajanın kalıcı hafızası: tercih ve revizelerin. Ajan her koşuda bunları okur. Buradan ekleyip düzeltebilir, silebilirsin. Toplam ' + toplam + ' madde.'), iz];
+}
+async function hafizaIslem(govde) {
+  if (DEMO) { tost('Demo modunda hafıza değiştirilemez'); return; }
+  const { durum, veri } = await postJSON('/api/hafiza', govde);
+  if (durum !== 200) { tost(veri.hata || ('hata ' + durum)); }
+  if (aktifSekme === 'hafiza') sekmeAc('hafiza');
+}
+function hafizaKarti(h) {
+  const k = el('div', 'kart hafiza-kart');
+  const ust = el('div', 'ust'); ust.append(avatar(h.ajan), document.createTextNode('hafiza/' + h.ajan + '.md · ' + h.madde_sayisi + ' madde'));
+  const ul = el('ul');
+  const maddeler = h.maddeler || (h.son_maddeler || []).map((m, i) => ({ sira: i, metin: m, tarih: '' }));
+  maddeler.slice().reverse().forEach(m => {
+    const li = el('li', 'madde');
+    const yazi = el('span', 'metin', m.metin);
+    if (m.tarih) yazi.title = m.tarih;
+    const duz = el('button', 'mini', '✎'); duz.title = 'Düzenle'; duz.setAttribute('aria-label', 'Düzenle');
+    const sil = el('button', 'mini', '×'); sil.title = 'Sil'; sil.setAttribute('aria-label', 'Sil');
+    duz.onclick = () => {
+      const inp = el('input', 'madde-gir'); inp.value = m.metin; inp.maxLength = 1200;
+      const kaydet = el('button', 'mini koyu', 'Kaydet');
+      const vazgec = el('button', 'mini', 'Vazgeç');
+      const gonder = () => { const v = inp.value.trim(); if (v && v !== m.metin) hafizaIslem({ ajan: h.ajan, islem: 'duzenle', sira: m.sira, eski: m.metin, metin: v }); else li.replaceWith(eskiLi); };
+      const eskiLi = li.cloneNode(true); eskiLi.querySelectorAll('button')[0].onclick = duz.onclick; eskiLi.querySelectorAll('button')[1].onclick = sil.onclick;
+      kaydet.onclick = gonder; vazgec.onclick = () => li.replaceWith(eskiLi);
+      inp.onkeydown = e => { if (e.key === 'Enter') gonder(); if (e.key === 'Escape') li.replaceWith(eskiLi); };
+      li.replaceChildren(inp, kaydet, vazgec); inp.focus();
+    };
+    sil.onclick = () => { if (confirm('Bu madde silinsin mi?\n\n' + kisa(m.metin, 200))) hafizaIslem({ ajan: h.ajan, islem: 'sil', sira: m.sira, eski: m.metin }); };
+    li.append(yazi, duz, sil);
+    ul.append(li);
+  });
+  if (!maddeler.length) ul.append(el('li', 'bos-madde', 'henüz madde yok'));
+  const form = el('form', 'madde-ekle'); form.autocomplete = 'off';
+  const inp = el('input', 'madde-gir'); inp.placeholder = 'Yeni madde: ör. "Özetler en fazla 5 satır olsun"'; inp.maxLength = 1200;
+  const ekle = el('button', 'mini koyu', 'Ekle'); ekle.type = 'submit';
+  form.append(inp, ekle);
+  form.onsubmit = e => { e.preventDefault(); const v = inp.value.trim(); if (v) hafizaIslem({ ajan: h.ajan, islem: 'ekle', metin: v }); };
+  k.append(ust, el('h4', null, h.ad || ajanBul(h.ajan)?.ad || h.ajan), ul, form);
+  return k;
 }
 function maliyetSayfasi() {
   const k = sayac.kosular || [];

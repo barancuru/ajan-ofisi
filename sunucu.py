@@ -273,22 +273,93 @@ def sayac_yaniti():
     }
 
 
-def hafiza_yaniti():
-    """hafiza/<ajan>.md listesi + her dosyanın son tarihli maddeleri (salt okuma, sabit dizin)."""
-    dosyalar = []
-    for ad in sorted(os.listdir(ortak.HAFIZA_DIZINI)):
-        kok, uzanti = os.path.splitext(ad)
-        if uzanti != ".md" or not ortak.AJAN_ID_DESENI.match(kok):
-            continue
-        yol = os.path.join(ortak.HAFIZA_DIZINI, ad)
-        if not os.path.isfile(yol) or os.path.islink(yol):
-            continue
+MADDE_DESENI = re.compile(r"^- (?:\[(\d{4}-\d{2}-\d{2})\] )?(.*)$")
+
+
+def hafiza_yolu(ajan_id):
+    if not isinstance(ajan_id, str) or not ortak.AJAN_ID_DESENI.match(ajan_id):
+        raise IstekHatasi(400, "geçersiz ajan id")
+    yol = os.path.join(ortak.HAFIZA_DIZINI, f"{ajan_id}.md")
+    if os.path.islink(yol):
+        raise IstekHatasi(400, "bağlantı dosyası")
+    return yol
+
+
+def hafiza_satirlari(yol):
+    try:
         with open(yol, encoding="utf-8") as f:
-            satirlar = [s.strip() for s in f.read().splitlines()]
-        maddeler = [s[2:][:300] for s in satirlar if s.startswith("- ")]
-        dosyalar.append({"ajan": kok, "madde_sayisi": len(maddeler), "son_maddeler": maddeler[-3:],
-                         "guncelleme": datetime.fromtimestamp(os.path.getmtime(yol)).isoformat(timespec="seconds")})
+            return f.read().splitlines()
+    except FileNotFoundError:
+        return []
+
+
+def hafiza_maddeleri(satirlar):
+    """[(satır_no, tarih, metin)]: only '- ' lines are items; other lines (headings etc.) are kept as-is."""
+    cikti = []
+    for i, s in enumerate(satirlar):
+        m = MADDE_DESENI.match(s.strip())
+        if m:
+            cikti.append((i, m.group(1) or "", m.group(2).strip()))
+    return cikti
+
+
+def hafiza_yaniti():
+    """Memory for every agent (empty too) with all items, newest first. Only hafiza/<agent>.md under a fixed directory."""
+    _, tablo = ortak.ajanlari_yukle()
+    dosyalar = []
+    for ajan_id, ajan in tablo.items():
+        yol = hafiza_yolu(ajan_id)
+        maddeler = hafiza_maddeleri(hafiza_satirlari(yol))
+        dosyalar.append({
+            "ajan": ajan_id, "ad": ajan.get("ad", ajan_id), "madde_sayisi": len(maddeler),
+            "maddeler": [{"sira": n, "tarih": t, "metin": m[:ortak.MAKS_HAFIZA_EKI]} for n, (_, t, m) in enumerate(maddeler)],
+            "son_maddeler": [m for _, _, m in maddeler[-3:]],
+            "guncelleme": datetime.fromtimestamp(os.path.getmtime(yol)).isoformat(timespec="seconds")
+                          if os.path.exists(yol) else "",
+        })
     return {"hafiza": dosyalar}
+
+
+def hafiza_degistir(veri):
+    """islem: ekle | duzenle | sil. sira = 0-based index in the item list."""
+    _, tablo = ortak.ajanlari_yukle()
+    ajan_id, islem = veri.get("ajan"), veri.get("islem")
+    if ajan_id not in tablo:
+        raise IstekHatasi(404, "bilinmeyen ajan")
+    yol = hafiza_yolu(ajan_id)
+    metin = veri.get("metin")
+    if islem in ("ekle", "duzenle"):
+        if not isinstance(metin, str) or not metin.strip():
+            raise IstekHatasi(400, "metin gerekli")
+        metin = " ".join(metin.split())  # single line
+        if len(metin) > ortak.MAKS_HAFIZA_EKI:
+            raise IstekHatasi(413, f"madde en fazla {ortak.MAKS_HAFIZA_EKI} karakter")
+    elif islem != "sil":
+        raise IstekHatasi(400, "islem: ekle | duzenle | sil")
+    with HAFIZA_KILIDI:
+        satirlar = hafiza_satirlari(yol)
+        maddeler = hafiza_maddeleri(satirlar)
+        if islem == "ekle":
+            satirlar.append(f"- [{ortak.bugun()}] {metin}")
+        else:
+            sira = veri.get("sira")
+            if not isinstance(sira, int) or not 0 <= sira < len(maddeler):
+                raise IstekHatasi(400, "geçersiz sıra (sayfayı yenile)")
+            satir_no, tarih, eski = maddeler[sira]
+            if veri.get("eski") is not None and veri.get("eski") != eski[:ortak.MAKS_HAFIZA_EKI]:
+                raise IstekHatasi(409, "madde bu arada değişmiş (sayfayı yenile)")
+            if islem == "sil":
+                del satirlar[satir_no]
+            else:
+                satirlar[satir_no] = f"- [{ortak.bugun()}] {metin}"
+        gecici = yol + ".tmp"
+        with open(gecici, "w", encoding="utf-8") as f:
+            f.write("\n".join(satirlar).strip("\n") + ("\n" if satirlar else ""))
+        os.replace(gecici, yol)
+    return hafiza_yaniti()
+
+
+HAFIZA_KILIDI = threading.Lock()
 
 
 # ---------- HTTP ----------
@@ -387,6 +458,8 @@ class Isleyici(SimpleHTTPRequestHandler):
                         (prompt is not None and not isinstance(prompt, str)):
                     raise IstekHatasi(400, "etiket/prompt metin olmalı")
                 return self._json(202, gorev_baslat(ajan, etiket=etiket, prompt=prompt))
+            if yol == "/api/hafiza":
+                return self._json(200, hafiza_degistir(veri))
             if yol == "/api/ceo":
                 metin = veri.get("metin")
                 if not isinstance(metin, str) or not metin.strip():
