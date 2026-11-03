@@ -99,7 +99,21 @@ h3.kucuk{font-family:"Space Grotesk",sans-serif;font-size:11px;font-weight:600;l
 .akis-pop .ust{display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border-bottom:1px solid rgba(59,52,44,.12)}
 .akis-pop .ust b{flex:1;min-width:0;font-size:13px;color:#6d6357;font-weight:600;overflow-wrap:anywhere}
 .akis-pop .ust button{min-width:44px;min-height:44px;margin:-8px -6px -8px 0;border:0;background:none;font-size:22px;cursor:pointer;color:#6d6357}
-.akis-pop pre{font:inherit;font-size:14px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;overflow-y:auto;padding:14px;margin:0;flex:1;min-height:0}
+.akis-pop .md{font-size:14px;line-height:1.55;overflow-wrap:anywhere;overflow-y:auto;padding:14px;margin:0;flex:1;min-height:0}
+.akis-pop .md>:first-child{margin-top:0}
+.akis-pop .md p,.akis-pop .md ul,.akis-pop .md ol,.akis-pop .md blockquote,.akis-pop .md pre,.akis-pop .md .tablo{margin:0 0 10px}
+.akis-pop .md h3,.akis-pop .md h4,.akis-pop .md h5,.akis-pop .md h6{margin:14px 0 6px;line-height:1.3}
+.akis-pop .md h3{font-size:17px}.akis-pop .md h4{font-size:15px}.akis-pop .md h5,.akis-pop .md h6{font-size:14px}
+.akis-pop .md ul,.akis-pop .md ol{padding-left:22px}
+.akis-pop .md code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;background:rgba(59,52,44,.09);padding:1px 4px;border-radius:4px}
+.akis-pop .md pre{white-space:pre-wrap;overflow-wrap:anywhere;background:rgba(59,52,44,.09);padding:10px;border-radius:8px}
+.akis-pop .md pre code{background:none;padding:0}
+.akis-pop .md blockquote{padding:2px 12px;border-left:3px solid rgba(59,52,44,.3);color:#6d6357}
+.akis-pop .md hr{border:0;border-top:1px solid rgba(59,52,44,.2);margin:12px 0}
+.akis-pop .md a{color:#a85d1f}
+.akis-pop .md .tablo{overflow-x:auto}
+.akis-pop .md table{border-collapse:collapse;font-size:13px}
+.akis-pop .md th,.akis-pop .md td{border:1px solid rgba(59,52,44,.2);padding:4px 8px;text-align:left}
 .akis li{display:flex;gap:10px;padding:8px 4px;border-bottom:1px solid rgba(59,52,44,.06);animation:kaygir .35s ease}
 @keyframes kaygir{from{transform:translateY(-6px)}to{transform:none}}
 .akis li .avatar{margin-top:1px}
@@ -1188,13 +1202,73 @@ function avatar(ajanId, sinif = '') {
   if (foto) d.style.backgroundImage = 'url(' + foto + ')'; else d.style.background = ajanRenk(ajanId);
   return d;
 }
+/* Küçük, güvenli markdown çizici: yalnız DOM düğümleri üretir (innerHTML yok) */
+function mdSatiriçi(kok, s) {
+  const re = /`([^`]+)`|\*\*([^*]+)\*\*|__([^_]+)__|\*([^*\s][^*]*)\*|\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+  let son = 0, m;
+  while ((m = re.exec(s))) {
+    if (m.index > son) kok.append(s.slice(son, m.index));
+    if (m[1] != null) kok.append(el('code', null, m[1]));
+    else if (m[2] != null || m[3] != null) { const b = el('strong'); mdSatiriçi(b, m[2] ?? m[3]); kok.append(b); }
+    else if (m[4] != null) { const i = el('em'); mdSatiriçi(i, m[4]); kok.append(i); }
+    else { const a = el('a', null, m[5]); a.href = m[6]; a.target = '_blank'; a.rel = 'noopener noreferrer'; kok.append(a); }
+    son = re.lastIndex;
+  }
+  if (son < s.length) kok.append(s.slice(son));
+}
+function mdCiz(kok, metin) {
+  const satirlar = String(metin || '').replace(/\r\n?/g, '\n').split('\n');
+  const cocuklar = [];
+  let i = 0;
+  const ozel = s => /^(#{1,6}\s|```|>\s?|[-*+]\s|\d+[.)]\s|(-{3,}|\*{3,}|_{3,})\s*$|\|)/.test(s);
+  while (i < satirlar.length) {
+    const s = satirlar[i];
+    if (!s.trim()) { i++; continue; }
+    let m;
+    if (/^```/.test(s)) {
+      const kod = []; i++;
+      while (i < satirlar.length && !/^```/.test(satirlar[i])) kod.push(satirlar[i++]);
+      i++;
+      const pre = el('pre'); pre.append(el('code', null, kod.join('\n'))); cocuklar.push(pre);
+    } else if ((m = /^(#{1,6})\s+(.*)$/.exec(s))) {
+      const h = el('h' + Math.min(m[1].length + 2, 6)); mdSatiriçi(h, m[2].trim()); cocuklar.push(h); i++;
+    } else if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(s)) {
+      cocuklar.push(el('hr')); i++;
+    } else if (/^>\s?/.test(s)) {
+      const alinti = [];
+      while (i < satirlar.length && /^>\s?/.test(satirlar[i])) alinti.push(satirlar[i++].replace(/^>\s?/, ''));
+      const bq = el('blockquote'); mdSatiriçi(bq, alinti.join(' ')); cocuklar.push(bq);
+    } else if (/^\s*([-*+]|\d+[.)])\s+/.test(s)) {
+      const sirali = /^\s*\d/.test(s), liste = el(sirali ? 'ol' : 'ul');
+      while (i < satirlar.length && (m = /^\s*(?:[-*+]|\d+[.)])\s+(.*)$/.exec(satirlar[i]))) {
+        const li = el('li'); mdSatiriçi(li, m[1].replace(/^\[[ xX]\]\s+/, x => /[xX]/.test(x) ? '☑ ' : '☐ ')); liste.append(li); i++;
+      }
+      cocuklar.push(liste);
+    } else if (/^\|/.test(s)) {
+      const sat = [];
+      while (i < satirlar.length && /^\|/.test(satirlar[i])) sat.push(satirlar[i++]);
+      const tablo = el('table');
+      sat.filter(x => !/^\|[\s:|-]+\|?\s*$/.test(x)).forEach((x, n) => {
+        const tr = el('tr');
+        x.replace(/^\|/, '').replace(/\|\s*$/, '').split('|').forEach(h => { const td = el(n === 0 ? 'th' : 'td'); mdSatiriçi(td, h.trim()); tr.append(td); });
+        tablo.append(tr);
+      });
+      const kaydir = el('div', 'tablo'); kaydir.append(tablo); cocuklar.push(kaydir);
+    } else {
+      const par = [];
+      while (i < satirlar.length && satirlar[i].trim() && (!par.length || !ozel(satirlar[i]))) par.push(satirlar[i++].trim());
+      const p = el('p'); mdSatiriçi(p, par.join(' ')); cocuklar.push(p);
+    }
+  }
+  kok.replaceChildren(...cocuklar);
+}
 let akisPop = null;
 function akisPopAc(baslik, tam, url) {
   if (!akisPop) {
     const kapat = () => { akisPop.hidden = true; };
     const kutu = el('div', 'kutu'), ust = el('div', 'ust'), x = el('button', null, '×');
     x.type = 'button'; x.setAttribute('aria-label', 'Kapat'); x.addEventListener('click', kapat);
-    ust.append(el('b'), x); kutu.append(ust, el('pre'));
+    ust.append(el('b'), x); kutu.append(ust, el('div', 'md'));
     akisPop = el('div', 'akis-pop'); akisPop.hidden = true; akisPop.setAttribute('role', 'dialog'); akisPop.setAttribute('aria-modal', 'true');
     akisPop.append(kutu);
     akisPop.addEventListener('click', e => { if (e.target === akisPop) kapat(); });
@@ -1202,13 +1276,13 @@ function akisPopAc(baslik, tam, url) {
     document.body.append(akisPop);
   }
   akisPop.querySelector('b').textContent = baslik;
-  const pre = akisPop.querySelector('pre'); pre.textContent = tam; pre.scrollTop = 0;
+  const pre = akisPop.querySelector('.md'); mdCiz(pre, tam); pre.scrollTop = 0;
   akisPop.hidden = false;
   akisPop.querySelector('button').focus();
   akisPop.dataset.url = url || '';
   if (url && !DEMO) getJSON(url).then(r => {
     if (akisPop.dataset.url !== url || !r || !r.metin) return;
-    pre.textContent = r.metin + (r.kirpildi ? '\n…(kırpıldı)' : ''); pre.scrollTop = 0;
+    mdCiz(pre, r.metin + (r.kirpildi ? '\n\n…(kırpıldı)' : '')); pre.scrollTop = 0;
   }).catch(() => {});
 }
 function akisEkle(ajanId,metin, alt = '', tip = '', zaman = new Date(), detay = '', kosuId = '') {
