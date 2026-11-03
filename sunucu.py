@@ -321,6 +321,9 @@ def ceo_kaydi_yaz(k):
     return goreli
 
 
+_ceo_acik = threading.local()  # bu iş parçacığında ceo_basladi yazılmış, ceo_bitti henüz yazılmamış koşunun id'si
+
+
 def ceo_calistir(metin, kuru=False, ekler=None):
     veri, tablo = ortak.ajanlari_yukle()
     ceo = tablo.get("ceo")
@@ -328,26 +331,32 @@ def ceo_calistir(metin, kuru=False, ekler=None):
         raise IstekHatasi(404, "ajanlar.json'da 'ceo' yok")
     ceo_id = f"{datetime.now():%Y-%m-%d-%H%M%S}-ceo-{secrets.token_hex(2)}"
     ortak.olay_yaz({"tur": "ceo_basladi", "kosu_id": ceo_id, "ajan": "ceo", "oda": "ceo", "istek": metin[:300]})
-    ek_kayit = ceo_ekleri_kaydet(ceo_id, ekler)
+    _ceo_acik.id = ceo_id
+    ek_kayit = []
     claude = shutil.which("claude") or "/opt/homebrew/bin/claude"
     komut = [claude, "-p", "--model", ceo["model"], "--output-format", "json",
              "--no-session-persistence", "--max-budget-usd", "0.20", "--tools", "", "--json-schema", json.dumps(CEO_SEMASI)]
     baslangic = time.time()
     try:
+        ek_kayit = ceo_ekleri_kaydet(ceo_id, ekler)
         surec = subprocess.run(komut, cwd=ortak.KOK, input=ceo_promptu(metin, tablo, ekler), text=True,
                                capture_output=True, timeout=CEO_ZAMAN_ASIMI)
         with open(os.path.join(ortak.KOSU_DIZINI, f"{ceo_id}.log"), "w", encoding="utf-8") as f:
             f.write(surec.stdout + ("\n--- stderr ---\n" + surec.stderr if surec.stderr else ""))
         sonuc = json.loads(surec.stdout)
         cevap, gecerli, reddedilen = ceo_dogrula(json_ayikla(sonuc), tablo, metin)
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, ValueError) as e:
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, ValueError, OSError) as e:
         hata = f"{type(e).__name__}: {str(e)[:200]}"
         sure = round(time.time() - baslangic, 1)
-        cikti = ceo_kaydi_yaz({"ceo_id": ceo_id, "zaman": ortak.simdi_iso(), "istek": metin[:ortak.MAKS_GIRDI],
-                               "ekler": ek_kayit, "kuru": kuru, "durum": "hata", "hata": hata, "sure_sn": sure,
-                               "maliyet_usd": None, "cevap": None, "atamalar": [], "reddedilen": []})
+        try:
+            cikti = ceo_kaydi_yaz({"ceo_id": ceo_id, "zaman": ortak.simdi_iso(), "istek": metin[:ortak.MAKS_GIRDI],
+                                   "ekler": ek_kayit, "kuru": kuru, "durum": "hata", "hata": hata, "sure_sn": sure,
+                                   "maliyet_usd": None, "cevap": None, "atamalar": [], "reddedilen": []})
+        except OSError:
+            cikti = None
         ortak.olay_yaz({"tur": "ceo_bitti", "kosu_id": ceo_id, "ajan": "ceo", "oda": "ceo",
                         "durum": "hata", "hata": hata, "sure_sn": sure, "istek": metin[:300], "cikti": cikti})
+        _ceo_acik.id = None
         raise IstekHatasi(502, "CEO geçerli bir plan döndürmedi; koşu başlatılmadı") from e
 
     baslatilan = []
@@ -372,6 +381,7 @@ def ceo_calistir(metin, kuru=False, ekler=None):
                                  for a in atamalar],
                     "baslatilan": baslatilan, "reddedilen": reddedilen, "kuru": kuru,
                     "kullanim": sonuc.get("usage"), "maliyet_usd": sonuc.get("total_cost_usd")})
+    _ceo_acik.id = None
     return {"kosu_id": ceo_id, "cevap": cevap, "atamalar": gecerli, "baslatilan": baslatilan,
             "reddedilen": reddedilen, "kuru": kuru, "maliyet_usd": sonuc.get("total_cost_usd")}
 
@@ -1025,6 +1035,17 @@ class Isleyici(SimpleHTTPRequestHandler):
             raise IstekHatasi(404, "yok")
         except IstekHatasi as e:
             return self._json(e.kod, {"hata": str(e)})
+        except Exception as e:  # son çare: bağlantı kopmasın, açıkta kalan CEO koşusu kapansın
+            sys.stderr.write(f"POST {yol} beklenmeyen hata: {type(e).__name__}: {str(e)[:200]}\n")
+            acik = getattr(_ceo_acik, "id", None)
+            if acik:
+                _ceo_acik.id = None
+                try:
+                    ortak.olay_yaz({"tur": "ceo_bitti", "kosu_id": acik, "ajan": "ceo", "oda": "ceo", "durum": "hata",
+                                    "hata": f"{type(e).__name__}: {str(e)[:200]}"})
+                except Exception:
+                    pass
+            return self._json(500, {"hata": "sunucu hatası"})
 
     def _sse(self, sorgu):
         self.send_response(200)
