@@ -775,7 +775,12 @@ class Isleyici(SimpleHTTPRequestHandler):
         self.wfile.write(govde)
 
     def _govde(self, maks=MAKS_GOVDE):
-        uzunluk = int(self.headers.get("Content-Length") or 0)
+        try:
+            uzunluk = int(self.headers.get("Content-Length") or 0)
+        except ValueError as e:
+            raise IstekHatasi(400, "geçersiz Content-Length") from e
+        if uzunluk < 0:
+            raise IstekHatasi(400, "geçersiz Content-Length")
         if uzunluk > maks:
             raise IstekHatasi(413, "gövde çok büyük")
         if "application/json" not in (self.headers.get("Content-Type") or ""):
