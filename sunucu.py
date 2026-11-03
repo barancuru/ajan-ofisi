@@ -16,7 +16,7 @@ import threading
 import time
 from datetime import datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, quote
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ortak  # noqa: E402
@@ -808,6 +808,7 @@ MODELLER = ("sonnet", "haiku", "opus")
 # ---------- directory tab: read-only browsing of .md files under BEYIN ----------
 DIZIN_MAKS_OKU = 400_000
 DIZIN_ATLA = {"node_modules", "__pycache__", "venv", ".venv"}
+DIZIN_INDIRILEBILIR = (".zip", ".sha256")
 
 
 def dizin_coz(goreli):
@@ -842,7 +843,9 @@ def dizin_yaniti(goreli):
         if os.path.isdir(gercek):
             klasorler.append(ad)
         elif ad.lower().endswith(".md") and os.path.isfile(gercek):
-            dosyalar.append({"ad": ad, "boyut": os.path.getsize(gercek)})
+            dosyalar.append({"ad": ad, "boyut": os.path.getsize(gercek), "indirilir": False})
+        elif ad.lower().endswith(DIZIN_INDIRILEBILIR) and os.path.isfile(gercek):
+            dosyalar.append({"ad": ad, "boyut": os.path.getsize(gercek), "indirilir": True})
     yol = os.path.relpath(tam, kok)
     return {"yol": "" if yol == "." else yol.replace(os.sep, "/"), "klasorler": klasorler, "dosyalar": dosyalar}
 
@@ -906,6 +909,16 @@ def dizin_oku_yaniti(goreli):
         ham = f.read(DIZIN_MAKS_OKU + 1)
     return {"ad": os.path.basename(tam), "kirpildi": len(ham) > DIZIN_MAKS_OKU, "surum": dosya_surumu(tam),
             "metin": ham[:DIZIN_MAKS_OKU].decode("utf-8", errors="replace")}
+
+
+def dizin_indir_coz(goreli):
+    """Download target: only .zip/.sha256 regular files inside BEYIN (dizin_coz rules apply)."""
+    kok, tam = dizin_coz(goreli)
+    if not tam.lower().endswith(DIZIN_INDIRILEBILIR) or not tam.startswith(kok + os.sep) or not os.path.isfile(tam):
+        raise IstekHatasi(404, "dosya yok")
+    if any(p in DIZIN_ATLA for p in os.path.relpath(tam, kok).split(os.sep)):
+        raise IstekHatasi(404, "dosya yok")
+    return tam
 
 
 def dosya_surumu(tam):
@@ -1251,6 +1264,32 @@ class Isleyici(SimpleHTTPRequestHandler):
             return self._json(200, hafiza_yaniti())
         if yol.path == "/api/gelistirme":
             return self._json(200, gelistirme_yaniti())
+        if yol.path == "/api/dizin/indir":
+            try:
+                tam = dizin_indir_coz((parse_qs(yol.query).get("yol") or [""])[0])
+                f = open(tam, "rb")
+            except IstekHatasi as e:
+                return self._json(e.kod, {"hata": str(e)})
+            except OSError:
+                return self._json(404, {"hata": "dosya yok"})
+            with f:
+                boyut = os.fstat(f.fileno()).st_size
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Disposition", "attachment; filename*=UTF-8''" + quote(os.path.basename(tam), safe=""))
+                self.send_header("Content-Length", str(boyut))
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Cache-Control", "no-store")
+                self._cors()
+                self.end_headers()
+                kalan = boyut
+                while kalan > 0:
+                    parca = f.read(min(65536, kalan))
+                    if not parca:
+                        break
+                    self.wfile.write(parca)
+                    kalan -= len(parca)
+            return
         if yol.path in ("/api/dizin", "/api/dizin/oku", "/api/dizin/ara"):
             try:
                 qs = parse_qs(yol.query)
