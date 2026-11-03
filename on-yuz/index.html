@@ -91,6 +91,8 @@ h3.kucuk{font-family:"Space Grotesk",sans-serif;font-size:11px;font-weight:600;l
 .akis{list-style:none;display:flex;flex-direction:column;gap:2px;overflow-x:hidden;overflow-y:auto;min-height:0}
 .akis li.tikla{cursor:pointer;min-height:44px}
 .akis li.tikla:hover{background:rgba(59,52,44,.04)}
+.not.son-is.tikla{cursor:pointer}
+.not.son-is.tikla:hover{background:rgba(59,52,44,.07)}
 .akis-pop{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(40,34,28,.45)}
 .akis-pop[hidden]{display:none}
 .akis-pop .kutu{background:#fffaf2;border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.3);width:min(720px,100%);max-height:85vh;display:flex;flex-direction:column;overflow:hidden}
@@ -1187,7 +1189,7 @@ function avatar(ajanId, sinif = '') {
   return d;
 }
 let akisPop = null;
-function akisPopAc(baslik, tam) {
+function akisPopAc(baslik, tam, url) {
   if (!akisPop) {
     const kapat = () => { akisPop.hidden = true; };
     const kutu = el('div', 'kutu'), ust = el('div', 'ust'), x = el('button', null, '×');
@@ -1203,15 +1205,21 @@ function akisPopAc(baslik, tam) {
   const pre = akisPop.querySelector('pre'); pre.textContent = tam; pre.scrollTop = 0;
   akisPop.hidden = false;
   akisPop.querySelector('button').focus();
+  akisPop.dataset.url = url || '';
+  if (url && !DEMO) getJSON(url).then(r => {
+    if (akisPop.dataset.url !== url || !r || !r.metin) return;
+    pre.textContent = r.metin + (r.kirpildi ? '\n…(kırpıldı)' : ''); pre.scrollTop = 0;
+  }).catch(() => {});
 }
-function akisEkle(ajanId,metin, alt = '', tip = '', zaman = new Date(), detay = '') {
+function akisEkle(ajanId,metin, alt = '', tip = '', zaman = new Date(), detay = '', kosuId = '') {
   const li = el('li', tip);
   const d = el('div'); d.append(el('p', null, metin), el('small', null, [ajanBul(ajanId)?.ad, saatYazi(zaman), alt].filter(Boolean).join(' · ')));
   const ayrinti = String(detay || '').trim();
   const tam = ayrinti && ayrinti !== metin ? ayrinti : metin;
   const baslik = [ajanBul(ajanId)?.ad || ajanId || 'Ajan', saatYazi(zaman), alt].filter(Boolean).join(' · ');
   li.classList.add('tikla'); li.tabIndex = 0; li.setAttribute('role', 'button');
-  const ac = () => akisPopAc(baslik, tam);
+  const url = kosuId && ajanId !== 'ceo' ? '/api/son-is?ajan=' + encodeURIComponent(ajanId) + '&kosu=' + encodeURIComponent(kosuId) : '';
+  const ac = () => akisPopAc(baslik, tam, url);
   li.addEventListener('click', ac);
   li.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); ac(); } });
   li.append(avatar(ajanId), d);
@@ -1374,7 +1382,7 @@ function olayIsle(o) {
     kosu_bitti() {
       const etiket = kosuEtiket.get(o.kosu_id);
       const sure = o.sure_sn != null ? Math.round(o.sure_sn) + ' sn' : '';
-      akisEkle(o.ajan, o.durum === 'hata' ? ad + ' işi bitiremedi' : ad + ' işi bitirdi' + (etiket ? ': ' + etiket : ''), sure, o.durum === 'hata' ? '' : 'ok', zaman, o.ozet || o.detay || '');
+      akisEkle(o.ajan, o.durum === 'hata' ? ad + ' işi bitiremedi' : ad + ' işi bitirdi' + (etiket ? ': ' + etiket : ''), sure, o.durum === 'hata' ? '' : 'ok', zaman, o.ozet || o.detay || '', o.cikti ? o.kosu_id : '');
       const hafiza = Array.isArray(o.hafiza_eklendi) ? o.hafiza_eklendi : [];
       hafiza.forEach(m => akisEkle(o.ajan, 'Hafızaya eklendi: ' + kisa(m, 90), '', 'hafiza', zaman, 'Hafızaya eklendi: ' + m));
       if (o.durum !== 'hata') kartEkle(o);
@@ -1725,6 +1733,13 @@ function ajanPaneli(a) {
   if (a.id !== 'ceo') parcalar.push(el('h3', null, 'Bağlı araçlar'), aracCipleri(a.izinli_araclar));
   if (a.sonOzet) {
     const son = el('div', 'not son-is', a.sonOzet);
+    if (!DEMO && a.id !== 'ceo') {
+      const sonUrl = '/api/son-is?ajan=' + encodeURIComponent(a.id);
+      son.classList.add('tikla'); son.tabIndex = 0; son.setAttribute('role', 'button'); son.title = 'Tam çıktıyı aç';
+      const sonAc = () => akisPopAc(a.ad + ' · son iş', son.textContent, sonUrl);
+      son.addEventListener('click', sonAc);
+      son.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sonAc(); } });
+    }
     parcalar.push(el('h3', null, 'Son iş'), son);
     if (!DEMO && a.id !== 'ceo') getJSON('/api/son-is?ajan=' + encodeURIComponent(a.id)).then(r => { if (r.metin) son.textContent = r.metin + (r.kirpildi ? '\n…(kırpıldı)' : ''); }).catch(() => {});
   }
