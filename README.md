@@ -126,6 +126,18 @@ Sunucu `olaylar.jsonl`'i SSE ile ön yüze akıtır. Hiçbir zamanlayıcı, dön
 uyurken harcama sıfırdır. `"yalin": true` olan ajan genel CLAUDE.md/kurallar/MCP yüklenmeden koşar (küçük işlerde
 bağlam ve token belirgin azalır).
 
+### Öngörülebilirlik: tekrar eden işler
+"Öngörülebilirlik" sekmesi iki şey gösterir: (a) `ajanlar.json`'daki `ne_zaman_metin` alanları (systemd timer'larıyla
+koşan otomatik işler; salt okunur, metin olarak), (b) senin eklediğin tekrar eden işler (ajan + hazır görev ya da
+prompt + 5 alanlı cron; aç/kapa, sil). Kayıtlar `durum/tekrarlar.json`'da durur ve her okuma/yazmada doğrulanır
+(bilinen, kurulu, CEO olmayan ajan; hazır görev ya da prompt'tan tam biri; sır kalıbı yok; en sık 15 dakikada bir;
+en fazla 50 iş). Bozuk dosya `.bozuk-<zaman>` olarak yana alınır.
+- `zamanlayici.py` sunucuda 30 saniyede bir uyanan bir iş parçacığıdır, **yalnız saat karşılaştırır, model çağırmaz**;
+  vakti gelen işi `gorev_baslat` ile (kaynak `tekrar`) açar. Ajan o an meşgulse çift koşu açılmaz, çalışma atlanır.
+- **Sunucu kapalıyken koşmaz**; kaçan çalışmalar sonradan telafi edilmez.
+- Tekrar eden iş yeni yetki kazanmaz: ajan kendi `izinli_araclar`'ıyla koşar. Yayın, mail, ödeme yapamaz.
+  Olay günlüğüne yalnız iş id'si, ajan ve sonuç yazılır; prompt yazılmaz.
+
 ### Terminal köprüsü: kendi açtığın Claude Code oturumları
 `kopru.py` sunucuda 2 saniyelik bir iş parçacığıdır ve **salt okur**: `~/.claude/sessions/<pid>.json` canlı oturumları,
 `~/.claude/projects/<cwd>/<oturum>.jsonl` transkripti verir; transkript ofsetle yalnız yeni satırlardan okunur.
@@ -183,6 +195,8 @@ toplamda en büyük sayı odur. Maliyet sekmesi yalnız `claude -p`'nin bildirdi
 | `GET /api/dizin/oku?yol=` | tek `.md` dosyasının metni (en fazla 400 KB) |
 | `GET /api/dizin/indir?yol=` | yalnız `.zip` ve `.sha256` dosyasını `attachment` olarak indirir (64 KB parça parça akıtır); `..`, noktayla başlayan ad, kök dışına çıkan symlink ve diğer uzantılar reddedilir. `/api/dizin` listesi bu dosyaları `indirilir: true` ile verir |
 | `POST /api/dizin/yaz` | `{yol, metin}`: var olan bir `.md` dosyasının üzerine yazar (yeni dosya açmaz, en fazla 400 KB) |
+| `GET /api/ongorulebilirlik` | `{otomatik, isler (sonraki çalışmayla), ajanlar, simdi}`; prompt yalnız ilk 40 karakteriyle döner |
+| `POST /api/ongorulebilirlik` | `{"islem": "ekle", ajan, etiket\|prompt, cron}`, `{"islem": "ac\|kapat\|sil", id}`, `{"islem": "onizle", cron}` (sonraki 3 çalışma); hatada 400 + Türkçe mesaj |
 
 ## Güvenlik notları
 - **Yalnız `127.0.0.1`.** `Host` ve `Origin` başlıkları yalnız localhost/127.0.0.1 kabul edilir (DNS rebinding ve
@@ -206,6 +220,7 @@ toplamda en büyük sayı odur. Maliyet sekmesi yalnız `claude -p`'nin bildirdi
 | `kosucu.py` | tek ajan koşusu (tmux penceresinde) |
 | `kopru.py` | terminal köprüsü (salt okuma) |
 | `token_sayac.py` | günlük token sayacı |
+| `zamanlayici.py` | tekrar eden işler: cron, `durum/tekrarlar.json`, sunucu içi zamanlayıcı |
 | `ortak.py` | yollar, ajan tablosu, olay günlüğü |
 | `ajanlar.example.json`, `kopru.example.json` | boş şablonlar |
 | `CLAUDE.md` | CEO anayasası şablonu |

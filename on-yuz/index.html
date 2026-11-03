@@ -367,6 +367,20 @@ td.sayi,th.sayi{text-align:right}
 .dizin-alan .dizin-duzenle{max-width:none}
 .dizin-onizleme{min-width:0;overflow:auto;max-height:70vh;padding:4px 10px;border:1px dashed rgba(59,52,44,.18);border-radius:10px}
 @media (max-width:768px){.dizin-alan{grid-template-columns:1fr}.dizin-arac button{min-width:44px;min-height:44px}.dizin-liste button,.dizin-liste a.dizin-indir{min-height:44px}.dizin-ara input{min-height:44px;font-size:16px}.dizin-yol button{min-height:40px}.md{font-size:15px}.dizin-duzenle{font-size:16px}.dizin-dugmeler button{min-height:44px;padding:10px 14px}}
+.ong-kart{margin:0 0 14px;max-width:720px}
+.ong-oto{list-style:none;padding:0;margin:6px 0 0;display:flex;flex-direction:column;gap:6px}
+.ong-oto li{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:13.5px}
+.ong-oto li b{min-width:110px}
+.ong-liste{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.ong-is{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:8px 10px;border-radius:10px;background:#fffdf9;border:1px solid rgba(59,52,44,.12)}
+.ong-is.kapali{opacity:.6}
+.ong-bilgi{display:flex;flex-direction:column;gap:2px;min-width:0;overflow-wrap:anywhere}
+.ong-bilgi b{font-size:13.5px}.ong-bilgi small{font-size:12px;color:var(--soluk)}
+.ong-dugmeler{display:flex;gap:6px;flex:0 0 auto}
+.ong-hizli{display:flex;flex-wrap:wrap;gap:6px}
+.ong-hata{color:#9c2f26 !important}
+.ong-onizle{min-height:1.2em}
+@media (max-width:768px){.ong-kart{max-width:none}.ong-is{flex-direction:column;align-items:stretch}.ong-dugmeler button,.ong-hizli button{min-height:44px;padding:10px 14px}.ong-dugmeler button{flex:1}.ong-form .koyu-dugme{align-self:stretch;min-height:44px}.ong-form select,.ong-form input,.ong-form textarea{width:100%;font-size:16px;min-height:44px}}
 /* ---------- phone layout (≤768px): panel ↔ office scene toggle ---------- */
 .mobil-gecis{display:none}
 .dugme.cikis{text-decoration:none;color:inherit}
@@ -414,6 +428,7 @@ td.sayi,th.sayi{text-align:right}
     <button data-sekme="hafiza">Hafıza</button>
     <button data-sekme="maliyet">Maliyet</button>
     <button data-sekme="dizin">Dizin</button>
+    <button data-sekme="ongorulebilirlik">Öngörülebilirlik</button>
   </nav>
   <div class="bosluk"></div>
   <div class="hap"><span class="nokta" id="aktifNokta"></span><b id="aktif">0</b><span class="yazi"> ajan çalışıyor</span></div>
@@ -2599,7 +2614,7 @@ async function sekmeAc(ad) {
   document.querySelectorAll('#sekmeler button').forEach(b => b.classList.toggle('secili', b.dataset.sekme === ad));
   if (ad === 'ofis') { sayfa.classList.remove('acik'); return; }
   panelKapat();
-  const icerik = ad === 'odalar' ? odalarSayfasi() : ad === 'hafiza' ? await hafizaSayfasi() : ad === 'gelistirme' ? await gelistirmeSayfasi() : ad === 'dizin' ? await dizinSayfasi() : maliyetSayfasi();
+  const icerik = ad === 'odalar' ? odalarSayfasi() : ad === 'hafiza' ? await hafizaSayfasi() : ad === 'gelistirme' ? await gelistirmeSayfasi() : ad === 'dizin' ? await dizinSayfasi() : ad === 'ongorulebilirlik' ? await ongorulebilirlikSayfasi() : maliyetSayfasi();
   if (aktifSekme !== ad) return;
   sayfa.replaceChildren(...icerik); sayfa.classList.add('acik');
 }
@@ -2999,6 +3014,114 @@ async function dizinSayfasi() {
   girdi.addEventListener('input', () => { clearTimeout(araZaman); araZaman = setTimeout(ara, 350); });
   aramaKutu.append(girdi);
   return [...bas, el('p', 'alt', 'Beynin içinde gez, .md dosyalarını oku, istersen düzenle.'), aramaKutu, sonucKutu, yolSatiri(d.yol), liste];
+}
+// Öngörülebilirlik: otomatik zamanlar (salt okunur) + tekrar eden işler. Yalnız sayfa açıkken sorgu atar.
+let ongZaman = null;
+const ONG_HIZLI = [['0 9 * * *', 'Her gün 09:00'], ['0 9 * * 1-5', 'Hafta içi 09:00'], ['0 * * * *', 'Her saat başı'], ['30 8 * * 1', 'Pazartesi 08:30']];
+const ONG_SONUC = { basladi: 'başladı', 'atlandi: mesgul': 'atlandı (ajan meşguldü)', hata: 'hata' };
+function ongTarih(iso) {
+  if (!iso) return '—';
+  const t = new Date(iso); if (isNaN(t)) return iso;
+  return t.toLocaleString('tr-TR', { weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
+}
+async function ongorulebilirlikSayfasi() {
+  clearInterval(ongZaman);
+  const bas = [el('h2', null, 'Öngörülebilirlik')];
+  if (DEMO) return [...bas, el('p', 'alt', 'Demo modunda tekrar eden işler gösterilmez.')];
+  let d;
+  try { d = await getJSON('/api/ongorulebilirlik'); }
+  catch { return [...bas, el('p', 'alt', 'Zamanlama listesi alınamadı.')]; }
+  // açıkken en çok 60 sn'de bir yenile; yazı yazarken formu silme
+  ongZaman = setInterval(() => {
+    if (aktifSekme !== 'ongorulebilirlik') return clearInterval(ongZaman);
+    const yaziyor = [...sayfa.querySelectorAll('textarea,input')].some(x => x.value.trim());
+    if (!yaziyor) sekmeAc('ongorulebilirlik');
+  }, 60000);
+  const islem = async (govde, tamam) => {
+    let r; try { r = await postJSON('/api/ongorulebilirlik', govde); } catch { r = { durum: 0, veri: {} }; }
+    if (r.durum !== 200) { tost(r.veri.hata || ('hata ' + r.durum)); return false; }
+    if (tamam) tost(tamam);
+    sekmeAc('ongorulebilirlik'); return true;
+  };
+  // (a) otomatik
+  const oto = el('div', 'kart ong-kart');
+  oto.append(el('h4', null, 'Otomatik (systemd)'), el('p', 'alt', 'ajanlar.json\'daki zaman metinleri; salt okunur. Bu koşular ofis kapalıyken de çalışır.'));
+  if (!d.otomatik.length) oto.append(el('p', 'alt', 'Zaman metni yazılmış ajan yok.'));
+  const otoListe = el('ul', 'ong-oto');
+  d.otomatik.forEach(o => { const li = el('li'); li.append(el('b', null, o.ad), el('span', null, o.metin)); otoListe.append(li); });
+  oto.append(otoListe);
+  // (b) tekrar eden işlerim
+  const isk = el('div', 'kart ong-kart');
+  isk.append(el('h4', null, 'Tekrar eden işlerim (' + d.isler.length + '/' + d.maks_is + ')'),
+    el('p', 'alt', 'Ofis sunucusu açıkken vakti gelince koşar; sunucu kapalıyken kaçan koşular sonradan çalıştırılmaz. Ajan o an meşgulse o çalışma atlanır.'));
+  if (!d.isler.length) isk.append(el('p', 'alt', 'Henüz tekrar eden iş yok. Aşağıdan ekleyebilirsin.'));
+  const liste = el('div', 'ong-liste');
+  d.isler.forEach(k => {
+    const s = el('div', 'ong-is' + (k.aktif ? '' : ' kapali'));
+    const bilgi = el('div', 'ong-bilgi');
+    bilgi.append(el('b', null, k.ad + ' · ' + (k.etiket || k.prompt_kisa || '—')));
+    const siklik = el('small', null, k.ozet);
+    if (k.ozet !== k.cron) siklik.append(' · ', el('code', null, k.cron));
+    bilgi.append(siklik);
+    bilgi.append(el('small', null, 'Sonraki: ' + (k.aktif ? ongTarih(k.sonraki) : 'kapalı') +
+      ' · Son: ' + (k.son_calisma ? ongTarih(k.son_calisma) + ' (' + (ONG_SONUC[k.son_sonuc] || k.son_sonuc || '…') + ')' : 'henüz koşmadı')));
+    if (k.hata) bilgi.append(el('small', 'ong-hata', 'Koşmuyor: ' + k.hata));
+    const dug = el('div', 'ong-dugmeler');
+    const ac = el('button', 'mini', k.aktif ? 'Kapat' : 'Aç');
+    ac.onclick = async () => { ac.disabled = true; if (!await islem({ islem: k.aktif ? 'kapat' : 'ac', id: k.id })) ac.disabled = false; };
+    const sil = el('button', 'mini', 'Sil');
+    sil.onclick = async () => { if (!confirm('Bu tekrar eden iş silinsin mi?')) return; sil.disabled = true; if (!await islem({ islem: 'sil', id: k.id }, 'Silindi')) sil.disabled = false; };
+    dug.append(ac, sil);
+    s.append(bilgi, dug); liste.append(s);
+  });
+  isk.append(liste);
+  // (c) ekleme formu
+  const form = el('form', 'kart gelistirme-form ong-form'); form.autocomplete = 'off';
+  const ajan = el('select'); ajan.setAttribute('aria-label', 'Ajan');
+  d.ajanlar.forEach(a => { const o = el('option', null, a.ad); o.value = a.id; ajan.append(o); });
+  const tur = el('select'); tur.setAttribute('aria-label', 'İş türü');
+  [['hazir', 'Hazır görev'], ['prompt', 'Serbest prompt']].forEach(([v, t]) => { const o = el('option', null, t); o.value = v; tur.append(o); });
+  const hazir = el('select'); hazir.setAttribute('aria-label', 'Hazır görev');
+  const prompt = el('textarea'); prompt.placeholder = 'Ajan ne yapsın? (yayın, mail, ödeme yapamaz)'; prompt.maxLength = 4000; prompt.rows = 3;
+  const cron = el('input'); cron.placeholder = 'cron: dakika saat ay-günü ay hafta-günü (ör. 0 9 * * 1-5)'; cron.setAttribute('aria-label', 'Cron ifadesi'); cron.spellcheck = false;
+  const hizli = el('div', 'ong-hizli');
+  ONG_HIZLI.forEach(([c, t]) => { const b = el('button', 'mini', t); b.type = 'button'; b.onclick = () => { cron.value = c; onizle(); }; hizli.append(b); });
+  const onizKutu = el('small', 'alt ong-onizle');
+  const ekle = el('button', 'koyu-dugme', 'Tekrar eden iş ekle'); ekle.type = 'submit';
+  const turGuncelle = () => {
+    const a = d.ajanlar.find(x => x.id === ajan.value);
+    const gorevler = a ? a.hazir_gorevler : [];
+    hazir.replaceChildren(...gorevler.map(g => { const o = el('option', null, g); o.value = g; return o; }));
+    if (!gorevler.length) tur.value = 'prompt';
+    tur.options[0].disabled = !gorevler.length;
+    hazir.hidden = tur.value !== 'hazir'; prompt.hidden = tur.value !== 'prompt';
+  };
+  ajan.onchange = turGuncelle; tur.onchange = turGuncelle; turGuncelle();
+  let onizNo = 0, onizZaman = null;
+  async function onizle() {
+    const ifade = cron.value.trim(), no = ++onizNo;
+    if (!ifade) { onizKutu.textContent = ''; return; }
+    let r; try { r = await postJSON('/api/ongorulebilirlik', { islem: 'onizle', cron: ifade }); } catch { r = { durum: 0, veri: {} }; }
+    if (no !== onizNo) return;
+    onizKutu.classList.toggle('ong-hata', r.durum !== 200);
+    onizKutu.textContent = r.durum === 200
+      ? r.veri.ozet + ' · sonraki 3: ' + (r.veri.sonrakiler.length ? r.veri.sonrakiler.map(ongTarih).join(', ') : 'bir yıl içinde yok')
+      : (r.veri.hata || 'önizlenemedi');
+  }
+  cron.addEventListener('input', () => { clearTimeout(onizZaman); onizZaman = setTimeout(onizle, 400); });
+  const satir = el('div', 'satir2'); satir.append(ajan, tur);
+  form.append(el('h4', null, 'Yeni tekrar eden iş'), el('p', 'alt ong-uyari', d.uyari + ' Ajan kendi izinli araçlarıyla koşar; en sık ' + d.min_aralik_dk + ' dakikada bir.'),
+    satir, hazir, prompt, cron, hizli, onizKutu, ekle);
+  if (!d.ajanlar.length) { ekle.disabled = true; form.append(el('p', 'alt', 'Kurulu ajan yok.')); }
+  form.onsubmit = async e => {
+    e.preventDefault();
+    const govde = { islem: 'ekle', ajan: ajan.value, cron: cron.value.trim() };
+    if (tur.value === 'hazir') govde.etiket = hazir.value; else govde.prompt = prompt.value;
+    ekle.disabled = true;
+    const tamam = await islem(govde, 'Tekrar eden iş eklendi');
+    if (!tamam) ekle.disabled = false;
+  };
+  return [...bas, el('p', 'alt', 'Ajanların ne zaman çalışacağını gör; kendi tekrar eden işlerini ekle. Boştayken model çağrılmaz.'), oto, isk, form];
 }
 document.querySelectorAll('#sekmeler button').forEach(b => { b.onclick = () => { SES.tik(); sekmeAc(b.dataset.sekme); }; b.onmouseenter = () => SES.uzerinde(); });
 

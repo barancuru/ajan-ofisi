@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ortak  # noqa: E402
 import kopru  # noqa: E402
 import token_sayac  # noqa: E402
+import zamanlayici  # noqa: E402
 
 HOST = "127.0.0.1"
 ILK_PORT = int(os.environ.get("OFIS_PORT", "8796"))
@@ -1203,6 +1204,52 @@ def gelistirme_degistir(veri):
     raise IstekHatasi(400, "islem: yeni | onay | oneri | oneri-tara")
 
 
+# ---------- Öngörülebilirlik (tekrar eden işler) ----------
+
+def _iso(t):
+    return t.astimezone().isoformat(timespec="minutes") if t else None
+
+
+def ongorulebilirlik_yaniti():
+    """Otomatik zamanlar (ajanlar.json metni, salt okunur) + kullanıcının tekrar eden işleri. Prompt tam gönderilmez."""
+    _, tablo = ortak.ajanlari_yukle()
+    simdi = datetime.now()
+    otomatik = [{"ajan": a["id"], "ad": a.get("ad") or a["id"], "metin": str(a["ne_zaman_metin"])[:200],
+                 "kaynak": "ajanlar.json"}
+                for a in tablo.values() if a["id"] != "ceo" and a.get("ne_zaman_metin")]
+    isler = []
+    for k in zamanlayici.yukle(tablo):
+        try:
+            sonraki = zamanlayici.sonraki(k["cron"], simdi) if k["aktif"] and not k["hata"] else None
+        except ValueError:
+            sonraki = None
+        p = k.get("prompt")
+        isler.append({"id": k["id"], "ajan": k["ajan"], "ad": (tablo.get(k["ajan"]) or {}).get("ad") or k["ajan"],
+                      "etiket": k["etiket"], "prompt_kisa": (p[:40] + ("…" if len(p) > 40 else "")) if p else None,
+                      "cron": k["cron"], "ozet": zamanlayici.ozet(k["cron"]), "aktif": k["aktif"],
+                      "olusturma": k["olusturma"], "son_calisma": k["son_calisma"], "son_sonuc": k["son_sonuc"],
+                      "hata": k["hata"], "sonraki": _iso(sonraki)})
+    ajanlar = [{"id": a["id"], "ad": a.get("ad") or a["id"],
+                "hazir_gorevler": [g["etiket"] for g in a.get("hazir_gorevler", []) if g.get("etiket")]}
+               for a in tablo.values() if a["id"] != "ceo" and a["kurulu"]]
+    return {"otomatik": otomatik, "isler": isler, "ajanlar": ajanlar, "simdi": _iso(simdi),
+            "uyari": zamanlayici.UYARI, "min_aralik_dk": zamanlayici.MIN_ARALIK_DK, "maks_is": zamanlayici.MAKS_IS}
+
+
+def ongorulebilirlik_degistir(veri):
+    """islem: ekle | sil | ac | kapat | onizle. Doğrulama hataları 400 + Türkçe mesaj."""
+    try:
+        if veri.get("islem") == "onizle":
+            ifade = zamanlayici.cron_dogrula(veri.get("cron"))
+            return {"cron": ifade, "ozet": zamanlayici.ozet(ifade),
+                    "sonrakiler": [_iso(t) for t in zamanlayici.sonrakiler(ifade, datetime.now(), 3)]}
+        _, tablo = ortak.ajanlari_yukle()
+        is_id = zamanlayici.degistir(veri, tablo)
+    except ValueError as e:
+        raise IstekHatasi(400, str(e)) from e
+    return {**ongorulebilirlik_yaniti(), "id": is_id}
+
+
 # ---------- HTTP ----------
 
 class Isleyici(SimpleHTTPRequestHandler):
@@ -1303,6 +1350,8 @@ class Isleyici(SimpleHTTPRequestHandler):
             return self._json(200, hafiza_yaniti())
         if yol.path == "/api/gelistirme":
             return self._json(200, gelistirme_yaniti())
+        if yol.path == "/api/ongorulebilirlik":
+            return self._json(200, ongorulebilirlik_yaniti())
         if yol.path == "/api/dizin/indir":
             try:
                 tam = dizin_indir_coz((parse_qs(yol.query).get("yol") or [""])[0])
@@ -1378,6 +1427,8 @@ class Isleyici(SimpleHTTPRequestHandler):
                 return self._json(200, hafiza_degistir(veri))
             if yol == "/api/gelistirme":
                 return self._json(200, gelistirme_degistir(veri))
+            if yol == "/api/ongorulebilirlik":
+                return self._json(200, ongorulebilirlik_degistir(veri))
             if yol == "/api/ceo":
                 metin = veri.get("metin")
                 if not isinstance(metin, str) or not metin.strip():
@@ -1475,6 +1526,8 @@ def main():
         f.write(str(port))
     print(f"Ajan Ofisi: http://{HOST}:{port}   (demo: http://{HOST}:{port}/?demo=1)", flush=True)
     KOPRU.baslat()
+    zamanlayici.baslat(lambda ajan, etiket, prompt, kaynak: gorev_baslat(ajan, etiket=etiket, prompt=prompt,
+                                                                         kaynak=kaynak))
     sunucu.serve_forever()
 
 
