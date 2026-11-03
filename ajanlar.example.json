@@ -12,14 +12,12 @@
     }
   },
   "_ssh_salt_okunur_ornek": {
-    "_not": "Salt-okunur donanım/sistem bakışı için dar örnek (sahte host/anahtar). 'cat' yalnız izinli_dizinler'deki tek dosyayı okur; onay_gerekli varsayılanı değiştirdiği için yıkıcı kalıpları yeniden yazın.",
+    "_not": "Salt-okunur donanım/sistem bakışı için dar örnek (sahte host/anahtar). birebir_komutlar: komut bu girişlerden biriyle token token TAM eşit olmalı; ek argüman, listede olmayan komut kesin RED (onay yolu yok).",
     "ssh": {
       "host": "sunucu.example.com", "user": "root", "port": 22,
       "anahtar": "/home/kullanici/.ssh/sunucu_ed25519",
       "known_hosts": "~/.ssh/known_hosts",
-      "izinli_komutlar": ["lscpu", "nproc", "free", "lsblk", "df", "uname", "uptime", "cat /etc/os-release", "lspci", "ip -brief addr"],
-      "izinli_dizinler": ["/etc/os-release"],
-      "onay_gerekli": ["rm", "reboot", "shutdown", "systemctl stop|restart|disable", "deploy", "git push", "ip -brief addr add|del|delete|flush|change|replace"]
+      "birebir_komutlar": ["lscpu", "nproc", "free -h", "lsblk", "df -h", "uname -a", "uptime", "cat /etc/os-release", "lspci", "ip -brief addr"]
     }
   },
   "surum": 2,

@@ -57,6 +57,12 @@ def komut_karar(ssh, args):
     if kotu:
         return "red", "komutta shell metakarakteri/kontrol karakteri var (zincir, yönlendirme, ikame, tırnak, joker yasak)", komut
     tokenlar = komut.split()
+    if ssh.get("birebir_komutlar") is not None:
+        # Birebir mod: token listesi bir girişle tamamen eşit olmalı; onay/önek yolu yok, eşleşmeyen = red.
+        for giris in ssh["birebir_komutlar"]:
+            if giris.split() == tokenlar:
+                return "izin", "", " ".join(giris.split())
+        return "red", "komut birebir izinli listede değil", komut
     for t in tokenlar:
         if ".." in t.split("/"):
             return "red", "'..' içeren yol yasak", komut

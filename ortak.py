@@ -66,6 +66,7 @@ def ssh_dogrula(ajan_id, ssh):
                 or not os.path.isabs(os.path.expanduser(d)) or (bosluksuz and any(c.isspace() for c in d)):
             raise YapilandirmaHatasi(f"ajan {ajan_id}: ssh.{alan} geçersiz (mutlak dosya yolu olmalı)")
     _ssh_liste(ajan_id, ssh, "izinli_komutlar")
+    _ssh_liste(ajan_id, ssh, "birebir_komutlar")
     _ssh_liste(ajan_id, ssh, "izinli_dizinler", mutlak=True)
     _ssh_liste(ajan_id, ssh, "onay_gerekli")
 

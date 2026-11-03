@@ -181,8 +181,8 @@ class GorevciDarListeTesti(Temel):
         ornek = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "ajanlar.example.json"),
                                encoding="utf-8"))["_ssh_salt_okunur_ornek"]["ssh"]
         ortak.ssh_dogrula("x", ornek)
-        self.assertEqual(ornek["izinli_komutlar"], self.LISTE)
-        self.assertEqual(ornek["onay_gerekli"], self.ONAY)
+        self.assertEqual(ornek["birebir_komutlar"], BirebirTesti.LISTE)
+        self.assertNotIn("izinli_komutlar", ornek)
 
     def test_reddedilir_ya_da_onaya_duser(self):
         for k in ("cat /etc/shadow", "cat /etc/os-release /etc/shadow", "cat ../etc/passwd",
@@ -204,6 +204,83 @@ class GorevciDarListeTesti(Temel):
         kod, cagrilar, _, _ = self.calistir(["cat", "/etc/os-release"])
         self.assertEqual(kod, 0)
         self.assertEqual(cagrilar[-1][-3:], ["ofis@sunucu.example", "--", "cat /etc/os-release"])
+
+
+class BirebirTesti(Temel):
+    """birebir_komutlar modu: token listesi tam eşit değilse kesin red; onay yolu yok."""
+    LISTE = ["lscpu", "nproc", "free -h", "lsblk", "df -h", "uname -a", "uptime", "cat /etc/os-release",
+             "lspci", "ip -brief addr"]
+    RED = ["df -h /", "free -h -x", "ls", "cat /etc/passwd", "cat /etc/os-release /etc/shadow", "uname",
+           "lscpu -e", "df", "uptime; id", "uptime && id", "uptime | cat", "uptime $(id)", "uptime `id`",
+           "uptime > /tmp/x", "uptime >> x", "df -h\nid", "cat /etc/os-release/../shadow", "",
+           "rm -rf /", "reboot"]
+
+    def setUp(self):
+        super().setUp()
+        self.ssh["birebir_komutlar"] = self.LISTE
+
+    def test_izinli_komutlar_kanonik_argv(self):
+        for k in self.LISTE:
+            kod, cagrilar, _, olay = self.calistir([k])
+            self.assertEqual(kod, 0, k)
+            argv = cagrilar[-1]
+            self.assertEqual(argv[:3], ["ssh", "-i", self.anahtar], k)
+            self.assertEqual(argv[-2:], ["--", k], k)
+            self.assertIn("StrictHostKeyChecking=accept-new", argv)
+            birlesik = " ".join(argv)
+            for yasak in ("StrictHostKeyChecking=no", "StrictHostKeyChecking=off", "StrictHostKeyChecking=ask",
+                          "/dev/null"):
+                self.assertNotIn(yasak, birlesik)
+            olay.assert_not_called()
+
+    def test_fazla_bosluk_kanonik_metne_cevrilir(self):
+        kod, cagrilar, _, _ = self.calistir(["free", "  ", "-h"])
+        self.assertEqual(kod, 0)
+        self.assertEqual(cagrilar[-1][-1], "free -h")
+
+    def test_red_listesi(self):
+        for k in self.RED:
+            args = [k] if "\n" in k or not k else k.split(" ")
+            kod, cagrilar, _, olay = self.calistir(args)
+            self.assertEqual(kod, ssh_gecit.CIKIS_RED, k)
+            self.assertEqual(cagrilar, [], k)
+            olay.assert_not_called()
+            self.assertEqual(ssh_gecit.komut_karar(self.ssh, args)[0], "red", k)
+
+    def test_ssh_blogu_yoksa_red(self):
+        kod, cagrilar, _, _ = self.calistir(["uptime"], ajan="b")
+        self.assertEqual(kod, ssh_gecit.CIKIS_RED)
+        self.assertEqual(cagrilar, [])
+
+    def test_anahtar_yoksa_ya_da_izin_gevsekse_ayar_hatasi(self):
+        os.chmod(self.anahtar, 0o644)
+        kod, cagrilar, _, _ = self.calistir(["uptime"])
+        self.assertEqual(kod, ssh_gecit.CIKIS_AYAR)
+        self.assertEqual(cagrilar, [])
+        os.remove(self.anahtar)
+        kod, cagrilar, _, _ = self.calistir(["uptime"])
+        self.assertEqual(kod, ssh_gecit.CIKIS_AYAR)
+        self.assertEqual(cagrilar, [])
+
+    def test_anahtar_acilmaz_yalniz_stat_ve_cikti_maskeli(self):
+        gercek = builtins.open
+        acilanlar = []
+
+        def izle(yol, *a, **k):
+            acilanlar.append(os.fspath(yol))
+            return gercek(yol, *a, **k)
+
+        with mock.patch.object(builtins, "open", side_effect=izle), \
+                mock.patch.object(os, "stat", wraps=os.stat) as st:
+            _, _, satirlar, _ = self.calistir(["uptime"], cikti=f"yol {self.anahtar}".encode())
+        self.assertNotIn(self.anahtar, acilanlar)
+        self.assertIn(self.anahtar, [os.fspath(c.args[0]) for c in st.call_args_list])
+        self.assertNotIn(self.anahtar, "\n".join(satirlar))
+        self.assertIn("[anahtar-yolu]", "\n".join(satirlar))
+
+    def test_bos_liste_her_seyi_reddeder(self):
+        self.ssh["birebir_komutlar"] = []
+        self.assertEqual(ssh_gecit.komut_karar(self.ssh, ["uptime"])[0], "red")
 
 
 class MaskelemeTesti(Temel):
