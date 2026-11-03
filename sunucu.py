@@ -23,7 +23,7 @@ import token_sayac  # noqa: E402
 
 HOST = "127.0.0.1"
 ILK_PORT = int(os.environ.get("OFIS_PORT", "8796"))
-TMUX_OTURUM = "ofis"
+TMUX_OTURUM = os.environ.get("OFIS_TMUX", "ofis")  # preview instance uses a separate session
 ON_YUZ = os.path.join(ortak.KOK, "on-yuz")
 IZINLI_ORIGIN = re.compile(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$")
 IZINLI_HOST = re.compile(r"^(localhost|127\.0\.0\.1)(:\d+)?$")
