@@ -29,7 +29,8 @@ IZINLI_ORIGIN = re.compile(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$")
 IZINLI_HOST = re.compile(r"^(localhost|127\.0\.0\.1)(:\d+)?$")
 MAKS_GOVDE = 16_000
 MAKS_ATAMA = 5
-MAKS_GOVDE_EKLI = 150_000   # /api/gorev: ekli dosyalar için
+MAKS_GOVDE_DIZIN = 1_300_000   # /api/dizin/yaz: 400 KB metin, JSON kaçışlarıyla şişebilir
+MAKS_GOVDE_EKLI = 150_000  # /api/gorev: ekli dosyalar için
 MAKS_EK_SAYISI = 3
 MAKS_EK_KARAKTER = 40_000   # dosya başına
 MAKS_SON_IS = 200_000
@@ -482,6 +483,23 @@ def dizin_oku_yaniti(goreli):
             "metin": ham[:DIZIN_MAKS_OKU].decode("utf-8", errors="replace")}
 
 
+def dizin_yaz(veri):
+    """Overwrite an existing .md under BEYIN (no create, no rename)."""
+    metin = veri.get("metin")
+    if not isinstance(metin, str):
+        raise IstekHatasi(400, "metin gerekli")
+    kok, tam = dizin_coz(veri.get("yol"))
+    if not tam.lower().endswith(".md") or not os.path.isfile(tam):
+        raise IstekHatasi(404, "dosya yok")
+    if len(metin.encode("utf-8")) > DIZIN_MAKS_OKU:
+        raise IstekHatasi(413, f"dosya en fazla {DIZIN_MAKS_OKU // 1000} KB olabilir")
+    if os.path.getsize(tam) > DIZIN_MAKS_OKU:
+        raise IstekHatasi(413, "dosya büyük; web'den düzenlenemez")
+    with GELISTIRME_KILIDI:
+        atomik_yaz(tam, metin)
+    return {"ok": True, "boyut": len(metin.encode("utf-8"))}
+
+
 def gelistirme_projeleri():
     try:
         return sorted(f[:-3] for f in os.listdir(os.path.join(BEYIN, "sistem", "gelistirme"))
@@ -729,7 +747,10 @@ class Isleyici(SimpleHTTPRequestHandler):
             return
         yol = urlparse(self.path).path
         try:
-            veri = self._govde(MAKS_GOVDE_EKLI if yol == "/api/gorev" else MAKS_GOVDE)
+            veri = self._govde(MAKS_GOVDE_EKLI if yol == "/api/gorev" else
+                               MAKS_GOVDE_DIZIN if yol == "/api/dizin/yaz" else MAKS_GOVDE)
+            if yol == "/api/dizin/yaz":
+                return self._json(200, dizin_yaz(veri))
             if yol == "/api/gorev":
                 ajan = veri.get("ajan")
                 if not isinstance(ajan, str) or not ortak.AJAN_ID_DESENI.match(ajan):

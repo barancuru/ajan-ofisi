@@ -292,7 +292,9 @@ td.sayi,th.sayi{text-align:right}
 .md hr{border:0;border-top:1px solid rgba(59,52,44,.15);margin:14px 0}
 .md .tablo-kap{overflow-x:auto;margin:10px 0}
 .md table{border-collapse:collapse;font-size:13px}.md th,.md td{border:1px solid rgba(59,52,44,.15);padding:4px 8px;text-align:left}
-@media (max-width:768px){.dizin-liste button{min-height:44px}.dizin-yol button{min-height:40px}.md{font-size:15px}}
+.dizin-duzenle{display:block;width:100%;max-width:820px;min-height:55vh;font:13px/1.5 ui-monospace,Menlo,Consolas,monospace;padding:10px;border-radius:10px;border:1px solid rgba(59,52,44,.18);background:#fffdf9;color:var(--murekkep);resize:vertical;box-sizing:border-box}
+.dizin-dugmeler{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0}
+@media (max-width:768px){.dizin-liste button{min-height:44px}.dizin-yol button{min-height:40px}.md{font-size:15px}.dizin-duzenle{font-size:16px}.dizin-dugmeler button{min-height:44px;padding:10px 14px}}
 /* ---------- phone layout (≤768px): panel ↔ office scene toggle ---------- */
 .mobil-gecis{display:none}
 .dugme.cikis{text-decoration:none;color:inherit}
@@ -2152,7 +2154,7 @@ function maliyetSayfasi() {
   return [el('h2', null, 'Maliyet'), el('p', 'alt', sayac.maliyet_notu || 'Ajanlar yalnız iş gelince çalışır; boştayken model çağrısı yok.'), ozet, tablo];
 }
 /* ---------- dizin sekmesi: ~/beyin altında gezin, .md dosyalarını oku (salt okuma) ---------- */
-let dizinYol = '', dizinDosya = null;
+let dizinYol = '', dizinDosya = null, dizinDuzenle = false;
 function mdSatirici(kap, s) {
   // inline: `kod`, **kalın**, *italik*, [metin](http/https bağlantı); everything via textContent
   const re = /`([^`]+)`|\*\*([^*]+)\*\*|\*([^*\s][^*]*)\*|\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
@@ -2212,7 +2214,7 @@ function dizinMdCiz(metin) {
 async function dizinSayfasi() {
   if (DEMO) return [el('h2', null, 'Dizin'), el('p', 'alt', 'Demo modunda dizin gezilemez.')];
   const bas = [el('h2', null, 'Dizin')];
-  const git = (yol, dosya) => { dizinYol = yol; dizinDosya = dosya || null; sekmeAc('dizin'); };
+  const git = (yol, dosya) => { dizinYol = yol; dizinDosya = dosya || null; dizinDuzenle = false; sekmeAc('dizin'); };
   const yolSatiri = (yol) => {
     const s = el('div', 'dizin-yol'); const k = el('button', null, 'beyin'); k.onclick = () => git(''); s.append(k);
     let birikim = '';
@@ -2224,8 +2226,23 @@ async function dizinSayfasi() {
     let d;
     try { d = await getJSON('/api/dizin/oku?yol=' + encodeURIComponent(dizinDosya)); }
     catch { return [...bas, yolSatiri(ust), el('p', 'alt', 'Dosya okunamadı.')]; }
-    const cikti = [...bas, yolSatiri(ust), el('h4', null, d.ad), dizinMdCiz(d.metin)];
-    if (d.kirpildi) cikti.push(el('p', 'alt', 'Dosya büyük olduğu için baştan kırpıldı.'));
+    if (dizinDuzenle && !d.kirpildi) {
+      const t = el('textarea', 'dizin-duzenle'); t.value = d.metin; t.spellcheck = false;
+      const durum = el('span', 'alt'), kaydet = el('button', 'koyu-dugme', 'Kaydet'), vazgec = el('button', 'mini', 'Vazgeç');
+      kaydet.onclick = async () => {
+        kaydet.disabled = true; durum.textContent = 'Kaydediliyor…';
+        let r; try { r = await postJSON('/api/dizin/yaz', { yol: dizinDosya, metin: t.value }); } catch { r = { durum: 0, veri: {} }; }
+        if (r.durum === 200) { dizinDuzenle = false; sekmeAc('dizin'); return; }
+        kaydet.disabled = false; durum.textContent = 'Kaydedilemedi: ' + (r.veri.hata || r.durum);
+      };
+      vazgec.onclick = () => { if (t.value === d.metin || confirm('Değişiklikler atılsın mı?')) { dizinDuzenle = false; sekmeAc('dizin'); } };
+      const dugmeler = el('div', 'dizin-dugmeler'); dugmeler.append(kaydet, vazgec, durum);
+      return [...bas, yolSatiri(ust), el('h4', null, d.ad), t, dugmeler];
+    }
+    const cikti = [...bas, yolSatiri(ust), el('h4', null, d.ad)];
+    if (d.kirpildi) cikti.push(el('p', 'alt', 'Dosya büyük olduğu için baştan kırpıldı; web\'den düzenlenemez.'));
+    else { const duz = el('button', 'mini', '✏️ Düzenle'); duz.onclick = () => { dizinDuzenle = true; sekmeAc('dizin'); }; cikti.push(duz); }
+    cikti.push(dizinMdCiz(d.metin));
     return cikti;
   }
   let d;
@@ -2235,7 +2252,7 @@ async function dizinSayfasi() {
   d.klasorler.forEach(k => { const b = el('button', null, '📁 ' + k); b.onclick = () => git((d.yol ? d.yol + '/' : '') + k); liste.append(b); });
   d.dosyalar.forEach(f => { const b = el('button', null, '📄 ' + f.ad); b.append(el('small', null, Math.max(1, Math.round(f.boyut / 1024)) + ' KB')); b.onclick = () => git(d.yol, (d.yol ? d.yol + '/' : '') + f.ad); liste.append(b); });
   if (!d.klasorler.length && !d.dosyalar.length) liste.append(el('p', 'alt', 'Burada klasör ya da .md dosyası yok.'));
-  return [...bas, el('p', 'alt', 'Beynin içinde gez, .md dosyalarını oku. Salt okuma.'), yolSatiri(d.yol), liste];
+  return [...bas, el('p', 'alt', 'Beynin içinde gez, .md dosyalarını oku, istersen düzenle.'), yolSatiri(d.yol), liste];
 }
 document.querySelectorAll('#sekmeler button').forEach(b => { b.onclick = () => { SES.tik(); sekmeAc(b.dataset.sekme); }; b.onmouseenter = () => SES.uzerinde(); });
 
