@@ -83,6 +83,8 @@ h3.kucuk{font-family:"Space Grotesk",sans-serif;font-size:11px;font-weight:600;l
 .kart .onay{background:var(--murekkep);color:#fff7ee;font-size:12px;font-weight:600;padding:6px 12px;border-radius:8px}
 .kart .sonra{font-size:12px;font-weight:500;padding:6px 10px;border-radius:8px;border:1px solid rgba(59,52,44,.14)}
 .kart.sonra-k{opacity:.6}
+.kart.tikla{cursor:pointer}
+.kart.tikla:hover{background:rgba(255,255,255,.9)}
 .kart.onaylandi{opacity:.7}
 .kart.onaylandi .dugmeler{display:none}
 .bos{font-size:12.5px;color:var(--soluk);padding:6px 2px}
@@ -1355,6 +1357,12 @@ function kartlariCiz() {
     sonraB.onclick = () => { SES.tik(); k.sonra = true; kartlariCiz(); };
     dug.append(onayB, sonraB);
     kart.append(ust, el('h4', null, 'Gözden geçir: ' + (a?.ad || k.ajan) + ' çıktısı'), el('p', null, k.ozet || '(özet yok)'), dug);
+    const popBaslik = (a?.ad || k.ajan) + ' · çıktı' + (k.zaman ? ' · ' + saatYazi(new Date(k.zaman)) : '');
+    const popUrl = !DEMO && k.ajan !== 'ceo' ? '/api/son-is?ajan=' + encodeURIComponent(k.ajan) + '&kosu=' + encodeURIComponent(k.kosu_id) : '';
+    const popAc = () => akisPopAc(popBaslik, k.ozet || '(özet yok)', popUrl);
+    kart.classList.add('tikla'); kart.tabIndex = 0; kart.setAttribute('role', 'button'); kart.title = 'Tam çıktıyı aç';
+    kart.addEventListener('click', e => { if (!e.target.closest('button')) popAc(); });
+    kart.addEventListener('keydown', e => { if (e.target === kart && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); popAc(); } });
     return kart;
   }));
   ustGuncelle();
