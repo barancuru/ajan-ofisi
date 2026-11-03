@@ -568,17 +568,24 @@ def _ceo_calistir(metin, kuru=False, ekler=None):
 
 # ---------- okuma uçları ----------
 
-def olaylari_oku(eski=False):
-    """Olayları eskiden yeniye verir. eski=True ise döndürülmüş olaylar.jsonl.1 de başa eklenir."""
+def olaylari_oku(eski=False, turler=None):
+    """Olayları eskiden yeniye verir. eski=True ise döndürülmüş olaylar.jsonl.1 de başa eklenir.
+    turler verilirse yalnız o türlerin olayları verilir; ham satırda `"tur": "<tür>"` alt dizgisi yoksa JSON çözülmez (ön eleme)."""
     yollar = [ortak.OLAYLAR + ".1", ortak.OLAYLAR] if eski else [ortak.OLAYLAR]
+    igneler = None if turler is None else tuple(f'"tur": {json.dumps(t, ensure_ascii=False)}' for t in turler)
     for yol in yollar:
         try:
             with open(yol, encoding="utf-8") as f:
                 for satir in f:
+                    if igneler is not None and not any(i in satir for i in igneler):
+                        continue
                     try:
-                        yield json.loads(satir)
+                        o = json.loads(satir)
                     except json.JSONDecodeError:
                         continue
+                    if igneler is not None and not (isinstance(o, dict) and o.get("tur") in turler):
+                        continue
+                    yield o
         except FileNotFoundError:
             continue
 
@@ -604,7 +611,7 @@ def gecmis_yaniti(ajan_id=None, sayfa=0):
     """kosu_bitti/ceo_bitti olaylarından koşu geçmişi (yeniden eskiye). Eski kayıtlarda eksik alanlar None döner."""
     if ajan_id and not ortak.AJAN_ID_DESENI.match(ajan_id):
         raise IstekHatasi(400, "geçersiz ajan id")
-    biten = [o for o in olaylari_oku(eski=True) if o.get("tur") in ("kosu_bitti", "ceo_bitti")
+    biten = [o for o in olaylari_oku(eski=True, turler=("kosu_bitti", "ceo_bitti")) if o.get("tur") in ("kosu_bitti", "ceo_bitti")
              and (not ajan_id or o.get("ajan") == ajan_id)]
     biten.reverse()
     sayfa = max(0, sayfa)
@@ -619,7 +626,7 @@ def gecmis_yaniti(ajan_id=None, sayfa=0):
 
 def kurul_gecmis_yaniti(sayfa=0):
     """Kurula danışılmış CEO isteklerinin geçmişi (yeniden eskiye). Görüşlerin tamamı /api/ceo-kayit'te."""
-    biten = [o for o in olaylari_oku(eski=True) if o.get("tur") == "ceo_bitti" and isinstance(o.get("kurul"), dict)]
+    biten = [o for o in olaylari_oku(eski=True, turler=("ceo_bitti",)) if o.get("tur") == "ceo_bitti" and isinstance(o.get("kurul"), dict)]
     biten.reverse()
     sayfa = max(0, sayfa)
     dilim = biten[sayfa * GECMIS_SAYFA:(sayfa + 1) * GECMIS_SAYFA]
@@ -642,7 +649,7 @@ def ceo_kayit_yaniti(ceo_id):
                 return {"kayit": json.load(f), "eksik": False}
         except (OSError, json.JSONDecodeError):
             pass
-    for o in olaylari_oku(eski=True):
+    for o in olaylari_oku(eski=True, turler=("ceo_bitti",)):
         if o.get("tur") == "ceo_bitti" and o.get("kosu_id") == ceo_id:
             return {"kayit": {"ceo_id": ceo_id, "zaman": o.get("zaman"), "istek": o.get("istek"), "ekler": None,
                               "kuru": o.get("kuru"), "durum": o.get("durum"), "hata": o.get("hata"),
