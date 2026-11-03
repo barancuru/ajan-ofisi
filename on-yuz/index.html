@@ -313,6 +313,9 @@ td.sayi,th.sayi{text-align:right}
 .dizin-liste{display:flex;flex-direction:column;gap:4px}
 .dizin-liste button{text-align:left;background:rgba(255,255,255,.72);border-radius:10px;padding:9px 12px;font-size:13.5px;min-height:40px;overflow-wrap:anywhere}
 .dizin-liste small{color:var(--soluk);margin-left:6px;font-size:11.5px}
+.dizin-ara{margin:8px 0}
+.dizin-ara input{width:100%;max-width:820px;box-sizing:border-box;padding:9px 12px;min-height:40px;font-size:14px;border-radius:10px;border:1px solid rgba(59,52,44,.18);background:#fffdf9;color:var(--murekkep)}
+.dizin-liste:empty{display:none}
 .md{max-width:820px;font-size:14px;line-height:1.6;overflow-wrap:anywhere}
 .md h1,.md h2,.md h3,.md h4{font-family:"Space Grotesk",sans-serif;margin:18px 0 6px;line-height:1.3;font-size:20px}
 .md h2{font-size:17px}.md h3,.md h4{font-size:15px}
@@ -330,7 +333,7 @@ td.sayi,th.sayi{text-align:right}
 .dizin-alan{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
 .dizin-alan .dizin-duzenle{max-width:none}
 .dizin-onizleme{min-width:0;overflow:auto;max-height:70vh;padding:4px 10px;border:1px dashed rgba(59,52,44,.18);border-radius:10px}
-@media (max-width:768px){.dizin-alan{grid-template-columns:1fr}.dizin-arac button{min-width:44px;min-height:44px}.dizin-liste button{min-height:44px}.dizin-yol button{min-height:40px}.md{font-size:15px}.dizin-duzenle{font-size:16px}.dizin-dugmeler button{min-height:44px;padding:10px 14px}}
+@media (max-width:768px){.dizin-alan{grid-template-columns:1fr}.dizin-arac button{min-width:44px;min-height:44px}.dizin-liste button{min-height:44px}.dizin-ara input{min-height:44px;font-size:16px}.dizin-yol button{min-height:40px}.md{font-size:15px}.dizin-duzenle{font-size:16px}.dizin-dugmeler button{min-height:44px;padding:10px 14px}}
 /* ---------- phone layout (≤768px): panel ↔ office scene toggle ---------- */
 .mobil-gecis{display:none}
 .dugme.cikis{text-decoration:none;color:inherit}
@@ -2504,7 +2507,31 @@ async function dizinSayfasi() {
   d.klasorler.forEach(k => { const b = el('button', null, '📁 ' + k); b.onclick = () => git((d.yol ? d.yol + '/' : '') + k); liste.append(b); });
   d.dosyalar.forEach(f => { const b = el('button', null, '📄 ' + f.ad); b.append(el('small', null, Math.max(1, Math.round(f.boyut / 1024)) + ' KB')); b.onclick = () => git(d.yol, (d.yol ? d.yol + '/' : '') + f.ad); liste.append(b); });
   if (!d.klasorler.length && !d.dosyalar.length) liste.append(el('p', 'alt', 'Burada klasör ya da .md dosyası yok.'));
-  return [...bas, el('p', 'alt', 'Beynin içinde gez, .md dosyalarını oku, istersen düzenle.'), yolSatiri(d.yol), liste];
+  // arama: dosya/klasör adı + .md içeriği (bulunduğun klasörden başlayarak)
+  const aramaKutu = el('div', 'dizin-ara'), girdi = el('input'), sonucKutu = el('div', 'dizin-liste');
+  girdi.type = 'search'; girdi.placeholder = (d.yol ? d.yol : 'beyin') + ' içinde ara (ad ve içerik)'; girdi.setAttribute('aria-label', 'Dizinde ara');
+  let araZaman = null, araNo = 0;
+  const ara = async () => {
+    const q = girdi.value.trim(), no = ++araNo;
+    sonucKutu.replaceChildren();
+    if (q.length < 2) return;
+    sonucKutu.append(el('p', 'alt', 'Aranıyor…'));
+    let r; try { r = await getJSON('/api/dizin/ara?q=' + encodeURIComponent(q) + '&yol=' + encodeURIComponent(d.yol)); } catch { r = null; }
+    if (no !== araNo) return;
+    sonucKutu.replaceChildren();
+    if (!r) { sonucKutu.append(el('p', 'alt', 'Arama yapılamadı.')); return; }
+    if (!r.sonuclar.length) sonucKutu.append(el('p', 'alt', 'Eşleşme yok.'));
+    r.sonuclar.forEach(s => {
+      const b = el('button', null, '📄 ' + s.yol);
+      if (s.parca) b.append(el('small', null, '…' + s.parca + '…'));
+      b.onclick = () => git(s.yol.includes('/') ? s.yol.slice(0, s.yol.lastIndexOf('/')) : '', s.yol);
+      sonucKutu.append(b);
+    });
+    if (r.kesildi) sonucKutu.append(el('p', 'alt', 'Çok sonuç var, ilk eşleşmeler gösterildi; aramayı daralt.'));
+  };
+  girdi.addEventListener('input', () => { clearTimeout(araZaman); araZaman = setTimeout(ara, 350); });
+  aramaKutu.append(girdi);
+  return [...bas, el('p', 'alt', 'Beynin içinde gez, .md dosyalarını oku, istersen düzenle.'), aramaKutu, sonucKutu, yolSatiri(d.yol), liste];
 }
 document.querySelectorAll('#sekmeler button').forEach(b => { b.onclick = () => { SES.tik(); sekmeAc(b.dataset.sekme); }; b.onmouseenter = () => SES.uzerinde(); });
 

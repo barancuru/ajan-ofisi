@@ -167,6 +167,7 @@ toplamda en büyük sayı odur. Maliyet sekmesi yalnız `claude -p`'nin bildirdi
 | `GET /api/sayac` | bugünkü koşu sayısı, aktif ajan, koşu başına süre/usage/maliyet |
 | `GET /api/hafiza` | `hafiza/<ajan>.md` başına madde sayısı ve son 3 madde |
 | `GET /api/dizin?yol=` | Dizin sekmesi: `~/beyin` (`OFIS_BEYIN`) altında klasörler ve `.md` dosyaları; salt okuma, `..` ve noktayla başlayan adlar reddedilir |
+| `GET /api/dizin/ara?q=&yol=` | `yol` klasöründen başlayarak `.md` dosya adlarında ve içeriklerinde arar (büyük/küçük harf duyarsız, `q` 2-100 karakter, en fazla 50 sonuç; `{sonuclar: [{yol, ad, ad_eslesti, parca}], kesildi}`); salt okuma |
 | `GET /api/dizin/oku?yol=` | tek `.md` dosyasının metni (en fazla 400 KB) |
 | `POST /api/dizin/yaz` | `{yol, metin}`: var olan bir `.md` dosyasının üzerine yazar (yeni dosya açmaz, en fazla 400 KB) |
 

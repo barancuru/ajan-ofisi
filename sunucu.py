@@ -652,6 +652,57 @@ def dizin_yaniti(goreli):
     return {"yol": "" if yol == "." else yol.replace(os.sep, "/"), "klasorler": klasorler, "dosyalar": dosyalar}
 
 
+DIZIN_ARA_MAKS_SONUC = 50
+DIZIN_ARA_MAKS_GEZ = 5000
+
+
+def dizin_ara_yaniti(sorgu, goreli):
+    """Search file/folder names and .md contents under BEYIN (or a sub-folder). Read-only."""
+    if not isinstance(sorgu, str):
+        raise IstekHatasi(400, "arama metni gerekli")
+    sorgu = sorgu.strip()
+    if len(sorgu) < 2 or len(sorgu) > 100:
+        raise IstekHatasi(400, "arama metni 2-100 karakter olmalı")
+    kok, bas = dizin_coz(goreli)
+    if not os.path.isdir(bas):
+        raise IstekHatasi(404, "dizin yok")
+    kucuk = sorgu.casefold()
+    sonuclar, gezilen, kesildi = [], 0, False
+    for ust, altlar, adlar in os.walk(bas):
+        altlar[:] = sorted((a for a in altlar if not a.startswith(".") and a not in DIZIN_ATLA), key=str.lower)
+        gercek_ust = os.path.realpath(ust)
+        if gercek_ust != kok and not gercek_ust.startswith(kok + os.sep):
+            altlar[:] = []
+            continue
+        for ad in sorted(adlar, key=str.lower):
+            if ad.startswith(".") or not ad.lower().endswith(".md"):
+                continue
+            tam = os.path.realpath(os.path.join(ust, ad))
+            if not tam.startswith(kok + os.sep) or not os.path.isfile(tam):
+                continue
+            gezilen += 1
+            if gezilen > DIZIN_ARA_MAKS_GEZ or len(sonuclar) >= DIZIN_ARA_MAKS_SONUC:
+                kesildi = True
+                break
+            goreli_yol = os.path.relpath(os.path.join(ust, ad), kok).replace(os.sep, "/")
+            ad_eslesti = kucuk in ad.casefold() or kucuk in goreli_yol.casefold()
+            parca = None
+            try:
+                with open(tam, "rb") as f:
+                    metin = f.read(DIZIN_MAKS_OKU).decode("utf-8", errors="replace")
+                i = metin.casefold().find(kucuk)
+                if i >= 0:
+                    a, b = max(0, i - 50), min(len(metin), i + len(sorgu) + 90)
+                    parca = " ".join(metin[a:b].split())
+            except OSError:
+                pass
+            if ad_eslesti or parca:
+                sonuclar.append({"yol": goreli_yol, "ad": ad, "ad_eslesti": ad_eslesti, "parca": parca})
+        if kesildi:
+            break
+    return {"sorgu": sorgu, "sonuclar": sonuclar, "kesildi": kesildi}
+
+
 def dizin_oku_yaniti(goreli):
     kok, tam = dizin_coz(goreli)
     if not tam.lower().endswith(".md") or not os.path.isfile(tam):
@@ -1003,9 +1054,12 @@ class Isleyici(SimpleHTTPRequestHandler):
             return self._json(200, hafiza_yaniti())
         if yol.path == "/api/gelistirme":
             return self._json(200, gelistirme_yaniti())
-        if yol.path in ("/api/dizin", "/api/dizin/oku"):
+        if yol.path in ("/api/dizin", "/api/dizin/oku", "/api/dizin/ara"):
             try:
-                y = (parse_qs(yol.query).get("yol") or [""])[0]
+                qs = parse_qs(yol.query)
+                y = (qs.get("yol") or [""])[0]
+                if yol.path == "/api/dizin/ara":
+                    return self._json(200, dizin_ara_yaniti((qs.get("q") or [""])[0], y))
                 return self._json(200, dizin_yaniti(y) if yol.path == "/api/dizin" else dizin_oku_yaniti(y))
             except IstekHatasi as e:
                 return self._json(e.kod, {"hata": str(e)})
