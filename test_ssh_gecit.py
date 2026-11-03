@@ -157,6 +157,55 @@ class PolitikaTesti(Temel):
                 ortak.ssh_dogrula("x", kotu)
 
 
+class GorevciDarListeTesti(Temel):
+    """Görevci'nin salt-okunur donanım allowlist'i (ajanlar.example.json'daki blokla aynı)."""
+    LISTE = ["lscpu", "nproc", "free", "lsblk", "df", "uname", "uptime", "cat /etc/os-release", "lspci",
+             "ip -brief addr"]
+    ONAY = ["rm", "reboot", "shutdown", "systemctl stop|restart|disable", "deploy", "git push",
+            "ip -brief addr add|del|delete|flush|change|replace"]
+
+    def setUp(self):
+        super().setUp()
+        self.ssh.update({"izinli_komutlar": self.LISTE, "izinli_dizinler": ["/etc/os-release"],
+                         "onay_gerekli": self.ONAY})
+
+    def karar(self, komut):
+        return ssh_gecit.komut_karar(self.ssh, komut.split(" "))[0]
+
+    def test_listedeki_her_komut_izinli(self):
+        for k in self.LISTE:
+            self.assertEqual(self.karar(k), "izin", k)
+
+    def test_ornek_dosya_blogu_gecerli_ve_ayni(self):
+        import json
+        ornek = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "ajanlar.example.json"),
+                               encoding="utf-8"))["_ssh_salt_okunur_ornek"]["ssh"]
+        ortak.ssh_dogrula("x", ornek)
+        self.assertEqual(ornek["izinli_komutlar"], self.LISTE)
+        self.assertEqual(ornek["onay_gerekli"], self.ONAY)
+
+    def test_reddedilir_ya_da_onaya_duser(self):
+        for k in ("cat /etc/shadow", "cat /etc/os-release /etc/shadow", "cat ../etc/passwd",
+                  "cat /etc/os-release/../shadow", "cat /etc/passwd", "cat /root/.ssh/id_ed25519",
+                  "cat ~/.ssh/id_ed25519", "cat .env", "cat /etc", "cat",
+                  "lsblk -o NAME; rm x", "lsblk -o NAME && reboot", "lsblk --output NAME",
+                  "ip addr add 10.0.0.1/24 dev eth0", "ip link set eth0 down",
+                  "ip -brief addr add 10.0.0.1/24 dev eth0", "ip -brief addr flush dev eth0",
+                  "free > /tmp/x", "df $(id)", "uname -a `id`", "ls /etc", "whoami", "rm -rf /"):
+            self.assertNotEqual(self.karar(k), "izin", k)
+
+    def test_liste_disi_onay_doner_ve_calismaz(self):
+        for args in (["cat", "/etc/shadow"], ["ip", "link", "set", "eth0", "down"], ["whoami"]):
+            kod, cagrilar, _, _ = self.calistir(args)
+            self.assertNotEqual(kod, 0)
+            self.assertEqual(cagrilar, [])
+
+    def test_izinli_komut_mock_ssh_ile_calisir(self):
+        kod, cagrilar, _, _ = self.calistir(["cat", "/etc/os-release"])
+        self.assertEqual(kod, 0)
+        self.assertEqual(cagrilar[-1][-3:], ["ofis@sunucu.example", "--", "cat /etc/os-release"])
+
+
 class MaskelemeTesti(Temel):
     def test_cikti_cerceve_ve_maske(self):
         _, _, satirlar, _ = self.calistir(["uptime"], cikti=f"yol {self.anahtar}\n{SAHTE_ANAHTAR_ICERIK}".encode())
