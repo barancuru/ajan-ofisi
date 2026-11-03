@@ -1,4 +1,5 @@
 """Ajan Ofisi ortak yardımcıları: yollar, ajan tablosu, olay günlüğü, durum dosyaları."""
+import contextlib
 import fcntl
 import json
 import os
@@ -71,6 +72,20 @@ def olay_yaz(olay):
             f.flush()
         finally:
             fcntl.flock(f, fcntl.LOCK_UN)
+
+
+@contextlib.contextmanager
+def hafiza_kilidi(ajan_id):
+    """hafiza/<ajan>.lock üzerinde süreçler arası özel kilit (oku-değiştir-yaz ve ekleme için)."""
+    if not AJAN_ID_DESENI.match(str(ajan_id)):
+        raise ValueError(f"geçersiz ajan id: {ajan_id!r}")
+    os.makedirs(HAFIZA_DIZINI, exist_ok=True)
+    fd = os.open(os.path.join(HAFIZA_DIZINI, f"{ajan_id}.lock"), os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)  # kapatmak kilidi de bırakır
 
 
 def durum_yolu(ajan_id):

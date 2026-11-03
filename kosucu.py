@@ -70,7 +70,7 @@ def hafizaya_ekle(ajan_id, metin):
     if not maddeler:
         return []
     yol = os.path.join(ortak.HAFIZA_DIZINI, f"{ajan_id}.md")
-    with open(yol, "a", encoding="utf-8") as f:
+    with ortak.hafiza_kilidi(ajan_id), open(yol, "a", encoding="utf-8") as f:
         for m in maddeler:
             f.write(f"\n- [{ortak.bugun()}] {m[:ortak.MAKS_HAFIZA_EKI]}")
     return maddeler

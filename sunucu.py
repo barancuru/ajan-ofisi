@@ -435,7 +435,7 @@ def hafiza_degistir(veri):
             raise IstekHatasi(413, f"madde en fazla {ortak.MAKS_HAFIZA_EKI} karakter")
     elif islem != "sil":
         raise IstekHatasi(400, "islem: ekle | duzenle | sil")
-    with HAFIZA_KILIDI:
+    with HAFIZA_KILIDI, ortak.hafiza_kilidi(ajan_id):
         satirlar = hafiza_satirlari(yol)
         maddeler = hafiza_maddeleri(satirlar)
         if islem == "ekle":

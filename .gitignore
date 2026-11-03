@@ -10,6 +10,7 @@ kosular/
 cikti/
 hafiza/*
 !hafiza/.gitkeep
+hafiza/*.lock
 port
 *.log
 
