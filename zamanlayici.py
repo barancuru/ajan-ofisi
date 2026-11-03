@@ -1,25 +1,37 @@
-"""Öngörülebilirlik: kullanıcının tekrar eden işleri (durum/tekrarlar.json) ve sunucu içi hafif zamanlayıcı.
+"""Öngörülebilirlik: kullanıcının tekrar eden işleri (durum/tekrarlar.json) ve iş başına systemd timer'ı.
 
-Yalnız stdlib. İş parçacığı yalnız saat okur; model çağırmaz. Vakti gelen iş, sunucunun `gorev_baslat`
-fonksiyonuyla (meşgul kontrolü + kosucu.py kilidi) koşar. Sunucu kapalıyken kaçan koşular telafi edilmez.
+Yalnız stdlib. Sunucu her değişiklikte `durum/systemd/` altına birim dosyalarını üretir; `~/.config`'e YAZMAZ.
+Kullanıcı bir kez `python3 zamanlayici.py --kur` çalıştırır: bir `.path` birimi `durum/systemd/.degisti`
+değişince `--esle` ile birimleri `~/.config/systemd/user/`'a eşler (içerik her seferinde doğrulanmış
+`tekrarlar.json`'dan yeniden üretilir; `durum/systemd/` dosyalarına güvenilmez). Timer `Persistent=true`:
+kapalıyken kaçan çalışma açılışta en çok 1 kez koşar. Vakti gelince servis `--tetikle <id>` çalıştırır;
+iş `gorev_baslat(havuz=True)` ile açılır (meşgulse alt ajan ya da kuyruk; çift koşu yok). Boşta model çağrılmaz.
+
+    python3 zamanlayici.py --kur          # bir kez: eşleme birimlerini kur + şimdi eşle
+    python3 zamanlayici.py --esle         # birimleri ~/.config/systemd/user/'a eşle
+    python3 zamanlayici.py --tetikle <id> # systemd servisi çağırır
 """
+import contextlib
+import fcntl
 import json
 import os
 import re
 import secrets
+import subprocess
 import sys
 import threading
-import time
 from datetime import datetime, timedelta
 
 import ortak
 
 MAKS_IS = 50
 MIN_ARALIK_DK = 15
-UYANMA_SN = 30
 UYARI = "Tekrar eden işler yayın, mail, ödeme yapamaz."
 TEKRAR_KILIDI = threading.Lock()
 IS_ID_DESENI = re.compile(r"^t[0-9a-f]{10}$")
+BIRIM_ON_EKI = "ajan-ofisi-tekrar-"
+BIRIM_DESENI = re.compile(r"^ajan-ofisi-tekrar-t[0-9a-f]{10}\.(timer|service)$")
+ESLE_BIRIMI = "ajan-ofisi-tekrar-esle"
 _SIR_SINIF = r"[A-Za-z0-9+_-]"
 SIR_DESENI = re.compile(
     r"(?i:\bsk-[A-Za-z0-9_-]{16,}|\bBearer\s|password\s*=|token\s*=)"
@@ -29,6 +41,23 @@ SIR_DESENI = re.compile(
 
 def tekrarlar_yolu():
     return os.path.join(ortak.DURUM_DIZINI, "tekrarlar.json")
+
+
+def birim_dizini():
+    return os.path.join(ortak.DURUM_DIZINI, "systemd")
+
+
+@contextlib.contextmanager
+def _kilit():
+    """tekrarlar.json oku-değiştir-yaz: iş parçacıkları ve süreçler (sunucu + systemd servisi) arası."""
+    with TEKRAR_KILIDI:
+        os.makedirs(ortak.DURUM_DIZINI, exist_ok=True)
+        fd = os.open(os.path.join(ortak.DURUM_DIZINI, "tekrarlar.lock"), os.O_RDWR | os.O_CREAT, 0o644)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            os.close(fd)
 
 
 # ---------- cron ----------
@@ -131,6 +160,26 @@ def en_kisa_aralik_dk(ifade):
     return en_kisa
 
 
+_HG_AD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+
+
+def _takvim_alani(degerler, alt, ust):
+    if set(degerler) == set(range(alt, ust + 1)):
+        return "*"
+    return ",".join(f"{v:02d}" for v in sorted(degerler))
+
+
+def oncalendar(ifade):
+    """Cron → systemd `OnCalendar=`. Değerler açık listeye çevrilir (`*/n` kaymaz). Gün-VEYA kuralı
+    (ay günü ve hafta günü ikisi de kısıtlı) systemd'de VE olduğundan çevrilemez: ValueError."""
+    dk, sa, ag, ay, hg, gk, hk = cron_coz(ifade)
+    if gk and hk:
+        raise ValueError("ay günü ve hafta günü birlikte kısıtlı cron systemd'ye çevrilemez; birini * yap")
+    gun = "" if not hk or hg == set(range(7)) else ",".join(_HG_AD[g] for g in sorted(hg)) + " "
+    return (f"{gun}*-{_takvim_alani(ay, 1, 12)}-{_takvim_alani(ag, 1, 31)} "
+            f"{_takvim_alani(sa, 0, 23)}:{_takvim_alani(dk, 0, 59)}:00")
+
+
 def cron_dogrula(ifade):
     if not isinstance(ifade, str) or not ifade.strip():
         raise ValueError("cron ifadesi gerekli")
@@ -139,6 +188,7 @@ def cron_dogrula(ifade):
         raise ValueError("cron ifadesi çok uzun")
     if en_kisa_aralik_dk(ifade) < MIN_ARALIK_DK:
         raise ValueError(f"cron en sık {MIN_ARALIK_DK} dakikada bir çalışabilir")
+    oncalendar(ifade)
     return ifade
 
 
@@ -252,11 +302,11 @@ def kaydet(isler):
 
 
 def degistir(veri, tablo):
-    """islem: ekle | sil | ac | kapat. Dönüş: iş id. Hata: ValueError (Türkçe)."""
+    """islem: ekle | sil | ac | kapat. Dönüş: iş id. Hata: ValueError (Türkçe). Sonra birimleri yeniden üretir."""
     islem = veri.get("islem")
     if islem not in ("ekle", "sil", "ac", "kapat"):
         raise ValueError("islem: ekle | sil | ac | kapat | onizle")
-    with TEKRAR_KILIDI:
+    with _kilit():
         isler = _yukle_ham()
         if islem == "ekle":
             if len(isler) >= MAKS_IS:
@@ -266,6 +316,7 @@ def degistir(veri, tablo):
                     "son_calisma": None, "son_sonuc": None}
             isler.append(yeni)
             kaydet(isler)
+            birimleri_uret(tablo)
             ortak.olay_yaz({"tur": "tekrar_eklendi", "ajan": yeni["ajan"], "is_id": yeni["id"]})
             return yeni["id"]
         is_id = veri.get("id")
@@ -279,61 +330,186 @@ def degistir(veri, tablo):
         else:
             k["aktif"] = islem == "ac"
         kaydet(isler)
+        birimleri_uret(tablo)
         ortak.olay_yaz({"tur": "tekrar_" + {"sil": "silindi", "ac": "acildi", "kapat": "kapatildi"}[islem],
                         "ajan": str(k.get("ajan"))[:40], "is_id": is_id})
         return is_id
 
 
-# ---------- zamanlayıcı ----------
+# ---------- systemd birimleri ----------
 
-def tik(baslatici, simdi=None, tablo_yukle=None):
-    """Bu dakika eşleşen aktif işleri bir kez başlatır. `baslatici(ajan, etiket, prompt, kaynak)`.
-    Ajan meşgulse (409 'çalışıyor') çift koşu açmaz, 'atlandi: mesgul' yazar. Başlatılan iş id'lerini döndürür."""
-    simdi = (simdi or datetime.now()).replace(second=0, microsecond=0)
-    damga = simdi.strftime("%Y-%m-%dT%H:%M")
-    if not os.path.exists(tekrarlar_yolu()):
-        return []  # hiç iş yok: başka hiçbir şey okunmaz
-    tablo = (tablo_yukle or (lambda: ortak.ajanlari_yukle()[1]))()
-    with TEKRAR_KILIDI:
-        gecerli = {k["id"] for k in yukle(tablo) if not k["hata"]}
-        isler = _yukle_ham()
-        vakti_gelen = [k for k in isler if k["id"] in gecerli and k.get("aktif") is not False
-                       and k.get("son_calisma") != damga and eslesir(k["cron"], simdi)]
-        if not vakti_gelen:
-            return []
-        for k in vakti_gelen:
-            k["son_calisma"] = damga  # önce damga: aynı dakikada ikinci tik ya da hata sonrası tekrar yok
-        kaydet(isler)
-    baslayan = []
-    for k in vakti_gelen:
+def _birim_yolu(metin):
+    return metin.replace("%", "%%")  # systemd belirteç kaçışı
+
+
+def birim_metinleri(is_id, takvim, kok=None, python=None):
+    """Bir iş için {ad.timer: metin, ad.service: metin}. İçinde yalnız iş id'si ve takvim var; prompt yok."""
+    if not IS_ID_DESENI.match(str(is_id)):
+        raise ValueError("geçersiz iş id")
+    if not re.fullmatch(r"[A-Za-z0-9*:,. -]{1,400}", takvim):
+        raise ValueError("geçersiz takvim")
+    kok, python = _birim_yolu(kok or ortak.KOK), _birim_yolu(python or sys.executable)
+    ad = BIRIM_ON_EKI + is_id
+    baslik = f"# Ajan Ofisi tekrar eden iş {is_id}. Üretilmiş dosya: zamanlayici.py --esle yeniden yazar.\n"
+    timer = (f"{baslik}[Unit]\nDescription=Ajan Ofisi tekrar eden iş {is_id}\n\n"
+             f"[Timer]\nOnCalendar={takvim}\nPersistent=true\nUnit={ad}.service\n\n"
+             "[Install]\nWantedBy=timers.target\n")
+    service = (f"{baslik}[Unit]\nDescription=Ajan Ofisi tekrar eden iş {is_id}\n\n"
+               "[Service]\nType=oneshot\n"
+               "KillMode=process\n"  # tmux sunucusunu bu servis açtıysa servis bitince öldürülmesin
+               "Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin\n"
+               f"WorkingDirectory={kok}\n"
+               f'ExecStart="{python}" "{kok}/zamanlayici.py" --tetikle {is_id}\n')
+    return {f"{ad}.timer": timer, f"{ad}.service": service}
+
+
+def birimler(isler):
+    """Aktif ve geçerli işlerin birimleri."""
+    sonuc = {}
+    for k in isler:
+        if k["aktif"] and not k["hata"]:
+            sonuc.update(birim_metinleri(k["id"], oncalendar(k["cron"])))
+    return sonuc
+
+
+def _dizine_yaz(dizin, hedef):
+    """Dizindeki ajan-ofisi-tekrar-* birimlerini tam olarak `hedef` yap. Başka dosyaya dokunmaz. Değişti mi?"""
+    os.makedirs(dizin, exist_ok=True)
+    degisti = False
+    for ad in os.listdir(dizin):
+        if BIRIM_DESENI.match(ad) and ad not in hedef:
+            os.remove(os.path.join(dizin, ad))
+            degisti = True
+    for ad, metin in hedef.items():
+        yol = os.path.join(dizin, ad)
         try:
-            baslatici(k["ajan"], k.get("etiket"), k.get("prompt"), "tekrar")
-            sonuc = "basladi"
-            baslayan.append(k["id"])
-        except Exception as e:  # noqa: BLE001 - ayrıntıda prompt/sır yok
-            sonuc = "atlandi: mesgul" if getattr(e, "kod", None) == 409 and "çalışıyor" in str(e) else "hata"
-        with TEKRAR_KILIDI:
-            guncel = _yukle_ham()
-            for g in guncel:
-                if g["id"] == k["id"]:
-                    g["son_sonuc"] = sonuc
-            kaydet(guncel)
-        try:
-            ortak.olay_yaz({"tur": "tekrar_tetiklendi", "ajan": k["ajan"], "is_id": k["id"], "sonuc": sonuc})
-        except OSError:
+            with open(yol, encoding="utf-8") as f:
+                if f.read() == metin:
+                    continue
+        except FileNotFoundError:
             pass
-    return baslayan
+        with open(yol + ".tmp", "w", encoding="utf-8") as f:
+            f.write(metin)
+        os.replace(yol + ".tmp", yol)
+        degisti = True
+    return degisti
 
 
-def baslat(baslatici):
-    """Daemon iş parçacığı: her 30 sn uyanır, yalnız saat karşılaştırır."""
-    def dongu():
-        while True:
-            try:
-                tik(baslatici)
-            except Exception as e:  # noqa: BLE001 - zamanlayıcı sunucuyu düşürmesin
-                sys.stderr.write(f"zamanlayıcı: {type(e).__name__}\n")
-            time.sleep(UYANMA_SN - time.time() % UYANMA_SN + 0.5)
-    t = threading.Thread(target=dongu, name="zamanlayici", daemon=True)
-    t.start()
-    return t
+def birimleri_uret(tablo):
+    """durum/systemd/ altına birimleri yazar (önizleme + eşleme tetiği). ~/.config'e yazmaz."""
+    if not _dizine_yaz(birim_dizini(), birimler(yukle(tablo))):
+        return False
+    with open(os.path.join(birim_dizini(), ".degisti"), "w", encoding="utf-8") as f:
+        f.write(ortak.simdi_iso() + "\n")  # .path birimi bunu izler (yerinde yazma: IN_CLOSE_WRITE)
+    return True
+
+
+def _systemctl(*arg):
+    return subprocess.run(["systemctl", "--user", *arg], capture_output=True, text=True, timeout=60)
+
+
+def esle(hedef=None, systemctl=_systemctl):
+    """Birimleri doğrulanmış tekrarlar.json'dan yeniden üretip hedefe eşler; fazlaları durdurup siler."""
+    hedef = hedef or os.path.expanduser("~/.config/systemd/user")
+    _, tablo = ortak.ajanlari_yukle()
+    with _kilit():
+        yeni = birimler(yukle(tablo))
+    eski = {ad for ad in os.listdir(hedef) if BIRIM_DESENI.match(ad)} if os.path.isdir(hedef) else set()
+    for ad in sorted(eski - set(yeni)):
+        if ad.endswith(".timer"):
+            systemctl("disable", "--now", ad)
+    _dizine_yaz(hedef, yeni)
+    systemctl("daemon-reload")
+    zamanlar = sorted(a for a in yeni if a.endswith(".timer"))
+    if zamanlar:
+        systemctl("enable", "--now", *zamanlar)
+    return zamanlar
+
+
+def kur(hedef=None, systemctl=_systemctl):
+    """Kullanıcının bir kez çalıştırdığı kurulum: durum/systemd/.degisti'yi izleyen .path + eşleme servisi."""
+    hedef = hedef or os.path.expanduser("~/.config/systemd/user")
+    os.makedirs(hedef, exist_ok=True)
+    os.makedirs(birim_dizini(), exist_ok=True)
+    damga = os.path.join(birim_dizini(), ".degisti")
+    if not os.path.exists(damga):
+        with open(damga, "w", encoding="utf-8") as f:
+            f.write(ortak.simdi_iso() + "\n")
+    kok, python = _birim_yolu(ortak.KOK), _birim_yolu(sys.executable)
+    metinler = {
+        f"{ESLE_BIRIMI}.path": ("[Unit]\nDescription=Ajan Ofisi tekrar eden işleri systemd ile eşle\n\n"
+                                f"[Path]\nPathChanged={_birim_yolu(damga)}\nUnit={ESLE_BIRIMI}.service\n\n"
+                                "[Install]\nWantedBy=default.target\n"),
+        f"{ESLE_BIRIMI}.service": ("[Unit]\nDescription=Ajan Ofisi tekrar eden işleri systemd ile eşle\n\n"
+                                   f"[Service]\nType=oneshot\nWorkingDirectory={kok}\n"
+                                   f'ExecStart="{python}" "{kok}/zamanlayici.py" --esle\n'),
+    }
+    for ad, metin in metinler.items():
+        with open(os.path.join(hedef, ad), "w", encoding="utf-8") as f:
+            f.write(metin)
+    systemctl("daemon-reload")
+    systemctl("enable", "--now", f"{ESLE_BIRIMI}.path")
+    return esle(hedef, systemctl)
+
+
+# ---------- tetik (systemd servisi) ----------
+
+def tetikle(is_id, baslatici, simdi=None, tablo_yukle=None):
+    """Tek bir işi bir kez başlatır. `baslatici(ajan, etiket, prompt, kaynak)` → gorev_baslat yanıtı.
+    Aynı dakikada ikinci tetik koşmaz. Meşgulde çift koşu açılmaz (alt ajan / kuyruk / atlandı). Sonucu döndürür."""
+    if not isinstance(is_id, str) or not IS_ID_DESENI.match(is_id):
+        raise ValueError("geçersiz iş id")
+    damga = (simdi or datetime.now()).strftime("%Y-%m-%dT%H:%M")
+    tablo = (tablo_yukle or (lambda: ortak.ajanlari_yukle()[1]))()
+    with _kilit():
+        k = next((k for k in yukle(tablo) if k["id"] == is_id), None)
+        if not k or k["hata"] or not k["aktif"] or k["son_calisma"] == damga:
+            return None
+        _alan_yaz(is_id, son_calisma=damga)  # önce damga: aynı dakikada ikinci tetik ya da hata sonrası tekrar yok
+    try:
+        y = baslatici(k["ajan"], k["etiket"], k["prompt"], "tekrar")
+        y = y if isinstance(y, dict) else {}
+        sonuc = "kuyrukta" if y.get("kuyrukta") else "basladi (alt ajan)" if y.get("alt") else "basladi"
+    except Exception as e:  # noqa: BLE001 - ayrıntıda prompt/sır yok
+        kod = getattr(e, "kod", None)
+        sonuc = ("atlandi: mesgul" if kod == 409 and "çalışıyor" in str(e)
+                 else "atlandi: kuyruk dolu" if kod == 429 else "hata")
+    with _kilit():
+        _alan_yaz(is_id, son_sonuc=sonuc)
+    try:
+        ortak.olay_yaz({"tur": "tekrar_tetiklendi", "ajan": k["ajan"], "is_id": is_id, "sonuc": sonuc})
+    except OSError:
+        pass
+    return sonuc
+
+
+def _alan_yaz(is_id, **alanlar):
+    isler = _yukle_ham()
+    for g in isler:
+        if g["id"] == is_id:
+            g.update(alanlar)
+    kaydet(isler)
+
+
+def main(argv):
+    if len(argv) == 2 and argv[0] == "--tetikle":
+        import sunucu  # sunucu sürecine değil, bu servis sürecine yüklenir (HTTP açılmaz)
+        sonuc = tetikle(argv[1], lambda a, e, p, k: sunucu.gorev_baslat(a, etiket=e, prompt=p, kaynak=k, havuz=True))
+        try:
+            sunucu.kuyrugu_isle()
+        except Exception as e:  # noqa: BLE001
+            sys.stderr.write(f"kuyruk: {type(e).__name__}\n")
+        print(f"tekrar {argv[1]}: {sonuc or 'koşmadı (kapalı, geçersiz ya da bu dakika koştu)'}")
+        return 0
+    if argv == ["--esle"]:
+        print("eşlendi:", " ".join(esle()) or "(iş yok)")
+        return 0
+    if argv == ["--kur"]:
+        print("kuruldu; eşlenen:", " ".join(kur()) or "(iş yok)")
+        return 0
+    print(__doc__)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

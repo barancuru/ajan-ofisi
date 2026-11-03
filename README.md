@@ -132,9 +132,20 @@ koşan otomatik işler; salt okunur, metin olarak), (b) senin eklediğin tekrar 
 prompt + 5 alanlı cron; aç/kapa, sil). Kayıtlar `durum/tekrarlar.json`'da durur ve her okuma/yazmada doğrulanır
 (bilinen, kurulu, CEO olmayan ajan; hazır görev ya da prompt'tan tam biri; sır kalıbı yok; en sık 15 dakikada bir;
 en fazla 50 iş). Bozuk dosya `.bozuk-<zaman>` olarak yana alınır.
-- `zamanlayici.py` sunucuda 30 saniyede bir uyanan bir iş parçacığıdır, **yalnız saat karşılaştırır, model çağırmaz**;
-  vakti gelen işi `gorev_baslat` ile (kaynak `tekrar`) açar. Ajan o an meşgulse çift koşu açılmaz, çalışma atlanır.
-- **Sunucu kapalıyken koşmaz**; kaçan çalışmalar sonradan telafi edilmez.
+- **İş başına systemd timer.** Her ekle/sil/aç/kapat sonrası sunucu `durum/systemd/` altına
+  `ajan-ofisi-tekrar-<id>.timer` (`OnCalendar=` cron'dan çevrilir, `Persistent=true`) ve `.service` üretir
+  (`ExecStart` yalnız iş id'sini alır; prompt birime girmez). Sunucu `~/.config`'e yazmaz. **Bir kez** sen kur:
+  `python3 zamanlayici.py --kur`. Bu, `durum/systemd/.degisti`'yi izleyen bir `.path` birimi kurar; değişince
+  `zamanlayici.py --esle` birimleri doğrulanmış `tekrarlar.json`'dan yeniden üretip `~/.config/systemd/user/`'a
+  eşler (yalnız `ajan-ofisi-tekrar-*` dosyalarına dokunur). Kurulum yapılmadıysa sayfa uyarır; işler kaydedilir ama koşmaz.
+- Ay günü ve hafta günü ikisi de kısıtlı cron (klasik cron'da VEYA) systemd'ye çevrilemez, reddedilir.
+- Ofis sunucusu kapalıyken de koşar. Bilgisayar kapalıyken kaçan çalışma açılışta **en çok 1 kez** telafi edilir.
+- Timer boşta model çağırmaz. Vakti gelince `zamanlayici.py --tetikle <id>` işi `gorev_baslat` ile (kaynak `tekrar`)
+  açar. Ajan meşgulse çift koşu açılmaz; iş kuyruğa girer.
+- **Alt ajan ve kuyruk.** Görevci meşgulken gelen iş en çok 2 alt ajan koşusunda açılır (`durum/gorevci--alt-N.json`;
+  aynı yetkiler, derinlik 1). Fazlası ve diğer ajanların CEO/tekrar işleri `durum/kuyruk.json`'a (en çok 20) girer.
+  Sunucu kuyruğu 20 sn'de bir dener; dosya yoksa yalnız varlığına bakar. CEO aynı anda 1 + 2 koşu yapabilir;
+  fazlası 429 alır. Koşular `calistir.lock` yüzünden yine sırayla yürür (kilide dokunulmadı).
 - Tekrar eden iş yeni yetki kazanmaz: ajan kendi `izinli_araclar`'ıyla koşar. Yayın, mail, ödeme yapamaz.
   Olay günlüğüne yalnız iş id'si, ajan ve sonuç yazılır; prompt yazılmaz.
 
@@ -220,7 +231,7 @@ toplamda en büyük sayı odur. Maliyet sekmesi yalnız `claude -p`'nin bildirdi
 | `kosucu.py` | tek ajan koşusu (tmux penceresinde) |
 | `kopru.py` | terminal köprüsü (salt okuma) |
 | `token_sayac.py` | günlük token sayacı |
-| `zamanlayici.py` | tekrar eden işler: cron, `durum/tekrarlar.json`, sunucu içi zamanlayıcı |
+| `zamanlayici.py` | tekrar eden işler: cron, `durum/tekrarlar.json`, iş başına systemd timer (`--kur`, `--esle`, `--tetikle`) |
 | `ortak.py` | yollar, ajan tablosu, olay günlüğü |
 | `ajanlar.example.json`, `kopru.example.json` | boş şablonlar |
 | `CLAUDE.md` | CEO anayasası şablonu |

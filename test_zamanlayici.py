@@ -157,67 +157,226 @@ class DepoTesti(unittest.TestCase):
             self.assertEqual(r["isler"][0]["ozet"], "her gün 09:00")
             self.assertIsNotNone(r["isler"][0]["sonraki"])
 
-    # ---------- tik ----------
+    # ---------- systemd birimleri ----------
 
-    def test_bosta_hicbir_sey_okumaz(self):
-        yukle = mock.Mock()
-        baslat = mock.Mock()
-        self.assertEqual(z.tik(baslat, datetime(2026, 11, 3, 9, 0), tablo_yukle=yukle), [])
-        yukle.assert_not_called()
-        baslat.assert_not_called()
+    def birim_dosyalari(self, dizin=None):
+        dizin = dizin or z.birim_dizini()
+        return sorted(a for a in os.listdir(dizin) if z.BIRIM_DESENI.match(a)) if os.path.isdir(dizin) else []
 
-    def test_ayni_dakika_iki_tik_tek_kosu(self):
+    def test_birimler_uretilir_prompt_yok(self):
+        is_id = self.ekle(prompt="GIZLI_ISTEK_METNI raporu hazırla")
+        self.assertEqual(self.birim_dosyalari(), [f"ajan-ofisi-tekrar-{is_id}.service",
+                                                  f"ajan-ofisi-tekrar-{is_id}.timer"])
+        for ad in self.birim_dosyalari():
+            with open(os.path.join(z.birim_dizini(), ad), encoding="utf-8") as f:
+                metin = f.read()
+            self.assertNotIn("GIZLI", metin)
+            self.assertNotIn("rapor", metin)
+            if ad.endswith(".timer"):
+                self.assertIn("OnCalendar=*-*-* 09:00:00\nPersistent=true\n", metin)
+            else:
+                self.assertIn(f"zamanlayici.py\" --tetikle {is_id}\n", metin)
+                self.assertIn("KillMode=process\n", metin)
+        self.assertTrue(os.path.exists(os.path.join(z.birim_dizini(), ".degisti")))
+        z.degistir({"islem": "kapat", "id": is_id}, self.tablo)
+        self.assertEqual(self.birim_dosyalari(), [])  # kapalı iş: timer yok
+        z.degistir({"islem": "ac", "id": is_id}, self.tablo)
+        self.assertEqual(len(self.birim_dosyalari()), 2)
+        z.degistir({"islem": "sil", "id": is_id}, self.tablo)
+        self.assertEqual(self.birim_dosyalari(), [])
+
+    def test_esle(self):
+        hedef = os.path.join(self.d.name, "user")
+        os.makedirs(hedef)
+        for ad in ("ajan-ofisi-tekrar-t0000000000.timer", "ajan-ofisi-tekrar-t0000000000.service", "baska.service"):
+            with open(os.path.join(hedef, ad), "w") as f:
+                f.write("eski")
         is_id = self.ekle(etiket="Özet")
-        baslat = mock.Mock()
+        cagrilar = []
+        with mock.patch.object(ortak, "ajanlari_yukle", return_value=({}, self.tablo)):
+            z.esle(hedef, lambda *a: cagrilar.append(a))
+        self.assertEqual(self.birim_dosyalari(hedef), [f"ajan-ofisi-tekrar-{is_id}.service",
+                                                       f"ajan-ofisi-tekrar-{is_id}.timer"])
+        self.assertTrue(os.path.exists(os.path.join(hedef, "baska.service")))  # başka birime dokunulmaz
+        self.assertEqual(cagrilar, [("disable", "--now", "ajan-ofisi-tekrar-t0000000000.timer"), ("daemon-reload",),
+                                    ("enable", "--now", f"ajan-ofisi-tekrar-{is_id}.timer")])
+        # durum/systemd/ içine elle yazılan bir ExecStart eşlemeye girmez (içerik tekrarlar.json'dan yeniden üretilir)
+        with open(os.path.join(z.birim_dizini(), f"ajan-ofisi-tekrar-{is_id}.service"), "w") as f:
+            f.write("[Service]\nExecStart=/bin/rm -rf /\n")
+        with mock.patch.object(ortak, "ajanlari_yukle", return_value=({}, self.tablo)):
+            z.esle(hedef, lambda *a: None)
+        with open(os.path.join(hedef, f"ajan-ofisi-tekrar-{is_id}.service"), encoding="utf-8") as f:
+            self.assertNotIn("rm -rf", f.read())
+
+    # ---------- tetik ----------
+
+    def test_ayni_dakika_iki_tetik_tek_kosu(self):
+        is_id = self.ekle(etiket="Özet")
+        baslat = mock.Mock(return_value={"kosu_id": "k", "ajan": "a"})
         an = datetime(2026, 11, 3, 9, 0, 5)
-        self.assertEqual(z.tik(baslat, an, tablo_yukle=lambda: self.tablo), [is_id])
-        self.assertEqual(z.tik(baslat, an.replace(second=35), tablo_yukle=lambda: self.tablo), [])
+        self.assertEqual(z.tetikle(is_id, baslat, an, tablo_yukle=lambda: self.tablo), "basladi")
+        self.assertIsNone(z.tetikle(is_id, baslat, an.replace(second=35), tablo_yukle=lambda: self.tablo))
         baslat.assert_called_once_with("a", "Özet", None, "tekrar")
         self.assertEqual(z.yukle(self.tablo)[0]["son_sonuc"], "basladi")
-        self.assertEqual(z.tik(baslat, datetime(2026, 11, 3, 9, 1), tablo_yukle=lambda: self.tablo), [])  # vakti değil
-        baslat.assert_called_once()
+        # Persistent=true telafisi başka dakikada gelir: koşar
+        self.assertEqual(z.tetikle(is_id, baslat, datetime(2026, 11, 3, 10, 2), tablo_yukle=lambda: self.tablo),
+                         "basladi")
+        self.assertEqual(baslat.call_count, 2)
+        with self.assertRaises(ValueError):
+            z.tetikle("../x", baslat, an, tablo_yukle=lambda: self.tablo)
 
     def test_kapali_is_kosmaz(self):
         is_id = self.ekle(etiket="Özet")
         z.degistir({"islem": "kapat", "id": is_id}, self.tablo)
         baslat = mock.Mock()
-        z.tik(baslat, datetime(2026, 11, 3, 9, 0), tablo_yukle=lambda: self.tablo)
+        self.assertIsNone(z.tetikle(is_id, baslat, datetime(2026, 11, 3, 9, 0), tablo_yukle=lambda: self.tablo))
         baslat.assert_not_called()
 
     def test_mesgul_ajan_cift_kosu_acmaz(self):
-        """Gerçek gorev_baslat: ajan 'basliyor' (kilit bekliyor) iken tetik 409'u yutar, tmux açılmaz."""
-        self.ekle(etiket="Özet")
+        """Gerçek gorev_baslat: ajan 'basliyor' (kilit bekliyor) iken tetik çift koşu açmaz, işi kuyruğa alır."""
+        is_id = self.ekle(etiket="Özet")
         ortak.durum_yaz("a", {"durum": "basliyor", "kosu_id": "k1", "pid": None, "baslangic_ts": time.time()})
         cagri = []
-        baslatici = lambda a, e, p, k: cagri.append(a) or sunucu.gorev_baslat(a, etiket=e, prompt=p, kaynak=k)  # noqa: E731
+        baslatici = lambda a, e, p, k: cagri.append(a) or sunucu.gorev_baslat(  # noqa: E731
+            a, etiket=e, prompt=p, kaynak=k, havuz=True)
         with mock.patch.object(ortak, "ajanlari_yukle", return_value=({}, self.tablo)), \
                 mock.patch.object(sunucu, "tmux_hazirla", side_effect=AssertionError("ikinci koşu açıldı")) as tm:
             an = datetime(2026, 11, 3, 9, 0)
-            self.assertEqual(z.tik(baslatici, an, tablo_yukle=lambda: self.tablo), [])
-            self.assertEqual(z.tik(baslatici, an, tablo_yukle=lambda: self.tablo), [])
+            self.assertEqual(z.tetikle(is_id, baslatici, an, tablo_yukle=lambda: self.tablo), "kuyrukta")
+            self.assertIsNone(z.tetikle(is_id, baslatici, an, tablo_yukle=lambda: self.tablo))
             tm.assert_not_called()
+            self.assertEqual(sunucu.kuyrugu_isle(), [])  # hâlâ meşgul: kuyrukta kalır
         self.assertEqual(cagri, ["a"])  # aynı dakikada yeniden denenmez
-        self.assertEqual(z.yukle(self.tablo)[0]["son_sonuc"], "atlandi: mesgul")
+        self.assertEqual(z.yukle(self.tablo)[0]["son_sonuc"], "kuyrukta")
+        self.assertEqual(len(sunucu.kuyruk_oku()), 1)
         self.assertEqual(ortak.durum_oku("a")["kosu_id"], "k1")  # mevcut koşunun durumu ezilmedi
-        self.assertIn("atlandi: mesgul", self.olaylar())
+        self.assertIn("kuyrukta", self.olaylar())
+
+    def test_mesgul_havuzsuz_409_atlanir(self):
+        is_id = self.ekle(etiket="Özet")
+        ortak.durum_yaz("a", {"durum": "basliyor", "kosu_id": "k1", "pid": None, "baslangic_ts": time.time()})
+        baslatici = lambda a, e, p, k: sunucu.gorev_baslat(a, etiket=e, prompt=p, kaynak=k)  # noqa: E731
+        with mock.patch.object(ortak, "ajanlari_yukle", return_value=({}, self.tablo)), \
+                mock.patch.object(sunucu, "tmux_hazirla", side_effect=AssertionError("ikinci koşu açıldı")):
+            self.assertEqual(z.tetikle(is_id, baslatici, datetime(2026, 11, 3, 9, 0), tablo_yukle=lambda: self.tablo),
+                             "atlandi: mesgul")
+        self.assertFalse(os.path.exists(sunucu.kuyruk_yolu()))
 
     def test_baska_hata_ayrinti_yazmaz(self):
-        self.ekle(prompt="özel istek metni")
+        is_id = self.ekle(prompt="özel istek metni")
         def patla(*_):
             raise RuntimeError("özel istek metni sızdı")
-        z.tik(patla, datetime(2026, 11, 3, 9, 0), tablo_yukle=lambda: self.tablo)
+        self.assertEqual(z.tetikle(is_id, patla, datetime(2026, 11, 3, 9, 0), tablo_yukle=lambda: self.tablo), "hata")
         self.assertEqual(z.yukle(self.tablo)[0]["son_sonuc"], "hata")
         self.assertNotIn("özel istek", self.olaylar())
 
     def test_gecersizlesen_is_kosmaz_ama_silinmez(self):
-        self.ekle(etiket="Özet")
+        is_id = self.ekle(etiket="Özet")
         tablo = {**self.tablo, "a": {**self.tablo["a"], "kurulu": False}}
         baslat = mock.Mock()
-        z.tik(baslat, datetime(2026, 11, 3, 9, 0), tablo_yukle=lambda: tablo)
+        self.assertIsNone(z.tetikle(is_id, baslat, datetime(2026, 11, 3, 9, 0), tablo_yukle=lambda: tablo))
         baslat.assert_not_called()
         k = z.yukle(tablo)
         self.assertEqual(len(k), 1)
         self.assertTrue(k[0]["hata"])
+
+
+class OnCalendarTesti(unittest.TestCase):
+    def test_ceviri(self):
+        self.assertEqual(z.oncalendar("0 9 * * *"), "*-*-* 09:00:00")
+        self.assertEqual(z.oncalendar("0 9 * * 1-5"), "Mon,Tue,Wed,Thu,Fri *-*-* 09:00:00")
+        self.assertEqual(z.oncalendar("30 8 * * 1"), "Mon *-*-* 08:30:00")
+        self.assertEqual(z.oncalendar("0 9 * * 7"), "Sun *-*-* 09:00:00")
+        self.assertEqual(z.oncalendar("0 9 * * 0-6"), "*-*-* 09:00:00")
+        self.assertEqual(z.oncalendar("*/15 * * * *"), "*-*-* *:00,15,30,45:00")  # kayma yok: açık liste
+        self.assertEqual(z.oncalendar("0 0 31 * *"), "*-*-31 00:00:00")  # 31'i olmayan ay atlanır (cron gibi)
+        self.assertEqual(z.oncalendar("0 12 29 2 *"), "*-02-29 12:00:00")
+        self.assertEqual(z.oncalendar("5 */6 1,15 */3 *"), "*-01,04,07,10-01,15 00,06,12,18:05:00")
+
+    def test_gun_veya_cevrilemez(self):
+        with self.assertRaises(ValueError) as h:
+            z.cron_dogrula("0 9 10 * 5")
+        self.assertIn("systemd", str(h.exception))
+
+
+class HavuzTesti(unittest.TestCase):
+    """Alt ajan havuzu + kuyruk; tmux yerine sahte subprocess.run, model yok."""
+
+    def setUp(self):
+        self.d = tempfile.TemporaryDirectory()
+        self.addCleanup(self.d.cleanup)
+        self.tablo = {
+            "gorevci": {"id": "gorevci", "ad": "Görevci", "kurulu": True, "cwd": self.d.name, "hazir_gorevler": []},
+            "a": {"id": "a", "ad": "A", "kurulu": True, "cwd": self.d.name, "hazir_gorevler": []},
+        }
+        self.run = mock.Mock()
+        yamalar = [mock.patch.object(ortak, "DURUM_DIZINI", self.d.name),
+                   mock.patch.object(ortak, "KOSU_DIZINI", self.d.name),
+                   mock.patch.object(ortak, "CIKTI_DIZINI", self.d.name),
+                   mock.patch.object(ortak, "OLAYLAR", os.path.join(self.d.name, "olaylar.jsonl")),
+                   mock.patch.object(ortak, "ajanlari_yukle", return_value=({}, self.tablo)),
+                   mock.patch.object(sunucu, "tmux_hazirla", return_value="tmux"),
+                   mock.patch.object(sunucu.subprocess, "run", self.run)]
+        for y in yamalar:
+            y.start()
+            self.addCleanup(y.stop)
+
+    def gb(self, ajan, havuz=True, prompt="iş metni"):
+        return sunucu.gorev_baslat(ajan, prompt=prompt, kaynak="ceo", havuz=havuz)
+
+    def test_gorevci_iki_alt_sonra_kuyruk(self):
+        self.assertNotIn("alt", self.gb("gorevci"))
+        self.assertEqual(self.gb("gorevci")["alt"], "gorevci--alt-1")
+        self.assertEqual(self.gb("gorevci")["alt"], "gorevci--alt-2")
+        q = self.gb("gorevci")
+        self.assertIsNone(q["kosu_id"])
+        self.assertEqual(q["sira"], 1)
+        self.assertEqual(self.run.call_count, 3)  # 2'den fazla alt ajan hiç açılmadı
+        self.assertEqual(sunucu.kuyrugu_isle(), [])  # yuva yok: bekler
+        self.assertEqual(self.run.call_count, 3)
+        ortak.durum_yaz("gorevci--alt-1", {"durum": "bitti", "kosu_id": "x"})  # bir alt ajan bitti
+        b = sunucu.kuyrugu_isle()
+        self.assertEqual([x["alt"] for x in b], ["gorevci--alt-1"])
+        self.assertEqual(self.run.call_count, 4)
+        self.assertFalse(os.path.exists(sunucu.kuyruk_yolu()))
+        with open(os.path.join(self.d.name, f"{b[0]['kosu_id']}.arg.json"), encoding="utf-8") as f:
+            arg = json.load(f)
+        self.assertEqual((arg["ajan"], arg["durum_id"]), ("gorevci", "gorevci--alt-1"))
+        self.assertEqual(ortak.durum_oku("gorevci--alt-1")["durum"], "basliyor")
+
+    def test_alt_ajansiz_ajan_kuyruga_havuzsuz_409(self):
+        self.gb("a")
+        with self.assertRaises(sunucu.IstekHatasi) as h:
+            self.gb("a", havuz=False)
+        self.assertEqual((h.exception.kod, str(h.exception)), (409, "ajan zaten çalışıyor"))
+        self.assertTrue(self.gb("a")["kuyrukta"])
+        self.assertEqual(self.run.call_count, 1)
+
+    def test_kuyruk_dolu_429(self):
+        self.gb("a")
+        with mock.patch.object(sunucu, "MAKS_KUYRUK", 2):
+            self.gb("a")
+            self.gb("a")
+            with self.assertRaises(sunucu.IstekHatasi) as h:
+                self.gb("a")
+        self.assertEqual(h.exception.kod, 429)
+        self.assertIn("kuyruk dolu", str(h.exception))
+
+    def test_kuyruk_prompt_olaya_yazilmaz_bozuk_dusurmez(self):
+        self.gb("a")
+        self.gb("a", prompt="GIZLI_KUYRUK_METNI")
+        with open(ortak.OLAYLAR, encoding="utf-8") as f:
+            self.assertNotIn("GIZLI", f.read())
+        with open(sunucu.kuyruk_yolu(), "w") as f:
+            f.write("{bozuk")
+        self.assertEqual(sunucu.kuyrugu_isle(), [])
+        self.assertEqual(len(glob.glob(sunucu.kuyruk_yolu() + ".bozuk-*")), 1)
+
+    def test_ceo_eszamanli_sinir(self):
+        with mock.patch.object(sunucu, "_ceo_kosuyor", sunucu.MAKS_ALT + 1):
+            with self.assertRaises(sunucu.IstekHatasi) as h:
+                sunucu.ceo_calistir("merhaba")
+        self.assertEqual(h.exception.kod, 429)
 
 
 if __name__ == "__main__":

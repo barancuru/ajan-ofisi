@@ -182,6 +182,9 @@ def kos(arg_dosyasi):
     veri, tablo = ortak.ajanlari_yukle()
     ajan = tablo[arg["ajan"]]
     kosu_id = arg["kosu_id"]
+    # alt ajan koşusu (sunucu.alt_yuva): durum ayrı dosyada (<ajan>--alt-N), ana ajanın durumu ezilmez
+    durum_id = arg.get("durum_id") if re.fullmatch(re.escape(ajan["id"]) + r"--alt-\d",
+                                                   str(arg.get("durum_id"))) else ajan["id"]
     baglam = {"kosu_id": kosu_id, "ajan": ajan["id"], "oda": ajan["oda"],
               **({"ust_kosu": arg["ust_kosu"]} if arg.get("ust_kosu") else {})}
     log_yolu = os.path.join(ortak.KOSU_DIZINI, f"{kosu_id}.log")
@@ -195,17 +198,17 @@ def kos(arg_dosyasi):
     komut = komut_kur(ajan, veri.get("varsayilan_yasak_araclar", []), cikti_dizini, butce)
 
     # Kilit beklenirken de ajan (süreç yaşadığı sürece) meşgul sayılsın
-    ortak.durum_yaz(ajan["id"], {"durum": "basliyor", "kosu_id": kosu_id, "pid": os.getpid(),
-                                 "baslangic_ts": time.time()})
+    ortak.durum_yaz(durum_id, {"durum": "basliyor", "kosu_id": kosu_id, "pid": os.getpid(),
+                               "baslangic_ts": time.time()})
     kilit = kilit_al()
     if kilit is None:
         baglam = {"kosu_id": kosu_id, "ajan": ajan["id"], "oda": ajan["oda"]}
         bitir(ajan, baglam, None, f"lock not acquired within {KILIT_BEKLE_SN} s (another beyin run is in progress)",
-              time.time(), log_yolu, cikti_dizini)
+              time.time(), log_yolu, cikti_dizini, durum_id)
         return
 
     baslangic = time.time()
-    ortak.durum_yaz(ajan["id"], {"durum": "calisiyor", "kosu_id": kosu_id, "pid": os.getpid(),
+    ortak.durum_yaz(durum_id, {"durum": "calisiyor", "kosu_id": kosu_id, "pid": os.getpid(),
                                  "baslangic": ortak.simdi_iso(), "baslangic_ts": baslangic,
                                  "etiket": arg.get("etiket")})
     ortak.olay_yaz({**baglam, "tur": "kosu_basladi", "model": ajan["model"],
@@ -258,7 +261,7 @@ def kos(arg_dosyasi):
         token_kesinle(baglam, sonuc, sayac)
     except (OSError, ValueError) as e:  # sayaç hatası koşuyu düşürmez
         print(f"(token sayacı yazılamadı: {type(e).__name__})", flush=True)
-    bitir(ajan, baglam, sonuc, hata, baslangic, log_yolu, cikti_dizini)
+    bitir(ajan, baglam, sonuc, hata, baslangic, log_yolu, cikti_dizini, durum_id)
 
 
 def token_kesinle(baglam, sonuc, sayac):
@@ -272,7 +275,7 @@ def token_kesinle(baglam, sonuc, sayac):
                     "ajan_gun": ajan_gun})
 
 
-def bitir(ajan, baglam, sonuc, hata, baslangic, log_yolu, cikti_dizini):
+def bitir(ajan, baglam, sonuc, hata, baslangic, log_yolu, cikti_dizini, durum_id=None):
     sure = round(time.time() - baslangic, 1)
     metin = (sonuc or {}).get("result") or ""
     basarili = bool(sonuc) and not sonuc.get("is_error") and not hata
@@ -293,10 +296,10 @@ def bitir(ajan, baglam, sonuc, hata, baslangic, log_yolu, cikti_dizini):
         "cikti": os.path.relpath(cikti_yolu, ortak.KOK),
     }
     ortak.olay_yaz(olay)
-    ortak.durum_yaz(ajan["id"], {"durum": "bitti" if basarili else "hata", "kosu_id": baglam["kosu_id"],
-                                 "pid": None, "bitis": ortak.simdi_iso(), "bitis_ts": time.time(),
-                                 "sure_sn": sure, "ozet": temiz[:400], "hata": hata,
-                                 "maliyet_usd": olay["maliyet_usd"], "cikti": olay["cikti"]})
+    ortak.durum_yaz(durum_id or ajan["id"], {"durum": "bitti" if basarili else "hata", "kosu_id": baglam["kosu_id"],
+                                             "pid": None, "bitis": ortak.simdi_iso(), "bitis_ts": time.time(),
+                                             "sure_sn": sure, "ozet": temiz[:400], "hata": hata,
+                                             "maliyet_usd": olay["maliyet_usd"], "cikti": olay["cikti"]})
     print(f"\n■ bitti · {sure} sn · maliyet_usd={olay['maliyet_usd']} · {olay['cikti']}", flush=True)
     if eklenen:
         print(f"  hafızaya eklendi: {eklenen}", flush=True)

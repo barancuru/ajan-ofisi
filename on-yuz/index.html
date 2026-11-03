@@ -2208,6 +2208,8 @@ async function gorevVer(ajanId, govde) {
     const { durum, veri } = await postJSON('/api/gorev', { ajan:ajanId, ...govde });
     if (durum === 202) {
       akisEkle(ajanId, SEN + ' → ' + a.ad + ': ' + kisa(govde.etiket || govde.prompt, 80));
+      if (veri.kuyrukta) tost(a.ad + ' meşgul; iş kuyruğa alındı (sıra ' + veri.sira + ').');
+      else if (veri.alt) tost(a.ad + ' meşgul; iş alt ajanla başladı.');
       if (a.durum === 'uyku' || a.durum === 'bitti') { a.durum = 'bekliyor'; a.eylem = 'iş yolda…'; ustGuncelle(); }
       zarfGonder(a);
     } else if (durum === 409) tost(a.ad + ' zaten çalışıyor; bitince tekrar dene.');
@@ -3018,7 +3020,8 @@ async function dizinSayfasi() {
 // Öngörülebilirlik: otomatik zamanlar (salt okunur) + tekrar eden işler. Yalnız sayfa açıkken sorgu atar.
 let ongZaman = null;
 const ONG_HIZLI = [['0 9 * * *', 'Her gün 09:00'], ['0 9 * * 1-5', 'Hafta içi 09:00'], ['0 * * * *', 'Her saat başı'], ['30 8 * * 1', 'Pazartesi 08:30']];
-const ONG_SONUC = { basladi: 'başladı', 'atlandi: mesgul': 'atlandı (ajan meşguldü)', hata: 'hata' };
+const ONG_SONUC = { basladi: 'başladı', 'basladi (alt ajan)': 'alt ajanla başladı', kuyrukta: 'kuyruğa alındı',
+  'atlandi: mesgul': 'atlandı (ajan meşguldü)', 'atlandi: kuyruk dolu': 'atlandı (kuyruk dolu)', hata: 'hata' };
 function ongTarih(iso) {
   if (!iso) return '—';
   const t = new Date(iso); if (isNaN(t)) return iso;
@@ -3053,7 +3056,8 @@ async function ongorulebilirlikSayfasi() {
   // (b) tekrar eden işlerim
   const isk = el('div', 'kart ong-kart');
   isk.append(el('h4', null, 'Tekrar eden işlerim (' + d.isler.length + '/' + d.maks_is + ')'),
-    el('p', 'alt', 'Ofis sunucusu açıkken vakti gelince koşar; sunucu kapalıyken kaçan koşular sonradan çalıştırılmaz. Ajan o an meşgulse o çalışma atlanır.'));
+    el('p', 'alt', 'Her iş kendi systemd timer\'ıyla koşar (ofis sunucusu kapalı olsa da). Bilgisayar kapalıyken kaçan çalışma açılışta en çok 1 kez telafi edilir. Ajan meşgulse çift koşu açılmaz: iş kuyruğa girer (Görevci\'de önce alt ajan denenir).'));
+  if (!d.systemd_kurulu) isk.append(el('p', 'alt ong-hata', 'systemd eşlemesi kurulu değil: işler kaydedilir ama koşmaz. Bir kez çalıştır: python3 zamanlayici.py --kur'));
   if (!d.isler.length) isk.append(el('p', 'alt', 'Henüz tekrar eden iş yok. Aşağıdan ekleyebilirsin.'));
   const liste = el('div', 'ong-liste');
   d.isler.forEach(k => {
@@ -3062,6 +3066,7 @@ async function ongorulebilirlikSayfasi() {
     bilgi.append(el('b', null, k.ad + ' · ' + (k.etiket || k.prompt_kisa || '—')));
     const siklik = el('small', null, k.ozet);
     if (k.ozet !== k.cron) siklik.append(' · ', el('code', null, k.cron));
+    if (k.oncalendar) siklik.append(' · systemd: ', el('code', null, k.oncalendar));
     bilgi.append(siklik);
     bilgi.append(el('small', null, 'Sonraki: ' + (k.aktif ? ongTarih(k.sonraki) : 'kapalı') +
       ' · Son: ' + (k.son_calisma ? ongTarih(k.son_calisma) + ' (' + (ONG_SONUC[k.son_sonuc] || k.son_sonuc || '…') + ')' : 'henüz koşmadı')));
@@ -3075,6 +3080,15 @@ async function ongorulebilirlikSayfasi() {
     s.append(bilgi, dug); liste.append(s);
   });
   isk.append(liste);
+  // kuyruk + alt ajanlar (prompt gösterilmez)
+  const kuy = el('div', 'kart ong-kart');
+  kuy.append(el('h4', null, 'Kuyruk (' + d.kuyruk.length + '/' + d.maks_kuyruk + ')'),
+    el('p', 'alt', d.alt.map(a => a.ajan + ': ' + a.calisan + '/' + d.maks_alt + ' alt ajan çalışıyor').join(' · ') +
+      (d.alt.length ? ' · ' : '') + 'CEO aynı anda en çok 1 + ' + d.maks_alt + ' koşu. Koşular yine sırayla yürür (ortak kilit).'));
+  if (!d.kuyruk.length) kuy.append(el('p', 'alt', 'Kuyrukta bekleyen iş yok.'));
+  const kuyListe = el('ul', 'ong-oto');
+  d.kuyruk.forEach((q, i) => { const li = el('li'); li.append(el('b', null, (i + 1) + '. ' + q.ajan), el('span', null, (q.etiket || q.kaynak) + ' · ' + ongTarih(q.zaman))); kuyListe.append(li); });
+  kuy.append(kuyListe);
   // (c) ekleme formu
   const form = el('form', 'kart gelistirme-form ong-form'); form.autocomplete = 'off';
   const ajan = el('select'); ajan.setAttribute('aria-label', 'Ajan');
@@ -3105,7 +3119,7 @@ async function ongorulebilirlikSayfasi() {
     if (no !== onizNo) return;
     onizKutu.classList.toggle('ong-hata', r.durum !== 200);
     onizKutu.textContent = r.durum === 200
-      ? r.veri.ozet + ' · sonraki 3: ' + (r.veri.sonrakiler.length ? r.veri.sonrakiler.map(ongTarih).join(', ') : 'bir yıl içinde yok')
+      ? r.veri.ozet + ' · systemd: ' + r.veri.oncalendar + ' · sonraki 3: ' + (r.veri.sonrakiler.length ? r.veri.sonrakiler.map(ongTarih).join(', ') : 'bir yıl içinde yok')
       : (r.veri.hata || 'önizlenemedi');
   }
   cron.addEventListener('input', () => { clearTimeout(onizZaman); onizZaman = setTimeout(onizle, 400); });
@@ -3121,7 +3135,7 @@ async function ongorulebilirlikSayfasi() {
     const tamam = await islem(govde, 'Tekrar eden iş eklendi');
     if (!tamam) ekle.disabled = false;
   };
-  return [...bas, el('p', 'alt', 'Ajanların ne zaman çalışacağını gör; kendi tekrar eden işlerini ekle. Boştayken model çağrılmaz.'), oto, isk, form];
+  return [...bas, el('p', 'alt', 'Ajanların ne zaman çalışacağını gör; kendi tekrar eden işlerini ekle. Boştayken model çağrılmaz.'), oto, isk, kuy, form];
 }
 document.querySelectorAll('#sekmeler button').forEach(b => { b.onclick = () => { SES.tik(); sekmeAc(b.dataset.sekme); }; b.onmouseenter = () => SES.uzerinde(); });
 

@@ -134,6 +134,18 @@ def hafiza_kilidi(ajan_id):
         os.close(fd)  # kapatmak kilidi de bırakır
 
 
+@contextlib.contextmanager
+def baslatma_kilidi():
+    """durum/baslatma.lock: Ofis sunucusu ve systemd tekrar servisi koşu açma kararını (meşgul/alt/kuyruk) sırayla verir."""
+    os.makedirs(DURUM_DIZINI, exist_ok=True)
+    fd = os.open(os.path.join(DURUM_DIZINI, "baslatma.lock"), os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
+
+
 def durum_yolu(ajan_id):
     return os.path.join(DURUM_DIZINI, f"{ajan_id}.json")
 

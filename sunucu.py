@@ -188,7 +188,7 @@ def son_is_yaniti(ajan_id, kosu_id=None):
             "durum": d.get("durum")}
 
 
-def gorev_baslat(ajan_id, etiket=None, prompt=None, kaynak="buton", ekler=None, ust=None):
+def gorev_baslat(ajan_id, etiket=None, prompt=None, kaynak="buton", ekler=None, ust=None, havuz=False):
     _, tablo = ortak.ajanlari_yukle()
     ajan = tablo.get(ajan_id)
     if not ajan or ajan_id == "ceo":
@@ -204,30 +204,162 @@ def gorev_baslat(ajan_id, etiket=None, prompt=None, kaynak="buton", ekler=None, 
         raise IstekHatasi(400, "etiket ya da prompt gerekli")
     if len(prompt) > ortak.MAKS_GIRDI:
         raise IstekHatasi(413, f"prompt en fazla {ortak.MAKS_GIRDI} karakter")
-    with BASLATMA_KILIDI:
-        if ortak.ajan_mesgul(ajan_id):
-            raise IstekHatasi(409, "ajan zaten çalışıyor")
-        kosu_id = f"{datetime.now():%Y-%m-%d-%H%M%S}-{ajan_id}"
-        prompt = eklerle_prompt(prompt, gorselleri_kaydet(ekler, ajan_id, kosu_id))
-        arg_yolu = os.path.join(ortak.KOSU_DIZINI, f"{kosu_id}.arg.json")
-        with open(arg_yolu, "w", encoding="utf-8") as f:
-            json.dump({"kosu_id": kosu_id, "ajan": ajan_id, "etiket": etiket,
-                       "prompt": prompt, "kaynak": kaynak,
-                       **({"ust_kosu": ust} if ust and KOSU_ID_DESENI.match(ust) else {})}, f, ensure_ascii=False)
-        ortak.durum_yaz(ajan_id, {"durum": "basliyor", "kosu_id": kosu_id, "pid": None,
-                                  "baslangic_ts": time.time()})
+    with BASLATMA_KILIDI, ortak.baslatma_kilidi():
+        return _baslat_kilitli(ajan, etiket, prompt, kaynak, ekler, ust, havuz)
+
+
+def _baslat_kilitli(ajan, etiket, prompt, kaynak, ekler, ust, havuz, kuyruktan=False):
+    """BASLATMA_KILIDI + baslatma_kilidi altında çağrılır. havuz=True: ajan meşgulse çift koşu açılmaz;
+    ALT_AJANLI ajanda boş alt yuvada (derinlik 1) koşar, yoksa kuyruğa alınır."""
+    ajan_id = ajan["id"]
+    durum_id = ajan_id
+    if ortak.ajan_mesgul(ajan_id):
+        durum_id = alt_yuva(ajan_id) if havuz else None
+        if durum_id is None:
+            if not havuz or kuyruktan:
+                raise IstekHatasi(409, "ajan zaten çalışıyor")
+            return kuyruga_ekle(ajan_id, etiket, prompt, kaynak, ekler, ust)
+    kosu_id = f"{datetime.now():%Y-%m-%d-%H%M%S}-{durum_id}" + (f"-{secrets.token_hex(2)}" if durum_id != ajan_id else "")
+    prompt = eklerle_prompt(prompt, gorselleri_kaydet(ekler, ajan_id, kosu_id))
+    arg_yolu = os.path.join(ortak.KOSU_DIZINI, f"{kosu_id}.arg.json")
+    with open(arg_yolu, "w", encoding="utf-8") as f:
+        json.dump({"kosu_id": kosu_id, "ajan": ajan_id, "etiket": etiket,
+                   "prompt": prompt, "kaynak": kaynak,
+                   **({"durum_id": durum_id} if durum_id != ajan_id else {}),
+                   **({"ust_kosu": ust} if ust and KOSU_ID_DESENI.match(ust) else {})}, f, ensure_ascii=False)
+    ortak.durum_yaz(durum_id, {"durum": "basliyor", "kosu_id": kosu_id, "pid": None,
+                               "baslangic_ts": time.time()})
+    try:
+        tmux = tmux_hazirla()
+        subprocess.run([tmux, "new-window", "-d", "-t", f"={TMUX_OTURUM}:", "-n", durum_id,
+                        "-c", ajan["cwd"], sys.executable,
+                        os.path.join(ortak.KOK, "kosucu.py"), arg_yolu],
+                       check=True, capture_output=True)
+    except (subprocess.CalledProcessError, OSError) as e:
+        ortak.durum_yaz(durum_id, {"durum": "hata", "kosu_id": kosu_id, "hata": "tmux açılamadı"})
+        ortak.olay_yaz({"tur": "hata", "ajan": ajan_id, "kosu_id": kosu_id,
+                        "detay": f"tmux: {type(e).__name__}"})
+        raise IstekHatasi(500, "koşu başlatılamadı") from e
+    return {"kosu_id": kosu_id, "ajan": ajan_id, "tmux": f"{TMUX_OTURUM}:{durum_id}",
+            **({"alt": durum_id} if durum_id != ajan_id else {})}
+
+
+# ---------- alt ajan havuzu + kuyruk ----------
+
+ALT_AJANLI = ("gorevci",)  # meşgulken alt ajan açabilen ajanlar (CEO'nun eşzamanlılığı: ceo_calistir)
+MAKS_ALT = 2
+MAKS_KUYRUK = 20
+MAKS_KUYRUK_PROMPT = ortak.MAKS_GIRDI + MAKS_EK_KARAKTER * 2 + 4000  # ekler gömülü hâliyle
+KUYRUK_KAYNAKLARI = ("buton", "ceo", "tekrar")
+KUYRUK_ID_DESENI = re.compile(r"^q[0-9a-f]{10}$")
+KUYRUK_UYANMA_SN = 20
+
+
+def kuyruk_yolu():
+    return os.path.join(ortak.DURUM_DIZINI, "kuyruk.json")
+
+
+def alt_yuva(ajan_id):
+    """Boş alt ajan yuvasının durum id'si (<ajan>--alt-N) ya da None. Alt yuvanın alt yuvası yok (derinlik 1)."""
+    if ajan_id not in ALT_AJANLI:
+        return None
+    return next((s for s in (f"{ajan_id}--alt-{n}" for n in range(1, MAKS_ALT + 1)) if not ortak.ajan_mesgul(s)),
+                None)
+
+
+def kuyruk_oku():
+    """Doğrulanmış kuyruk kayıtları. Bozuk dosya .bozuk-<zaman> olarak yana alınır."""
+    yol = kuyruk_yolu()
+    try:
+        with open(yol, encoding="utf-8") as f:
+            veri = json.load(f)
+        if not isinstance(veri, dict) or not isinstance(veri.get("isler"), list):
+            raise ValueError("isler listesi yok")
+    except FileNotFoundError:
+        return []
+    except (ValueError, OSError, UnicodeDecodeError) as e:
         try:
-            tmux = tmux_hazirla()
-            subprocess.run([tmux, "new-window", "-d", "-t", f"={TMUX_OTURUM}:", "-n", ajan_id,
-                            "-c", ajan["cwd"], sys.executable,
-                            os.path.join(ortak.KOK, "kosucu.py"), arg_yolu],
-                           check=True, capture_output=True)
-        except (subprocess.CalledProcessError, OSError) as e:
-            ortak.durum_yaz(ajan_id, {"durum": "hata", "kosu_id": kosu_id, "hata": "tmux açılamadı"})
-            ortak.olay_yaz({"tur": "hata", "ajan": ajan_id, "kosu_id": kosu_id,
-                            "detay": f"tmux: {type(e).__name__}"})
-            raise IstekHatasi(500, "koşu başlatılamadı") from e
-    return {"kosu_id": kosu_id, "ajan": ajan_id, "tmux": f"{TMUX_OTURUM}:{ajan_id}"}
+            os.replace(yol, f"{yol}.bozuk-{datetime.now():%Y%m%d-%H%M%S}")
+        except OSError:
+            pass
+        ortak.olay_yaz({"tur": "hata", "ajan": "ofis", "detay": f"kuyruk.json bozuk, yana alındı ({type(e).__name__})"})
+        return []
+    return [k for k in veri["isler"][:MAKS_KUYRUK]
+            if isinstance(k, dict) and KUYRUK_ID_DESENI.match(str(k.get("id")))
+            and ortak.AJAN_ID_DESENI.match(str(k.get("ajan"))) and k.get("kaynak") in KUYRUK_KAYNAKLARI
+            and isinstance(k.get("prompt"), str) and k["prompt"].strip() and len(k["prompt"]) <= MAKS_KUYRUK_PROMPT
+            and (k.get("etiket") is None or isinstance(k.get("etiket"), str))
+            and (k.get("ust") is None or (isinstance(k.get("ust"), str) and KOSU_ID_DESENI.match(k["ust"])))]
+
+
+def kuyruk_yaz(isler):
+    if not isler:  # boş kuyrukta dosya yok: izleyici yalnız varlığına bakar
+        try:
+            os.remove(kuyruk_yolu())
+        except FileNotFoundError:
+            pass
+        return
+    atomik_yaz(kuyruk_yolu(), json.dumps({"surum": 1, "isler": isler}, ensure_ascii=False, indent=1))
+
+
+def kuyruga_ekle(ajan_id, etiket, prompt, kaynak, ekler, ust):
+    kuyruk = kuyruk_oku()
+    if len(kuyruk) >= MAKS_KUYRUK:
+        raise IstekHatasi(429, f"ajan meşgul ve kuyruk dolu (en fazla {MAKS_KUYRUK} iş); biri bitince yeniden dene")
+    q_id = "q" + secrets.token_hex(5)
+    kuyruk.append({"id": q_id, "ajan": ajan_id, "etiket": etiket if isinstance(etiket, str) else None,
+                   "prompt": eklerle_prompt(prompt, gorselleri_kaydet(ekler, ajan_id, q_id)),
+                   "kaynak": kaynak if kaynak in KUYRUK_KAYNAKLARI else "buton",
+                   "ust": ust if isinstance(ust, str) and KOSU_ID_DESENI.match(ust) else None,
+                   "zaman": ortak.simdi_iso()})
+    kuyruk_yaz(kuyruk)
+    ortak.olay_yaz({"tur": "kuyruga_alindi", "ajan": ajan_id, "kuyruk_id": q_id, "kaynak": kuyruk[-1]["kaynak"],
+                    "sira": len(kuyruk)})
+    return {"kosu_id": None, "ajan": ajan_id, "kuyrukta": q_id, "sira": len(kuyruk)}
+
+
+def kuyrugu_isle():
+    """Kuyruktaki işleri sırayla dener; ajan (ya da alt yuvası) boşsa başlatır. Model çağırmaz, yalnız koşu açar."""
+    if not os.path.exists(kuyruk_yolu()):
+        return []
+    _, tablo = ortak.ajanlari_yukle()
+    baslayan = []
+    with BASLATMA_KILIDI, ortak.baslatma_kilidi():
+        kalan = []
+        for k in kuyruk_oku():
+            ajan = tablo.get(k["ajan"])
+            if not ajan or k["ajan"] == "ceo" or not ajan["kurulu"]:
+                ortak.olay_yaz({"tur": "hata", "ajan": k["ajan"], "kuyruk_id": k["id"],
+                                "detay": "kuyruktaki iş düşürüldü: ajan yok ya da kurulu değil"})
+                continue
+            try:
+                b = _baslat_kilitli(ajan, k["etiket"], k["prompt"], k["kaynak"], None, k["ust"], True, kuyruktan=True)
+            except IstekHatasi as e:
+                if e.kod == 409 and "çalışıyor" in str(e):
+                    kalan.append(k)
+                else:
+                    ortak.olay_yaz({"tur": "hata", "ajan": k["ajan"], "kuyruk_id": k["id"],
+                                    "detay": f"kuyruktan başlatılamadı ({e.kod})"})
+                continue
+            baslayan.append(b)
+            ortak.olay_yaz({"tur": "kuyruktan_basladi", "ajan": k["ajan"], "kuyruk_id": k["id"],
+                            "kosu_id": b["kosu_id"]})
+        kuyruk_yaz(kalan)
+    return baslayan
+
+
+def kuyruk_izleyici_baslat():
+    """Daemon: 20 sn'de bir kuyruk dosyası var mı bakar (boşta yalnız stat); varsa sıradakini dener."""
+    def dongu():
+        while True:
+            time.sleep(KUYRUK_UYANMA_SN)
+            try:
+                kuyrugu_isle()
+            except Exception as e:  # noqa: BLE001 - izleyici sunucuyu düşürmesin
+                sys.stderr.write(f"kuyruk: {type(e).__name__}\n")
+    t = threading.Thread(target=dongu, name="kuyruk", daemon=True)
+    t.start()
+    return t
 
 
 MAKS_REVIZE_NOT = 1000
@@ -490,21 +622,21 @@ def ceo_kaydi_yaz(k):
 _ceo_acik = threading.local()  # bu iş parçacığında ceo_basladi yazılmış, ceo_bitti henüz yazılmamış koşunun id'si
 
 
-_ceo_kosuyor = False  # sunucu sürecinde: bir CEO koşusu sürerken ikincisi başlamasın
-_CEO_KILIDI = threading.Lock()  # yalnız _ceo_kosuyor bayrağını korur, koşu boyunca tutulmaz
+_ceo_kosuyor = 0  # sunucu sürecinde süren CEO koşusu sayısı: 1 + en fazla MAKS_ALT alt koşu
+_CEO_KILIDI = threading.Lock()  # yalnız _ceo_kosuyor sayacını korur, koşu boyunca tutulmaz
 
 
 def ceo_calistir(metin, kuru=False, ekler=None):
     global _ceo_kosuyor
     with _CEO_KILIDI:
-        if _ceo_kosuyor:
-            raise IstekHatasi(409, "CEO zaten çalışıyor")
-        _ceo_kosuyor = True
+        if _ceo_kosuyor > MAKS_ALT:
+            raise IstekHatasi(429, f"CEO ve {MAKS_ALT} alt koşusu dolu; biri bitince yeniden dene")
+        _ceo_kosuyor += 1
     try:
         return _ceo_calistir(metin, kuru=kuru, ekler=ekler)
     finally:
         with _CEO_KILIDI:
-            _ceo_kosuyor = False
+            _ceo_kosuyor -= 1
 
 
 def _ceo_calistir(metin, kuru=False, ekler=None):
@@ -569,9 +701,14 @@ def _ceo_calistir(metin, kuru=False, ekler=None):
     baslatilan = []
     for a in ([] if kuru else gecerli):
         try:
-            baslatilan.append(gorev_baslat(a["ajan"], prompt=a["prompt"], kaynak="ceo", ekler=ekler, ust=ceo_id))
+            b = gorev_baslat(a["ajan"], prompt=a["prompt"], kaynak="ceo", ekler=ekler, ust=ceo_id, havuz=True)
         except IstekHatasi as e:
             reddedilen.append({**a, "neden": str(e)})
+            continue
+        if b.get("kosu_id"):
+            baslatilan.append(b)
+        else:
+            reddedilen.append({**a, "neden": f"ajan meşgul; kuyruğa alındı (sıra {b.get('sira')}), boşalınca başlar"})
     kosu_haritasi = {b["ajan"]: b["kosu_id"] for b in baslatilan}
     atamalar = [{"ajan": a["ajan"], "prompt": a["prompt"], "kosu_id": kosu_haritasi.get(a["ajan"])} for a in gecerli]
     for ek in ek_kayit:  # görsel ekler atanan ajanın cikti/<ajan>/ek/ klasörüne gider; ilk atananın yolu kayda girer
@@ -1224,16 +1361,27 @@ def ongorulebilirlik_yaniti():
         except ValueError:
             sonraki = None
         p = k.get("prompt")
+        try:
+            takvim = zamanlayici.oncalendar(k["cron"]) if not k["hata"] else None
+        except ValueError:
+            takvim = None
         isler.append({"id": k["id"], "ajan": k["ajan"], "ad": (tablo.get(k["ajan"]) or {}).get("ad") or k["ajan"],
                       "etiket": k["etiket"], "prompt_kisa": (p[:40] + ("…" if len(p) > 40 else "")) if p else None,
                       "cron": k["cron"], "ozet": zamanlayici.ozet(k["cron"]), "aktif": k["aktif"],
                       "olusturma": k["olusturma"], "son_calisma": k["son_calisma"], "son_sonuc": k["son_sonuc"],
-                      "hata": k["hata"], "sonraki": _iso(sonraki)})
+                      "hata": k["hata"], "sonraki": _iso(sonraki), "oncalendar": takvim})
     ajanlar = [{"id": a["id"], "ad": a.get("ad") or a["id"],
                 "hazir_gorevler": [g["etiket"] for g in a.get("hazir_gorevler", []) if g.get("etiket")]}
                for a in tablo.values() if a["id"] != "ceo" and a["kurulu"]]
+    kuyruk = [{"ajan": k["ajan"], "kaynak": k["kaynak"], "etiket": k["etiket"], "zaman": k.get("zaman")}
+              for k in kuyruk_oku()]  # prompt gönderilmez
+    alt = [{"ajan": a, "calisan": sum(1 for n in range(1, MAKS_ALT + 1) if ortak.ajan_mesgul(f"{a}--alt-{n}"))}
+           for a in ALT_AJANLI if a in tablo]
+    kurulu = os.path.exists(os.path.expanduser(f"~/.config/systemd/user/{zamanlayici.ESLE_BIRIMI}.path"))
     return {"otomatik": otomatik, "isler": isler, "ajanlar": ajanlar, "simdi": _iso(simdi),
-            "uyari": zamanlayici.UYARI, "min_aralik_dk": zamanlayici.MIN_ARALIK_DK, "maks_is": zamanlayici.MAKS_IS}
+            "uyari": zamanlayici.UYARI, "min_aralik_dk": zamanlayici.MIN_ARALIK_DK, "maks_is": zamanlayici.MAKS_IS,
+            "kuyruk": kuyruk, "maks_kuyruk": MAKS_KUYRUK, "alt": alt, "maks_alt": MAKS_ALT,
+            "systemd_kurulu": kurulu}
 
 
 def ongorulebilirlik_degistir(veri):
@@ -1241,7 +1389,7 @@ def ongorulebilirlik_degistir(veri):
     try:
         if veri.get("islem") == "onizle":
             ifade = zamanlayici.cron_dogrula(veri.get("cron"))
-            return {"cron": ifade, "ozet": zamanlayici.ozet(ifade),
+            return {"cron": ifade, "ozet": zamanlayici.ozet(ifade), "oncalendar": zamanlayici.oncalendar(ifade),
                     "sonrakiler": [_iso(t) for t in zamanlayici.sonrakiler(ifade, datetime.now(), 3)]}
         _, tablo = ortak.ajanlari_yukle()
         is_id = zamanlayici.degistir(veri, tablo)
@@ -1420,7 +1568,8 @@ class Isleyici(SimpleHTTPRequestHandler):
                         (prompt is not None and not isinstance(prompt, str)):
                     raise IstekHatasi(400, "etiket/prompt metin olmalı")
                 ekler = ekleri_dogrula(veri.get("ekler"))
-                return self._json(202, gorev_baslat(ajan, etiket=etiket, prompt=prompt, ekler=ekler))
+                return self._json(202, gorev_baslat(ajan, etiket=etiket, prompt=prompt, ekler=ekler,
+                                                    havuz=ajan in ALT_AJANLI))
             if yol == "/api/revize":
                 return self._json(202, revize_baslat(veri))
             if yol == "/api/hafiza":
@@ -1526,8 +1675,7 @@ def main():
         f.write(str(port))
     print(f"Ajan Ofisi: http://{HOST}:{port}   (demo: http://{HOST}:{port}/?demo=1)", flush=True)
     KOPRU.baslat()
-    zamanlayici.baslat(lambda ajan, etiket, prompt, kaynak: gorev_baslat(ajan, etiket=etiket, prompt=prompt,
-                                                                         kaynak=kaynak))
+    kuyruk_izleyici_baslat()  # tekrar eden işler systemd timer'larıyla koşar; sunucu yalnız kuyruğu boşaltır
     sunucu.serve_forever()
 
 
