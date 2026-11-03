@@ -1712,7 +1712,8 @@ $('komutDosya').onchange = async function () {
   for (const f of this.files) {
     if (ceoEkler.length >= 3) { tost('En fazla 3 dosya eklenebilir.'); break; }
     const t = await f.text().catch(() => null);
-    if (t == null || t.includes('\u0000')) tost(f.name + ': yalnız metin dosyaları eklenebilir.');
+    const ikili = t == null || /[\u0000�]/.test(t.slice(0, 8000));
+    if (ikili) ceoEkler.push({ ad:f.name, icerik:'[İkili dosya: ' + (f.type || 'bilinmeyen tür') + ', ' + f.size + ' bayt. İçerik iletilmedi, yalnız dosya adı ve türü bilgi olarak verildi.]' });
     else if (t.length > 40000) tost(f.name + ': dosya çok büyük (en fazla 40.000 karakter).');
     else ceoEkler.push({ ad:f.name, icerik:t });
   }
