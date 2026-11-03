@@ -1,6 +1,7 @@
 # kişisel yapılandırma (örnekleri: *.example.json)
 ajanlar.json
 kopru.json
+kurul.json
 CLAUDE.local.md
 
 # çalışma verisi: koşu logları, olaylar, durum, çıktılar, hafıza içeriği

@@ -97,6 +97,14 @@ araçlarını ve hazır görevlerini tutar. CEO araçsız tek bir `claude -p --j
 klasör, boş/uzun prompt, en fazla 5 atama); bozuksa **hiçbir koşu başlamaz**. `tetik_kelime` alanı olan bir ajan
 (ör. posta) yalnız istekte o kelime geçince atanabilir.
 
+**Mentor kurulu.** CEO'nun danışabileceği 5 mentor var: strateji, teknoloji, finans, pazarlama, hukuk/etik. Her birinin
+ayrı uzmanlığı ve tecrübesi var. Karar stratejikse, riskliyse ya da belirsizse (ya da sen "kurula sor" dersen) CEO ilk
+cevabında `"kurul": {"soru", "uyeler"}` döndürür. Sunucu seçilen mentorları paralel, araçsız `claude -p` ile sorar
+(her biri en çok 120 sn ve 0,10 $). Görüşler veri olarak CEO'ya geri verilir, CEO son planı ikinci çağrıda çıkarır.
+Basit işlerde kurula danışılmaz, ek çağrı da yapılmaz. Görüşler CEO kaydında (`cikti/ceo/<id>.json/.md`) durur.
+Kurulu değiştirmek istersen kök klasöre `kurul.json` koy:
+`{"uyeler": [{"id", "ad", "uzmanlik", "tecrube", "model"}]}` (en fazla 7 üye).
+
 ### Her ajan = bir proje klasörü
 Ajan kendi `cwd`'sinde çalışır ve `oda` alanındaki odaya oturur. Odalar ajanlardan türer: CEO ortada, diğerleri
 üst sıra, CEO'nun iki yanı ve alt sıraya dengeli dağılır; kaide, ışık ve kamera bu yerleşime göre hesaplanır

@@ -1368,6 +1368,10 @@ function ceoKaydiAc(ceoId) {
     if (!Array.isArray(k.ekler)) m.push('_kayıt yok_');
     else if (!k.ekler.length) m.push('_ek yok_');
     else k.ekler.forEach(e => m.push('- ' + e.ad + ' (' + (e.tur === 'gorsel' ? 'görsel' : 'metin') + ')' + (e.yol ? ' → `' + e.yol + '`' : '')));
+    if (k.kurul && Array.isArray(k.kurul.gorusler)) {
+      m.push('### Mentor kurulu', '**Soru:** ' + (k.kurul.soru || ''));
+      k.kurul.gorusler.forEach(g => m.push('**' + (g.ad || g.uye) + '**\n\n' + (g.gorus || '_görüş alınamadı' + (g.hata ? ': ' + g.hata : '') + '_')));
+    }
     m.push('### CEO cevabı', k.cevap || (k.hata ? 'Hata: ' + k.hata : '_cevap kaydı yok_'));
     m.push('### Atamalar');
     if (!(k.atamalar || []).length) m.push('_atama yok_' + (k.kuru ? ' (kuru koşu)' : ''));
@@ -1617,6 +1621,7 @@ function olayIsle(o) {
     ceo_bitti() {
       if (o.durum === 'hata') { if (!tekrar) akisEkle('ceo', 'CEO geçerli bir plan çıkaramadı, koşu başlatılmadı', '', '', zaman); }
       else {
+        if (o.kurul && Array.isArray(o.kurul.uyeler)) akisEkle('ceo', 'CEO mentor kuruluna danıştı: ' + o.kurul.uyeler.map(u => u.ad + (u.tamam ? '' : ' (cevapsız)')).join(', '), '', '', zaman, 'Kurula soru: ' + (o.kurul.soru || ''), o.kosu_id || '');
         akisEkle('ceo', 'CEO: ' + kisa(o.cevap || '', 140), '', '', zaman, o.cevap || '', o.kosu_id || '');
         (o.reddedilen || []).forEach(r => akisEkle(r.ajan, 'CEO atamadı: ' + (ajanBul(r.ajan)?.ad || r.ajan) + ' · ' + (r.neden || ''), '', '', zaman));
       }
