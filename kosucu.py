@@ -182,7 +182,8 @@ def kos(arg_dosyasi):
     veri, tablo = ortak.ajanlari_yukle()
     ajan = tablo[arg["ajan"]]
     kosu_id = arg["kosu_id"]
-    baglam = {"kosu_id": kosu_id, "ajan": ajan["id"], "oda": ajan["oda"]}
+    baglam = {"kosu_id": kosu_id, "ajan": ajan["id"], "oda": ajan["oda"],
+              **({"ust_kosu": arg["ust_kosu"]} if arg.get("ust_kosu") else {})}
     log_yolu = os.path.join(ortak.KOSU_DIZINI, f"{kosu_id}.log")
     cikti_dizini = os.path.join(ortak.CIKTI_DIZINI, ajan["id"])
     os.makedirs(cikti_dizini, exist_ok=True)

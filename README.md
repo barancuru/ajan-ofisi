@@ -158,6 +158,8 @@ toplamda en büyük sayı odur. Maliyet sekmesi yalnız `claude -p`'nin bildirdi
 | `GET /api/ajanlar` | ajanlar + `kurulu`, `durum`, `son_kosu`, `odalar`, `ayarlar` (cwd ve görev prompt'ları gönderilmez) |
 | `POST /api/gorev` | `{"ajan": id, "etiket": "<hazır görev>"}` ya da `{"ajan": id, "prompt": "...", "ekler": [{"ad","icerik"}]}` → 202; çalışıyorsa 409. `ekler`: en fazla 3 metin dosyası, her biri 40.000 karakter; prompt'a veri olarak gömülür |
 | `GET /api/son-is?ajan=id` | ajanın son koşusunun tam çıktısı (`{metin, kirpildi}`) |
+| `GET /api/gecmis?ajan=id&sayfa=0` | koşu geçmişi (`olaylar.jsonl`, yeniden eskiye, sayfada 20; `ajan` boşsa hepsi, CEO dahil). Eksik alanlar `null` |
+| `GET /api/ceo-kayit?kosu=<ceo_id>` | bir CEO isteğinin kaydı (`cikti/ceo/<id>.json`: istek, ekler, cevap, atamalar + atanan koşu id'leri). CEO istekleri `cikti/ceo/<id>.md/.json`, metin ekleri `cikti/ceo/ek/` altına yazılır; eski kayıtlarda eksik alanlar "kayıt yok" görünür |
 | `POST /api/ceo` | `{"metin": "...", "kuru": false, "ekler": [{"ad","icerik"}]}` (ekler isteğe bağlı, `/api/gorev` ile aynı sınırlar; görsel için `{"ad","gorsel_b64"}` (PNG/JPEG/GIF/WebP, en fazla 2 MB; tür imzadan doğrulanır, atanan ajanın `cikti/<ajan>/ek/` klasörüne yazılır ve prompt'ta yolu verilir; CEO görseli görmez); CEO'ya ve atanan ajanlara veri olarak gider) → `{cevap, atamalar, baslatilan, reddedilen}`; `kuru: true` yalnız plan |
 | `GET /api/olaylar?son=N` | SSE; son N olayı tekrar oynatır, sonra canlı |
 | `GET /api/terminaller` | köprüdeki oturumlar (ajan, oda, oturum adı, durum, son araç, son hedef) |

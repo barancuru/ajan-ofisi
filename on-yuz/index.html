@@ -95,6 +95,17 @@ h3.kucuk{font-family:"Space Grotesk",sans-serif;font-size:11px;font-weight:600;l
 .akis li.tikla:hover{background:rgba(59,52,44,.04)}
 .not.son-is.tikla{cursor:pointer}
 .not.son-is.tikla:hover{background:rgba(59,52,44,.07)}
+.gecmis ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;max-height:40vh;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.gecmis li{padding:8px 10px;border-radius:8px;background:rgba(59,52,44,.05);overflow-wrap:anywhere;min-width:0}
+.gecmis li.tikla{cursor:pointer;min-height:44px}
+.gecmis li.tikla:hover{background:rgba(59,52,44,.09)}
+.gecmis li.bos{color:#6d6357;font-size:13px}
+.gecmis li p{margin:2px 0;font-size:13px}
+.gecmis small{color:#6d6357;font-size:12px}
+.gecmis .chipler{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.gecmis .chipler button,.gecmis .daha{min-height:40px;padding:6px 12px;border-radius:999px;border:1px solid rgba(59,52,44,.25);background:none;color:inherit;font-size:12.5px;cursor:pointer}
+.gecmis .chipler button:disabled{opacity:.5;cursor:default}
+.gecmis .daha{display:block;margin-top:6px;width:100%;border-radius:8px}
 .akis-pop{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(40,34,28,.45)}
 .akis-pop[hidden]{display:none}
 .akis-pop .kutu{background:#fffaf2;border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.3);width:min(720px,100%);max-height:85vh;display:flex;flex-direction:column;overflow:hidden}
@@ -1335,6 +1346,69 @@ function akisPopAc(baslik, tam, url, eylemKur) {
     mdCiz(pre, r.metin + (r.kirpildi ? '\n\n…(kırpıldı)' : '')); pre.scrollTop = 0;
   }).catch(() => {});
 }
+/* Koşu geçmişi (/api/gecmis) ve CEO kaydı (/api/ceo-kayit). Eksik alanlar "kayıt yok" yazılır. */
+const gecmisZaman = z => { const d = new Date(z); return isNaN(d) ? '—' : d.toLocaleString('tr-TR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }); };
+function ajanKosusuAc(ajanId, kosuId, geri) {
+  akisPopAc((ajanBul(ajanId)?.ad || ajanId) + ' · koşu', 'Çıktı yükleniyor… (çıktı dosyası yoksa bu kayıtta metin yok)', '/api/son-is?ajan=' + encodeURIComponent(ajanId) + '&kosu=' + encodeURIComponent(kosuId),
+    geri ? (kap, kapat) => { const dm = el('div', 'dugmeler'), b = el('button', null, '← CEO kaydı'); b.type = 'button'; b.onclick = geri; dm.append(b); kap.append(dm); } : null);
+}
+function ceoKaydiAc(ceoId) {
+  getJSON('/api/ceo-kayit?kosu=' + encodeURIComponent(ceoId)).then(r => {
+    const k = r.kayit;
+    if (!k) { akisPopAc('CEO kaydı', 'Bu kayıt bulunamadı.'); return; }
+    const m = ['### İstek', k.istek || '_istek kaydı yok_', '### Ekler'];
+    if (!Array.isArray(k.ekler)) m.push('_kayıt yok_');
+    else if (!k.ekler.length) m.push('_ek yok_');
+    else k.ekler.forEach(e => m.push('- ' + e.ad + ' (' + (e.tur === 'gorsel' ? 'görsel' : 'metin') + ')' + (e.yol ? ' → `' + e.yol + '`' : '')));
+    m.push('### CEO cevabı', k.cevap || (k.hata ? 'Hata: ' + k.hata : '_cevap kaydı yok_'));
+    m.push('### Atamalar');
+    if (!(k.atamalar || []).length) m.push('_atama yok_' + (k.kuru ? ' (kuru koşu)' : ''));
+    (k.atamalar || []).forEach(a => m.push('- **' + (ajanBul(a.ajan)?.ad || a.ajan) + '**' + (a.kosu_id ? ' · `' + a.kosu_id + '`' : '') + (a.prompt ? ': ' + a.prompt : '')));
+    (k.reddedilen || []).forEach(a => m.push('- ~~' + (ajanBul(a.ajan)?.ad || a.ajan) + '~~ atanmadı: ' + (a.neden || '')));
+    if (r.eksik) m.push('_Not: bu kayıt eski; yalnız olay günlüğündeki alanlar var._');
+    akisPopAc('CEO · ' + gecmisZaman(k.zaman), m.join('\n\n'), '', (kap, kapat) => {
+      const baglar = (k.atamalar || []).filter(a => a.kosu_id);
+      if (!baglar.length) { kap.hidden = true; return; }
+      const dm = el('div', 'dugmeler');
+      baglar.forEach(a => { const b = el('button', null, (ajanBul(a.ajan)?.ad || a.ajan) + ' koşusu ↗'); b.type = 'button'; b.onclick = () => ajanKosusuAc(a.ajan, a.kosu_id, () => ceoKaydiAc(ceoId)); dm.append(b); });
+      kap.append(dm);
+    });
+  }).catch(() => akisPopAc('CEO kaydı', 'Kayıt okunamadı.'));
+}
+function gecmisListesi(a) {
+  const kap = el('div', 'gecmis'), ul = el('ul'), daha = el('button', 'daha', 'Daha eski'); daha.type = 'button'; daha.hidden = true;
+  let sayfa = 0;
+  const yukle = () => getJSON('/api/gecmis?ajan=' + encodeURIComponent(a.id) + '&sayfa=' + sayfa).then(r => {
+    if (!sayfa && !r.kayitlar.length) ul.append(el('li', 'bos', 'Henüz kayıt yok'));
+    r.kayitlar.forEach(k => {
+      const li = el('li', 'tikla'); li.tabIndex = 0; li.setAttribute('role', 'button');
+      const ceoMu = k.ajan === 'ceo';
+      li.append(el('small', null, [gecmisZaman(k.zaman), k.sure_sn != null ? Math.round(k.sure_sn) + ' sn' : '', k.durum === 'hata' ? 'hata' : (k.kuru ? 'kuru koşu' : '')].filter(Boolean).join(' · ')));
+      if (ceoMu) li.append(el('p', null, 'İstek: ' + (k.istek ? kisa(k.istek, 120) : 'kayıt yok')));
+      li.append(el('p', null, kisa(temizMetin(k.ozet || k.hata || ''), 140) || '(özet yok)'));
+      const chipler = el('div', 'chipler');
+      (k.atamalar || []).forEach(t => {
+        const c = el('button', null, (ajanBul(t.ajan)?.ad || t.ajan) + (t.kosu_id ? ' ↗' : '')); c.type = 'button'; c.disabled = !t.kosu_id;
+        c.addEventListener('click', e => { e.stopPropagation(); if (t.kosu_id) ajanKosusuAc(t.ajan, t.kosu_id, () => ceoKaydiAc(k.kosu_id)); });
+        chipler.append(c);
+      });
+      if (!ceoMu && k.ust_kosu) {
+        const c = el('button', null, 'CEO isteği ↗'); c.type = 'button';
+        c.addEventListener('click', e => { e.stopPropagation(); ceoKaydiAc(k.ust_kosu); });
+        chipler.append(c);
+      }
+      if (chipler.children.length) li.append(chipler);
+      const ac = () => ceoMu ? ceoKaydiAc(k.kosu_id) : ajanKosusuAc(k.ajan, k.kosu_id);
+      li.addEventListener('click', ac);
+      li.addEventListener('keydown', e => { if (e.target === li && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); ac(); } });
+      ul.append(li);
+    });
+    daha.hidden = !r.daha_var; sayfa++;
+  }).catch(() => ul.append(el('li', 'bos', 'Geçmiş okunamadı')));
+  daha.onclick = yukle; yukle();
+  kap.append(ul, daha);
+  return kap;
+}
 function akisEkle(ajanId,metin, alt = '', tip = '', zaman = new Date(), detay = '', kosuId = '') {
   const li = el('li', tip);
   const d = el('div'); d.append(el('p', null, metin), el('small', null, [ajanBul(ajanId)?.ad, saatYazi(zaman), alt].filter(Boolean).join(' · ')));
@@ -1342,7 +1416,7 @@ function akisEkle(ajanId,metin, alt = '', tip = '', zaman = new Date(), detay = 
   const tam = ayrinti && ayrinti !== metin ? ayrinti : metin;
   const baslik = [ajanBul(ajanId)?.ad || ajanId || 'Ajan', saatYazi(zaman), alt].filter(Boolean).join(' · ');
   li.classList.add('tikla'); li.tabIndex = 0; li.setAttribute('role', 'button');
-  const url = kosuId && ajanId !== 'ceo' ? '/api/son-is?ajan=' + encodeURIComponent(ajanId) + '&kosu=' + encodeURIComponent(kosuId) : '';
+  const url = kosuId ? '/api/son-is?ajan=' + encodeURIComponent(ajanId) + '&kosu=' + encodeURIComponent(kosuId) : '';
   const ac = () => akisPopAc(baslik, tam, url);
   li.addEventListener('click', ac);
   li.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); ac(); } });
@@ -1382,7 +1456,7 @@ function kartlariCiz() {
     dug.append(onayB, sonraB);
     kart.append(ust, el('h4', null, 'Gözden geçir: ' + (a?.ad || k.ajan) + ' çıktısı'), el('p', null, k.ozet || '(özet yok)'), dug);
     const popBaslik = (a?.ad || k.ajan) + ' · çıktı' + (k.zaman ? ' · ' + saatYazi(new Date(k.zaman)) : '');
-    const popUrl = !DEMO && k.ajan !== 'ceo' ? '/api/son-is?ajan=' + encodeURIComponent(k.ajan) + '&kosu=' + encodeURIComponent(k.kosu_id) : '';
+    const popUrl = !DEMO ?'/api/son-is?ajan=' + encodeURIComponent(k.ajan) + '&kosu=' + encodeURIComponent(k.kosu_id) : '';
     const popAc = () => akisPopAc(popBaslik, k.ozet || '(özet yok)', popUrl, (kap, kapat) => {
       const d = el('div', 'dugmeler'); const b = el('button', 'onay', 'Onayla'); b.type = 'button';
       b.onclick = () => { SES.tik(); kartOnayla(k); kapat(); };
@@ -1535,7 +1609,7 @@ function olayIsle(o) {
     ceo_bitti() {
       if (o.durum === 'hata') { if (!tekrar) akisEkle('ceo', 'CEO geçerli bir plan çıkaramadı, koşu başlatılmadı', '', '', zaman); }
       else {
-        akisEkle('ceo', 'CEO: ' + kisa(o.cevap || '', 140), '', '', zaman, o.cevap || '');
+        akisEkle('ceo', 'CEO: ' + kisa(o.cevap || '', 140), '', '', zaman, o.cevap || '', o.kosu_id || '');
         (o.reddedilen || []).forEach(r => akisEkle(r.ajan, 'CEO atamadı: ' + (ajanBul(r.ajan)?.ad || r.ajan) + ' · ' + (r.neden || ''), '', '', zaman));
       }
       if (tekrar || !a) return;
@@ -1906,7 +1980,7 @@ function ajanPaneli(a) {
   if (a.id !== 'ceo') parcalar.push(el('h3', null, 'Bağlı araçlar'), aracCipleri(a.izinli_araclar));
   if (a.sonOzet) {
     const son = el('div', 'not son-is', a.sonOzet);
-    if (!DEMO && a.id !== 'ceo') {
+    if (!DEMO) {
       const sonUrl = '/api/son-is?ajan=' + encodeURIComponent(a.id);
       son.classList.add('tikla'); son.tabIndex = 0; son.setAttribute('role', 'button'); son.title = 'Tam çıktıyı aç';
       const sonAc = () => akisPopAc(a.ad + ' · son iş', son.textContent, sonUrl);
@@ -1914,8 +1988,9 @@ function ajanPaneli(a) {
       son.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sonAc(); } });
     }
     parcalar.push(el('h3', null, 'Son iş'), son);
-    if (!DEMO && a.id !== 'ceo') getJSON('/api/son-is?ajan=' + encodeURIComponent(a.id)).then(r => { if (r.metin) son.textContent = r.metin + (r.kirpildi ? '\n…(kırpıldı)' : ''); }).catch(() => {});
+    if (!DEMO) getJSON('/api/son-is?ajan=' + encodeURIComponent(a.id)).then(r => { if (r.metin) son.textContent = r.metin + (r.kirpildi ? '\n…(kırpıldı)' : ''); }).catch(() => {});
   }
+  if (!DEMO) parcalar.push(el('h3', null, 'Geçmiş'), gecmisListesi(a));
   const form = el('form', 'yaz'); form.autocomplete = 'off';
   const inp = el('input'); inp.maxLength = 600;
   const gon = el('button', 'gonder', a.id === 'ceo' ? 'Sor' : 'Ver'); gon.type = 'submit';

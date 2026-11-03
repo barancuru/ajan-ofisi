@@ -161,7 +161,7 @@ def son_is_yaniti(ajan_id, kosu_id=None):
             "durum": d.get("durum")}
 
 
-def gorev_baslat(ajan_id, etiket=None, prompt=None, kaynak="buton", ekler=None):
+def gorev_baslat(ajan_id, etiket=None, prompt=None, kaynak="buton", ekler=None, ust=None):
     _, tablo = ortak.ajanlari_yukle()
     ajan = tablo.get(ajan_id)
     if not ajan or ajan_id == "ceo":
@@ -185,7 +185,8 @@ def gorev_baslat(ajan_id, etiket=None, prompt=None, kaynak="buton", ekler=None):
         arg_yolu = os.path.join(ortak.KOSU_DIZINI, f"{kosu_id}.arg.json")
         with open(arg_yolu, "w", encoding="utf-8") as f:
             json.dump({"kosu_id": kosu_id, "ajan": ajan_id, "etiket": etiket,
-                       "prompt": prompt, "kaynak": kaynak}, f, ensure_ascii=False)
+                       "prompt": prompt, "kaynak": kaynak,
+                       **({"ust_kosu": ust} if ust and KOSU_ID_DESENI.match(ust) else {})}, f, ensure_ascii=False)
         ortak.durum_yaz(ajan_id, {"durum": "basliyor", "kosu_id": kosu_id, "pid": None,
                                   "baslangic_ts": time.time()})
         try:
@@ -265,13 +266,69 @@ def ceo_dogrula(veri, tablo, metin):
     return veri["cevap"], gecerli, reddedilen
 
 
+def ceo_ekleri_kaydet(ceo_id, ekler):
+    """CEO'ya eklenen metin dosyalarını cikti/ceo/ek/<ceo_id>-<n>.<uzantı> altına yazar (ad sunucuda üretilir).
+    Dönen liste kayda girer; görseller ayrıca atanan ajanın cikti/<ajan>/ek/ klasörüne düşer (yol sonradan eklenir)."""
+    sonuc = []
+    for i, e in enumerate(ekler or [], 1):
+        if "gorsel" in e:
+            sonuc.append({"ad": e["ad"], "tur": "gorsel", "sira": i, "uzanti": e["uzanti"], "yol": None})
+            continue
+        uzanti = os.path.splitext(e["ad"])[1].lstrip(".").lower()
+        uzanti = uzanti if re.fullmatch(r"[a-z0-9]{1,8}", uzanti) else "txt"
+        goreli = os.path.join("cikti", "ceo", "ek", f"{ceo_id}-{i}.{uzanti}")
+        try:
+            os.makedirs(os.path.join(ortak.KOK, "cikti", "ceo", "ek"), exist_ok=True)
+            with open(os.path.join(ortak.KOK, goreli), "w", encoding="utf-8") as f:
+                f.write(e["icerik"])
+        except OSError:
+            goreli = None
+        sonuc.append({"ad": e["ad"], "tur": "metin", "sira": i, "uzanti": uzanti, "yol": goreli,
+                      "boyut": len(e["icerik"])})
+    return sonuc
+
+
+def ceo_kaydi_yaz(k):
+    """cikti/ceo/<ceo_id>.json (yapılandırılmış) + .md (okunur) + durum/ceo.json (son iş). Dönen: .md yolu (kök'e göre)."""
+    klasor = os.path.join(ortak.CIKTI_DIZINI, "ceo")
+    goreli = os.path.join("cikti", "ceo", f"{k['ceo_id']}.md")
+    satirlar = ["## İstek", k["istek"], ""]
+    if k["ekler"]:
+        satirlar += ["## Ekler"] + [f"- {e['ad']} ({e['tur']})" + (f" → {e['yol']}" if e.get("yol") else "")
+                                     for e in k["ekler"]] + [""]
+    if k["durum"] == "hata":
+        satirlar += ["## Hata", k["hata"] or "", ""]
+    else:
+        satirlar += ["## CEO cevabı", k["cevap"] or "", ""]
+        if k["kuru"]:
+            satirlar += ["(kuru koşu: ajanlar başlatılmadı)", ""]
+        satirlar += ["## Atamalar"] + ([f"- {a['ajan']}" + (f" · koşu {a['kosu_id']}" if a.get("kosu_id") else "")
+                                         + f"\n  {a['prompt']}" for a in k["atamalar"]] or ["(atama yok)"])
+        if k["reddedilen"]:
+            satirlar += ["", "## Reddedilen"] + [f"- {a.get('ajan')}: {a.get('neden')}" for a in k["reddedilen"]]
+    try:
+        os.makedirs(klasor, exist_ok=True)
+        with open(os.path.join(klasor, f"{k['ceo_id']}.json"), "w", encoding="utf-8") as f:
+            json.dump(k, f, ensure_ascii=False, indent=1)
+        with open(os.path.join(ortak.KOK, goreli), "w", encoding="utf-8") as f:
+            f.write("\n".join(satirlar))
+        # "bitti"/"hata" yazılmaz: canli_durum CEO'yu 10 dk "bitti" gösterirdi
+        ortak.durum_yaz("ceo", {"durum": "basarisiz" if k["durum"] == "hata" else k["durum"], "kosu_id": k["ceo_id"], "pid": None, "bitis": ortak.simdi_iso(),
+                                "bitis_ts": time.time(), "sure_sn": k["sure_sn"], "ozet": (k["cevap"] or k["hata"] or "")[:400],
+                                "hata": k["hata"], "maliyet_usd": k["maliyet_usd"], "cikti": goreli})
+    except OSError:
+        return None
+    return goreli
+
+
 def ceo_calistir(metin, kuru=False, ekler=None):
     veri, tablo = ortak.ajanlari_yukle()
     ceo = tablo.get("ceo")
     if not ceo:
         raise IstekHatasi(404, "ajanlar.json'da 'ceo' yok")
     ceo_id = f"{datetime.now():%Y-%m-%d-%H%M%S}-ceo-{secrets.token_hex(2)}"
-    ortak.olay_yaz({"tur": "ceo_basladi", "kosu_id": ceo_id, "ajan": "ceo", "oda": "ceo"})
+    ortak.olay_yaz({"tur": "ceo_basladi", "kosu_id": ceo_id, "ajan": "ceo", "oda": "ceo", "istek": metin[:300]})
+    ek_kayit = ceo_ekleri_kaydet(ceo_id, ekler)
     claude = shutil.which("claude") or "/opt/homebrew/bin/claude"
     komut = [claude, "-p", "--model", ceo["model"], "--output-format", "json",
              "--no-session-persistence", "--max-budget-usd", "0.20", "--tools", "", "--json-schema", json.dumps(CEO_SEMASI)]
@@ -284,20 +341,35 @@ def ceo_calistir(metin, kuru=False, ekler=None):
         sonuc = json.loads(surec.stdout)
         cevap, gecerli, reddedilen = ceo_dogrula(json_ayikla(sonuc), tablo, metin)
     except (subprocess.TimeoutExpired, json.JSONDecodeError, ValueError) as e:
+        hata = f"{type(e).__name__}: {str(e)[:200]}"
+        sure = round(time.time() - baslangic, 1)
+        cikti = ceo_kaydi_yaz({"ceo_id": ceo_id, "zaman": ortak.simdi_iso(), "istek": metin[:ortak.MAKS_GIRDI],
+                               "ekler": ek_kayit, "kuru": kuru, "durum": "hata", "hata": hata, "sure_sn": sure,
+                               "maliyet_usd": None, "cevap": None, "atamalar": [], "reddedilen": []})
         ortak.olay_yaz({"tur": "ceo_bitti", "kosu_id": ceo_id, "ajan": "ceo", "oda": "ceo",
-                        "durum": "hata", "hata": f"{type(e).__name__}: {str(e)[:200]}",
-                        "sure_sn": round(time.time() - baslangic, 1)})
+                        "durum": "hata", "hata": hata, "sure_sn": sure, "istek": metin[:300], "cikti": cikti})
         raise IstekHatasi(502, "CEO geçerli bir plan döndürmedi; koşu başlatılmadı") from e
 
     baslatilan = []
     for a in ([] if kuru else gecerli):
         try:
-            baslatilan.append(gorev_baslat(a["ajan"], prompt=a["prompt"], kaynak="ceo", ekler=ekler))
+            baslatilan.append(gorev_baslat(a["ajan"], prompt=a["prompt"], kaynak="ceo", ekler=ekler, ust=ceo_id))
         except IstekHatasi as e:
             reddedilen.append({**a, "neden": str(e)})
+    kosu_haritasi = {b["ajan"]: b["kosu_id"] for b in baslatilan}
+    atamalar = [{"ajan": a["ajan"], "prompt": a["prompt"], "kosu_id": kosu_haritasi.get(a["ajan"])} for a in gecerli]
+    for ek in ek_kayit:  # görsel ekler atanan ajanın cikti/<ajan>/ek/ klasörüne gider; ilk atananın yolu kayda girer
+        if ek.get("tur") == "gorsel" and baslatilan:
+            ek["yol"] = f"cikti/{baslatilan[0]['ajan']}/ek/{baslatilan[0]['kosu_id']}-{ek['sira']}.{ek['uzanti']}"
+    sure = round(time.time() - baslangic, 1)
+    cikti = ceo_kaydi_yaz({"ceo_id": ceo_id, "zaman": ortak.simdi_iso(), "istek": metin[:ortak.MAKS_GIRDI],
+                           "ekler": ek_kayit, "kuru": kuru, "durum": "basarili", "hata": None, "sure_sn": sure,
+                           "maliyet_usd": sonuc.get("total_cost_usd"), "cevap": cevap,
+                           "atamalar": atamalar, "reddedilen": reddedilen})
     ortak.olay_yaz({"tur": "ceo_bitti", "kosu_id": ceo_id, "ajan": "ceo", "oda": "ceo", "durum": "basarili",
-                    "sure_sn": round(time.time() - baslangic, 1), "cevap": cevap,
-                    "atamalar": [{"ajan": a["ajan"], "prompt": a["prompt"][:300]} for a in gecerli],
+                    "sure_sn": sure, "cevap": cevap, "istek": metin[:300], "cikti": cikti,
+                    "atamalar": [{"ajan": a["ajan"], "prompt": a["prompt"][:300], "kosu_id": a["kosu_id"]}
+                                 for a in atamalar],
                     "baslatilan": baslatilan, "reddedilen": reddedilen, "kuru": kuru,
                     "kullanim": sonuc.get("usage"), "maliyet_usd": sonuc.get("total_cost_usd")})
     return {"kosu_id": ceo_id, "cevap": cevap, "atamalar": gecerli, "baslatilan": baslatilan,
@@ -316,6 +388,48 @@ def olaylari_oku():
                     continue
     except FileNotFoundError:
         return
+
+
+GECMIS_SAYFA = 20
+
+
+def gecmis_yaniti(ajan_id=None, sayfa=0):
+    """kosu_bitti/ceo_bitti olaylarından koşu geçmişi (yeniden eskiye). Eski kayıtlarda eksik alanlar None döner."""
+    if ajan_id and not ortak.AJAN_ID_DESENI.match(ajan_id):
+        raise IstekHatasi(400, "geçersiz ajan id")
+    biten = [o for o in olaylari_oku() if o.get("tur") in ("kosu_bitti", "ceo_bitti")
+             and (not ajan_id or o.get("ajan") == ajan_id)]
+    biten.reverse()
+    sayfa = max(0, sayfa)
+    dilim = biten[sayfa * GECMIS_SAYFA:(sayfa + 1) * GECMIS_SAYFA]
+    kayitlar = [{"kosu_id": o.get("kosu_id"), "ajan": o.get("ajan"), "zaman": o.get("zaman"), "durum": o.get("durum"),
+                 "sure_sn": o.get("sure_sn"), "maliyet_usd": o.get("maliyet_usd"), "ust_kosu": o.get("ust_kosu"),
+                 "ozet": o.get("cevap") if o["tur"] == "ceo_bitti" else o.get("ozet"),
+                 "istek": o.get("istek"), "atamalar": o.get("atamalar") if o["tur"] == "ceo_bitti" else None,
+                 "kuru": o.get("kuru"), "hata": o.get("hata"), "cikti_var": bool(o.get("cikti"))} for o in dilim]
+    return {"kayitlar": kayitlar, "sayfa": sayfa, "daha_var": len(biten) > (sayfa + 1) * GECMIS_SAYFA}
+
+
+def ceo_kayit_yaniti(ceo_id):
+    """Bir CEO isteğinin yapılandırılmış kaydı (cikti/ceo/<id>.json). Yoksa (eski kayıt) olaydan eksik haliyle kurulur."""
+    if not KOSU_ID_DESENI.match(ceo_id or ""):
+        raise IstekHatasi(400, "geçersiz koşu id")
+    kok = os.path.realpath(os.path.join(ortak.CIKTI_DIZINI, "ceo"))
+    yol = os.path.realpath(os.path.join(kok, f"{ceo_id}.json"))
+    if yol.startswith(kok + os.sep) and os.path.isfile(yol):
+        try:
+            with open(yol, encoding="utf-8") as f:
+                return {"kayit": json.load(f), "eksik": False}
+        except (OSError, json.JSONDecodeError):
+            pass
+    for o in olaylari_oku():
+        if o.get("tur") == "ceo_bitti" and o.get("kosu_id") == ceo_id:
+            return {"kayit": {"ceo_id": ceo_id, "zaman": o.get("zaman"), "istek": o.get("istek"), "ekler": None,
+                              "kuru": o.get("kuru"), "durum": o.get("durum"), "hata": o.get("hata"),
+                              "sure_sn": o.get("sure_sn"), "maliyet_usd": o.get("maliyet_usd"),
+                              "cevap": o.get("cevap"), "atamalar": o.get("atamalar") or [],
+                              "reddedilen": o.get("reddedilen") or []}, "eksik": True}
+    return {"kayit": None, "eksik": True}
 
 
 def canli_durum(ajan_id):
@@ -816,6 +930,18 @@ class Isleyici(SimpleHTTPRequestHandler):
             try:
                 q = parse_qs(yol.query)
                 return self._json(200, son_is_yaniti((q.get("ajan") or [""])[0], (q.get("kosu") or [""])[0] or None))
+            except IstekHatasi as e:
+                return self._json(e.kod, {"hata": str(e)})
+        if yol.path in ("/api/gecmis", "/api/ceo-kayit"):
+            try:
+                q = parse_qs(yol.query)
+                if yol.path == "/api/ceo-kayit":
+                    return self._json(200, ceo_kayit_yaniti((q.get("kosu") or [""])[0]))
+                try:
+                    sayfa = int((q.get("sayfa") or ["0"])[0])
+                except ValueError:
+                    sayfa = 0
+                return self._json(200, gecmis_yaniti((q.get("ajan") or [""])[0] or None, sayfa))
             except IstekHatasi as e:
                 return self._json(e.kod, {"hata": str(e)})
         if yol.path == "/api/hafiza":
