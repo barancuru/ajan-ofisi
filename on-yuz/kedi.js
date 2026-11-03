@@ -33,7 +33,8 @@ const GEO = (() => {
   const kalkanSekil = new THREE.Shape();
   kalkanSekil.moveTo(0, .09); kalkanSekil.lineTo(.075, .065); kalkanSekil.lineTo(.065, -.03); kalkanSekil.lineTo(0, -.09); kalkanSekil.lineTo(-.065, -.03); kalkanSekil.lineTo(-.075, .065); kalkanSekil.closePath();
   const kalkan = new THREE.ExtrudeGeometry(kalkanSekil, { depth:.02, bevelEnabled:true, bevelSize:.006, bevelThickness:.006, bevelSegments:2 });
-  return { kure, bacak, kuyruk, kulak, kulakIc, yay, biyik, papyon, tasma, kalkan };
+  const kutu = new THREE.BoxGeometry(1, 1, 1);
+  return { kure, bacak, kuyruk, kulak, kulakIc, yay, biyik, papyon, tasma, kalkan, kutu };
 })();
 
 /* ---------- dokular (desen başına bir kez) ---------- */
@@ -149,6 +150,8 @@ const ORTAK = {
   kirmizi: new THREE.MeshStandardMaterial({ color:'#d8433a', roughness:.55 }),
   altin: new THREE.MeshStandardMaterial({ color:'#e2b54a', roughness:.25, metalness:.85 }),
   kalkan: new THREE.MeshStandardMaterial({ color:'#4f6b5a', roughness:.4, metalness:.3 }),
+  takim: new THREE.MeshStandardMaterial({ color:'#2e3a52', roughness:.75 }),
+  kravat: new THREE.MeshStandardMaterial({ color:'#a8322d', roughness:.5 }),
 };
 
 /* ---------- pozlar: [px,py,pz, rx,ry,rz, sx,sy,sz] ---------- */
@@ -264,6 +267,12 @@ export function createCat({ desen = 'tekir', ton = 0, yavru = false, aksesuar = 
     mesh(boyun, GEO.kure, ORTAK.altin, [0, -.04, .07], [.035, .035, .035]);
   }
   if (aksesuar.kalkan) { const k = mesh(boyun, GEO.kalkan, ORTAK.kalkan, [0, -.17, .02]); k.rotation.x = -.25; }
+  if (aksesuar.takim) { // kurumsal: lacivert ceket + kol, göğüste gömlek ve kırmızı kravat
+    mesh(dugum.govde, GEO.kure, ORTAK.takim, [0, 0, 0], [1.07, 1.03, 1.04]);
+    ['L', 'R'].forEach(y => mesh(dugum['on' + y], GEO.bacak, ORTAK.takim, [0, 0, 0], [1.5, .55, 1.5]));
+    mesh(dugum.gogus, GEO.kutu, ORTAK.kravat, [0, -.08, .97], [.15, .5, .1]);
+    mesh(dugum.gogus, GEO.kutu, ORTAK.kravat, [0, .28, .98], [.22, .14, .12]);
+  }
 
   // durum makinesi
   const NODLAR = Object.keys(POZ.otur);
@@ -272,6 +281,11 @@ export function createCat({ desen = 'tekir', ton = 0, yavru = false, aksesuar = 
   const yuz = { ...YUZ0, acik:0 };
   let durum = 'uyuyor', t = Math.random() * 10, bittiT = -1, kirpT = 2 + Math.random() * 3, kirp = 0;
   let meme = null, memePoz = null, uyanT = -1;
+  // boşta aktiviteler: ad → [süre sn, poz]. Uyuyan kedi arada esner, tüy yalar, etrafa bakar; tepki() ile dışarıdan da tetiklenir
+  const AKT = { esne:[2.8, 'kivril'], kuyruk:[4, 'kivril'], tay:[4.4, 'otur'], bak:[4.6, 'otur'], gerin:[3.2, 'otur'], selam:[3.4, 'otur'], gul:[2.8, 'otur'] };
+  const BOSTA = ['esne', 'kuyruk', 'tay', 'bak', 'gerin'];
+  let akt = null, aktT = 0, sonraAkt = t + 3 + Math.random() * 12;
+  function tepki(ad) { if (meme || !AKT[ad]) return; akt = ad; aktT = t; }
 
   let dis = 'uyuyor'; // dışarıdan son gelen durum; 'bitti' her karede gelse de gerinme bir kez oynar
   function setDurum(yeni) {
@@ -279,10 +293,11 @@ export function createCat({ desen = 'tekir', ton = 0, yavru = false, aksesuar = 
     if (yeni === dis) return;
     dis = yeni;
     durum = yeni;
+    akt = null; sonraAkt = t + 6 + Math.random() * 12;
     if (yeni === 'bitti') bittiT = t;
   }
   function setMeme(spec, { aninda = false } = {}) {
-    meme = spec || null;
+    meme = spec || null; akt = null;
     memePoz = spec ? pozTuret(spec.temel || 'otur', spec.poz) : null;
     uyanT = spec && durum === 'uyuyor' && !aninda ? t : -1; // uyuyan kedi önce gerinip uyanır
     if (aninda && spec) { // önizleme: geçişsiz doğrudan poz
@@ -295,10 +310,14 @@ export function createCat({ desen = 'tekir', ton = 0, yavru = false, aksesuar = 
   function hedefPoz() {
     if (meme && !uyaniyor()) return memePoz;
     if (meme || durum !== 'uyuyor') return POZ.otur;
-    return POZ.kivril;
+    return akt && AKT[akt][1] === 'otur' ? POZ.otur : POZ.kivril;
   }
   function hedefYuz() {
     if (meme && !uyaniyor()) return { ...YUZ0, ...meme.yuz };
+    if (akt && !meme) { // her zaman yeni nesne: update içinde değiştirilir
+      const kapali = akt === 'esne' || akt === 'gerin' || akt === 'selam' || akt === 'gul';
+      return { ...YUZ0, acik:kapali ? 0 : 1, mutlu:kapali ? 1 : 0, kapak:akt === 'tay' ? 1 : 0 };
+    }
     if (durum === 'uyuyor' && !meme) return { ...YUZ0, acik:0 };
     if (durum === 'bitti' || uyaniyor()) return { ...YUZ0, acik:0, mutlu:1 };
     if (durum === 'dusunuyor') return { ...YUZ0, bakY:.6, bakX:.3 };
@@ -316,15 +335,24 @@ export function createCat({ desen = 'tekir', ton = 0, yavru = false, aksesuar = 
   function update(dt) {
     t += dt;
     if (durum === 'bitti' && bittiT >= 0 && t - bittiT > 1.7 && !meme) { durum = 'uyuyor'; bittiT = -1; }
+    if (akt && t - aktT >= AKT[akt][0]) { akt = null; sonraAkt = t + 8 + Math.random() * 16; }
+    if (!akt && !meme && durum === 'uyuyor' && t > sonraAkt) { akt = BOSTA[Math.floor(Math.random() * BOSTA.length)]; aktT = t; }
     const k = 1 - Math.exp(-dt * 8);
     const hp = hedefPoz();
     NODLAR.forEach(n => { const a = taban[n], b = hp[n]; for (let i = 0; i < 9; i++) a[i] += (b[i] - a[i]) * k; });
     const hy = hedefYuz();
     if (meme?.konus && !uyaniyor()) hy.agiz = .2 + Math.abs(Math.sin(t * 9)) * .55;
+    const as = akt && !meme ? (t - aktT) / AKT[akt][0] : 0;            // aktivite ilerlemesi 0→1
+    const ae = Math.max(0, Math.min(1, as * 4, (1 - as) * 4));          // giriş-çıkış zarfı
+    if (akt && !meme) {
+      if (akt === 'esne') hy.agiz = Math.sin(Math.min(1, as) * Math.PI) * 1.1;
+      if (akt === 'gul') hy.agiz = .3 + Math.abs(Math.sin(t * 10)) * .5;
+      if (akt === 'bak' || akt === 'kuyruk') { hy.bakX = Math.sin(t * 2.2) * .9; hy.bakY = Math.sin(t * 1.3) * .4; }
+    }
     Object.keys(yuz).forEach(n => { yuz[n] += (hy[n] - yuz[n]) * Math.min(1, k * 1.6); });
 
-    const uyur = durum === 'uyuyor' && !meme;
-    const yaz = (!meme && durum === 'calisiyor') || (meme && meme.yaz && !uyaniyor());
+    const uyur = durum === 'uyuyor' && !meme && !akt;
+    const yaz = (!meme && durum === 'calisiyor' && !akt) || (meme && meme.yaz && !uyaniyor());
     const ek = {};
     if (uyur) {
       const n = Math.sin(t * 1.7);
@@ -343,6 +371,22 @@ export function createCat({ desen = 'tekir', ton = 0, yavru = false, aksesuar = 
       ek.onL = { rx:-1.4 * e, rz:.5 * e }; ek.onR = { rx:-1.4 * e, rz:-.5 * e };
       ek.kok = { py:bitiyor ? Math.abs(Math.sin(tb * 6)) * .1 * (1 - tb / sure) : 0 };
       ek.govde = { sy:1 + .12 * e }; ek.bas = { rx:-.25 * e };
+    }
+    if (akt && !meme) {
+      if (akt === 'esne') { ek.bas = { rx:-.5 * ae }; ek.govde = { s:1 + .05 * ae }; }
+      else if (akt === 'kuyruk') {
+        ek.k2 = { rz:Math.sin(t * 7) * .5 }; ek.k4 = { rz:Math.sin(t * 7) * .7 }; ek.k5 = { rz:Math.sin(t * 7 - .5) * .9 };
+        ek.bas = { ry:Math.sin(t * 2.2) * .5 };
+      }
+      else if (akt === 'tay') { // oturup patisini yalar
+        ek.onL = { rx:-1 * ae + Math.sin(t * 9) * .08 * ae, rz:-.35 * ae }; ek.bas = { rx:.3 * ae, rz:.15 * ae };
+      }
+      else if (akt === 'bak') { ek.bas = { ry:Math.sin(t * 1.8) * .6, rx:Math.sin(t * .9) * .08 }; }
+      else if (akt === 'gerin') { // ön patiler öne, sırt kavis, kuyruk dik
+        ek.onL = { rx:-.5 * ae }; ek.onR = { rx:-.5 * ae }; ek.govde = { sy:1 - .1 * ae }; ek.bas = { rx:.4 * ae }; ek.k3 = { rz:-.5 * ae };
+      }
+      else if (akt === 'selam') { ek.onR = { rx:-1.4 * ae, rz:-.5 + Math.sin(t * 12) * .3 * ae }; ek.bas = { rz:.12 * ae }; }
+      else if (akt === 'gul') { ek.kok = { py:Math.abs(Math.sin(t * 9)) * .04 * ae }; ek.bas = { rx:-.2 * ae }; ek.govde = { sy:1 + .05 * Math.sin(t * 18) * ae }; }
     }
     if (meme?.anim && !uyaniyor()) meme.anim(t, ek);
     NODLAR.forEach(n => uygula(n, taban[n], ek[n]));
@@ -390,7 +434,7 @@ export function createCat({ desen = 'tekir', ton = 0, yavru = false, aksesuar = 
   }
 
   update(0);
-  return { group, dugum, setDurum, setMeme, setKontur, update, get durum() { return durum; }, desen };
+  return { group, dugum, setDurum, setMeme, setKontur, update, tepki, get durum() { return durum; }, get aktif() { return !!akt; }, desen };
 }
 
 /* ---------- takım → desen eşlemesi ---------- */

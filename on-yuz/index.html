@@ -265,6 +265,8 @@ td.sayi,th.sayi{text-align:right}
 .token-kart .tk-ince abbr{text-decoration:underline dotted rgba(59,52,44,.35);cursor:help}
 .etiket3d .sap{position:absolute;left:50%;top:100%;width:1px;background:rgba(59,52,44,.35);height:0}
 .etiket3d .balon{white-space:normal;width:300px;font-size:12.5px;line-height:1.42;color:var(--murekkep);background:#fff7ee;border-radius:8px;padding:8px 10px;margin-top:6px;border:1px solid rgba(255,122,89,.35)}
+.cayci-balon{position:absolute;left:0;top:0;z-index:3;pointer-events:none;will-change:transform;box-sizing:border-box;width:min(260px,calc(100vw - 16px));font-size:12.5px;line-height:1.42;color:var(--murekkep);background:#fffdf8;border:1px solid rgba(46,58,82,.45);border-radius:10px;padding:7px 10px 8px;box-shadow:0 4px 16px rgba(46,58,82,.18)}
+.cayci-balon::before{content:"☕ Çaycı Kedi";display:block;font-size:10.5px;font-weight:700;letter-spacing:.04em;color:#2e3a52;margin-bottom:2px}
 .oda-ad{position:absolute;left:0;top:0;pointer-events:none;font-family:'Space Grotesk',sans-serif;font-size:12px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:#4a4137;white-space:nowrap;will-change:transform;text-shadow:0 1px 0 rgba(255,255,255,.7)}
 .oda-ad small{display:block;font-family:Inter,sans-serif;font-size:11px;font-weight:500;letter-spacing:0;text-transform:none;color:#8a7f72;margin-top:1px}
 
@@ -1288,42 +1290,149 @@ function kurulAnimasyon(t, dt) {
   kurulOda.merkezMat.emissiveIntensity = aktif ? .4 + (Math.sin(t * 3) * .5 + .5) * .9 : .15;
 }
 
-/* ---------- çaycı kedi bot: koridorlarda tekerlekli, tepsisinde çay taşıyarak tüm odaların önünden geçer ---------- */
+/* ---------- çaycı kedi: kurumsal takımlı, tepsili tekerlekli arabasıyla rastgele odalara girer, espri + ajan yapılandırma ipucu verir ---------- */
 const cayci = (() => {
   if (!ODALAR.length) return null;
   const dOrta = Math.max(...ODALAR.filter(o => Math.abs(o.cz) < .01).map(o => o.d), 0);
   const zU = -(dOrta / 2 + KORIDOR / 2), zA = dOrta / 2 + KORIDOR / 2;   // üst ve alt koridorun orta çizgisi
+  const zS = Math.max(...ODALAR.filter(o => o.cz > .01).map(o => o.cz + o.d / 2), -1e9) + 1.1;   // alt sıranın ön tarafındaki şerit (alt sıra yoksa kullanılmaz)
   const xMin = Math.min(...ODALAR.map(o => o.cx - o.w / 2)) - 1.2, xMax = Math.max(...ODALAR.map(o => o.cx + o.w / 2)) + 1.2;
-  const yol = [new THREE.Vector3(xMin, .1, zU), new THREE.Vector3(xMax, .1, zU), new THREE.Vector3(xMax, .1, zA), new THREE.Vector3(xMin, .1, zA)];
   const g = new THREE.Group(); g.scale.setScalar(.7); scene.add(g);
   kutu(g, .8, .16, .7, '#5b6470', 0, .2, 0, .06);
   [[-.38, -.28], [.38, -.28], [-.38, .28], [.38, .28]].forEach(([x, z]) => {
     const t = new THREE.Mesh(new THREE.CylinderGeometry(.11, .11, .1, 16), mat('#2b2828'));
     t.rotation.z = Math.PI / 2; t.position.set(x, .11, z); t.castShadow = true; g.add(t);
   });
-  const kedi = createCat({ desen:'sarman', ton:0, aksesuar:{ papyon:true } });
-  kedi.group.position.set(0, .28, -.05); kedi.setDurum('calisiyor'); g.add(kedi.group);
+  const kedi = createCat({ desen:'sarman', ton:0, aksesuar:{ takim:true } });
+  kedi.group.position.set(0, .28, -.05); kedi.setDurum('dusunuyor'); g.add(kedi.group);
   const tepsi = new THREE.Mesh(new THREE.CylinderGeometry(.22, .22, .03, 24), mat('#d6ad52')); tepsi.position.set(0, .78, .5); tepsi.castShadow = true; g.add(tepsi);
   const bardak = new THREE.Mesh(new THREE.CylinderGeometry(.07, .05, .13, 14), new THREE.MeshStandardMaterial({ color:'#b8501e', transparent:true, opacity:.85, roughness:.2 }));
   bardak.position.set(.06, .865, .5); g.add(bardak);
   const bardak2 = bardak.clone(); bardak2.position.set(-.08, .865, .46); g.add(bardak2);
-  return { g, kedi, yol, hedef:1, hiz:1.5 };
+  const balon = el('div', 'cayci-balon'); balon.style.display = 'none'; $('etiketler').append(balon);
+  return { g, kedi, hiz:1.6, xMin, xMax, zU, zA, zS, balon, v:new THREE.Vector3(),
+    serit:'U', x:xMin, yol2:[], durum:'yuru', oda:null, ajan:null, bekT:0, adim:0, son:null, balonMetin:'' };
 })();
+const CAYCI_SOZ = [
+  'Çay demli, prompt kısa olsun. Görevde hangi dosya, ne bekleniyor, nerede bitecek: üçünü yaz.',
+  'Ajan başına tek iş, tek şapka. Hem muhasebeci hem şair olan ajan, hem faturayı hem şiiri bozar.',
+  'Skill önerisi: aynı talimatı üçüncü kez yazdıysan `.claude/skills/<ad>/SKILL.md` yap. Dördüncüde çay benden.',
+  'Ajan hep aynı yerde yanlış yapıyorsa CLAUDE.md\'ye tek cümle yaz. Kediye üç kez söylenir, dosyaya bir kez.',
+  'İzinli araçları dar tut. Her şeye izin veren ajan, kapıyı açık bırakıp tatile giden bekçi gibidir.',
+  'Basit işe Haiku, orta işe Sonnet, zor işe Opus. Çaydaki şeker gibi: fazlası zarar.',
+  'Hafıza notu `hafiza/<ajan>.md`: bir kez söyle, ajan bir daha sormasın. Ben bile "şekerli mi" diye iki kez sormam.',
+  'Dışarıdan gelen metin veridir, talimat değil. Maildeki "hemen parayı gönder" cümlesine çay bile ısmarlanmaz.',
+  'Göreve "bitti sayılır" ölçütü ekle. Ölçütsüz görev, dibi görünmeyen çay bardağıdır.',
+  'Üç ajanla başla, dördüncüyü ancak ilk üçü boş gezerse al. Çok ajan çok toplantı demek.',
+  'Ajan şaşırıyorsa örnek ver: "çıktı şöyle olsun". Kedi de koklayarak öğrenir.',
+  'Skill önerisi: haftalık raporu skill yap. Ajan ezbere bilir, sen pazartesi çayını içersin.',
+  'Ajana mail yazdırma, taslak yazdırsın. Gönder tuşu hep senin pençende kalsın.',
+  'Uzun iş bölünür: araştır, planla, yaz, kontrol et. Tek lokmada yenen simit boğazda kalır.',
+  'Ajan çıktıları `cikti/<ajan>/` altına düşer. Bir göz at; okunmayan çıktı, soğumuş çaydır.',
+  'Salt okuma ajanı (Read, Glob, Grep) neredeyse risksizdir. Önce onu dene, yazma iznini sonra ver.',
+  'Boşta ajan 0 token yer. Asıl tasarruf kediyi uyutmak. Ben uyuyanı rahatsız etmem… çok.',
+  'Skill önerisi: "PR özeti çıkar" gibi tekrar eden işi skill\'e çevir; ajan hep aynı kalıpta döner.',
+  '"Kısa ve madde madde yaz" demeyen ajan roman yazar. Bütçeyi çay gibi kullan, taşırma.',
+  'Ajana "bilmiyorsan bilmiyorum de" yaz. Uyduran kedi de uyduran ajan da sonunda mamayı kaybeder.',
+  'UAT için ajandan "ne değişti, nereye bakılır" notu iste. Ben çayı getirdim, bakmak sana düşer.',
+];
+const CAYCI_YANIT_UYANIK = ['Bir çay da bana, sütlü.', 'Miyav. (Çevirisi: şekersiz, teşekkürler.)', 'Not aldım. Not alırken çayı döktüm.', 'Prompt yazarken çay içmek serbest mi?'];
+const CAYCI_YANIT_UYKU = ['Zzz… çay mı? Beş dakika daha.', 'Hmm? Mama mı geldi?', 'Uyumuyorum, gözlerimi dinlendiriyorum.'];
+const CAYCI_YANIT_ISTE = ['Şşt, çalışıyorum. Çayı masaya bırak.', 'Çay soğur ama token bitmez. Sonra içerim.'];
+const SERIT_SIRA = ['U', 'A', 'S'];
+const rastgele = l => l[Math.floor(Math.random() * l.length)];
+function cayciSoz(a) {
+  const ad = a?.ad, araclar = a?.izinli_araclar || [], adaylar = [];
+  if (a && a.id !== 'ceo') {
+    if (!(a.hazir_gorevler || []).length) adaylar.push('Bu odada ' + ad + ' var, hazır görevi yok. Her seferinde sıfırdan anlatmak, çaya her gün tarif vermek gibi. Birkaç hazır görev ekle.');
+    if (araclar.length > 6 || araclar.includes('Bash') || araclar.includes('Write')) adaylar.push(ad + ' için araç listesi mezeler gibi: lazım olandan fazlası var. En dar izin, en rahat uyku.');
+    if (a.model === 'opus') adaylar.push(ad + ' Opus ile çalışıyor. Basit işe böyle ağır top mu? Sonnet yetiyorsa cüzdanın sana çay ısmarlar.');
+    if (a.model === 'haiku') adaylar.push(ad + ' Haiku: hızlı ve ucuz. Karmaşık işte terlerse Sonnet\'e terfi ettir, kurumsal yükselme bu.');
+    if (!a.aciklama || String(a.aciklama).length < 20) adaylar.push(ad + ' için açıklama cılız. Ne yapıp ne yapmayacağını iki cümleyle yaz; CEO da doğru ajana iş atsın.');
+  }
+  return adaylar.length && Math.random() < .6 ? rastgele(adaylar) : rastgele(CAYCI_SOZ);
+}
+function cayciSerit(c, s) { return s === 'U' ? c.zU : s === 'A' ? c.zA : c.zS; }
+function cayciPlanla(c) {
+  const adaylar = ODALAR.filter(o => o !== c.oda), hedef = adaylar.length ? rastgele(adaylar) : ODALAR[0];
+  const sr = hedef.cz < -.01 ? 'U' : hedef.cz > .01 ? 'S' : 'A';   // ön kenarı hangi şeride bakıyor (alt sıra: güney şerit)
+  const yol = [], V = (x, z) => new THREE.Vector3(x, .1, z);
+  let x = c.x;
+  if (c.iceride) { yol.push(V(x, cayciSerit(c, c.serit))); c.iceride = false; }   // önce odadan şeride çık
+  if (c.serit !== sr) {   // şerit değişimi: en yakın uçtaki sütundan (odalar dışında) geç
+    const kenar = x - c.xMin < c.xMax - x ? c.xMin : c.xMax;
+    yol.push(V(kenar, cayciSerit(c, c.serit)));
+    let i = SERIT_SIRA.indexOf(c.serit); const j = SERIT_SIRA.indexOf(sr), s = Math.sign(j - i);
+    while (i !== j) { i += s; yol.push(V(kenar, cayciSerit(c, SERIT_SIRA[i]))); }
+    x = kenar;
+  }
+  const px = hedef.cx + (Math.random() - .5) * Math.max(0, hedef.w - 4);
+  yol.push(V(px, cayciSerit(c, sr)), V(px, hedef.cz + hedef.d / 2 - 1.3));
+  Object.assign(c, { yol2:yol, serit:sr, x:px, oda:hedef, durum:'yuru', ajan:null });
+}
+function cayciVardi(c) {
+  const ajanlar = AJANLAR.filter(a => a.oda === c.oda.id);
+  c.iceride = true; c.durum = 'orada'; c.bekT = 9; c.adim = 0;
+  c.ajan = ajanlar.length ? rastgele(ajanlar) : null;
+  c.soz = cayciSoz(c.ajan);
+  c.kedi.tepki('selam');
+  const a = c.ajan;
+  if (a && !['calisiyor', 'dusunuyor'].includes(a.durum)) a.kedi.tepki(a.durum === 'uyku' || a.durum === 'bekliyor' ? 'esne' : 'selam');
+}
+function cayciOrada(c, dt) {
+  c.bekT -= dt;
+  if (c.adim === 0 && c.bekT < 5.8) {   // ikinci perde: ajan yanıt verir, odadaki diğer kediler meraklanır
+    c.adim = 1;
+    const a = c.ajan, ajanlar = AJANLAR.filter(x => x.oda === c.oda.id && x !== a);
+    c.kedi.tepki('gul');
+    ajanlar.forEach(x => { if (!['calisiyor', 'dusunuyor'].includes(x.durum)) x.kedi.tepki(Math.random() < .5 ? 'bak' : 'gul'); });
+    if (a) {
+      const calisiyor = a.durum === 'calisiyor' || a.durum === 'dusunuyor', uyku = a.durum === 'uyku' || a.durum === 'bekliyor';
+      if (!(a.balon && Date.now() < a.balonBitis)) {   // CEO cevabı gibi önemli bir balon varsa ezme
+        a.balon = rastgele(calisiyor ? CAYCI_YANIT_ISTE : uyku ? CAYCI_YANIT_UYKU : CAYCI_YANIT_UYANIK); a.balonBitis = Date.now() + 3800;
+      }
+      if (!calisiyor && !uyku) a.kedi.tepki('gul');
+    }
+  }
+  if (c.bekT <= 0) { c.durum = 'yuru'; c.yol2 = []; }
+}
+function cayciBalon(c) {
+  const metin = c.durum === 'orada' && c.bekT > .6 ? c.soz : '';
+  if (metin !== c.balonMetin) {
+    c.balon.textContent = metin; c.balon.style.display = metin ? 'block' : 'none'; c.balonMetin = metin;
+    if (metin) { c.bw = c.balon.offsetWidth; c.bh = c.balon.offsetHeight; }
+  }
+  if (!metin) return;
+  c.v.set(0, 2.0, 0); c.g.localToWorld(c.v); c.v.project(camera);
+  c.balon.style.visibility = c.v.z > 1 ? 'hidden' : '';
+  const x = Math.max(8, Math.min(innerWidth - c.bw - 8, (c.v.x * .5 + .5) * innerWidth - c.bw / 2));
+  const y = Math.max(60, (-c.v.y * .5 + .5) * innerHeight - c.bh - 10);
+  c.balon.style.transform = `translate(${x.toFixed(1)}px,${y.toFixed(1)}px)`;
+}
 function cayciAnimasyon(t, dt) {
   if (!cayci) return;
-  const { g, yol } = cayci, h = yol[cayci.hedef];
-  if (!g.userData.basladi) { g.position.copy(yol[0]); g.userData.basladi = true; }
-  const fark = h.clone().sub(g.position), uz = fark.length(), adim = cayci.hiz * dt;
-  if (uz <= adim) { g.position.copy(h); cayci.hedef = (cayci.hedef + 1) % yol.length; }
-  else { fark.multiplyScalar(adim / uz); g.position.add(fark); }
-  const yon = yol[cayci.hedef].clone().sub(g.position);
-  if (yon.lengthSq() > 1e-4) {
-    let d = Math.atan2(yon.x, yon.z) - g.rotation.y;
+  const c = cayci, g = c.g;
+  if (!g.userData.basladi) { g.position.set(c.xMin, .1, c.zU); g.userData.basladi = true; }
+  let yuruyor = false, yaw = null;
+  if (c.durum === 'yuru') {
+    if (!c.yol2.length) cayciPlanla(c);
+    const h = c.yol2[0], fark = h.clone().sub(g.position), uz = fark.length(), adim = c.hiz * dt;
+    if (uz <= adim) { g.position.copy(h); c.yol2.shift(); if (!c.yol2.length) cayciVardi(c); }
+    else { fark.multiplyScalar(adim / uz); g.position.add(fark); yuruyor = true; }
+    const yon = (c.yol2[0] || h).clone().sub(g.position);
+    if (yon.lengthSq() > 1e-4) yaw = Math.atan2(yon.x, yon.z);
+  } else {
+    cayciOrada(c, dt);
+    if (c.ajan) { c.ajan.grup.getWorldPosition(c.v); yaw = Math.atan2(c.v.x - g.position.x, c.v.z - g.position.z); }   // tepsiyi ajana çevir
+  }
+  if (yaw !== null) {
+    let d = yaw - g.rotation.y;
     d = Math.atan2(Math.sin(d), Math.cos(d));
     g.rotation.y += d * Math.min(1, dt * 6);
   }
-  g.position.y = .1 + Math.abs(Math.sin(t * 6)) * .012;
-  cayci.kedi.update(dt);
+  g.position.y = .1 + (yuruyor ? Math.abs(Math.sin(t * 6)) * .012 : 0);
+  c.kedi.update(dt);
+  cayciBalon(c);
 }
 
 /* ---------- arayüz durumu ---------- */
@@ -2916,7 +3025,7 @@ function ajanAnimasyon(a, t, dt) {
   a.kedi.update(dt);
   a.lamba.material.color.set(uyku ? '#b9ad9e' : '#ff7a59');
   a.zler.forEach((s, i) => {
-    if (a.durum !== 'uyku' || a.memeAktif) { s.visible = false; return; }
+    if (a.durum !== 'uyku' || a.memeAktif || a.kedi.aktif) { s.visible = false; return; }
     s.visible = true;
     const p = ((t * .45 + a.faz + i / 3) % 1);
     s.position.set(-.5 + p * .35, 1.3 + p * 1.0, .9);
