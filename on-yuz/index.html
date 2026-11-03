@@ -87,6 +87,15 @@ h3.kucuk{font-family:"Space Grotesk",sans-serif;font-size:11px;font-weight:600;l
 .kart.tikla:hover{background:rgba(255,255,255,.9)}
 .kart.onaylandi{opacity:.7}
 .kart.onaylandi .dugmeler{display:none}
+.kart .revize,.akis-pop .revize{font-size:12px;font-weight:500;padding:6px 10px;border-radius:8px;border:1px solid rgba(59,52,44,.14)}
+.revize-alan{margin-top:8px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.revize-alan textarea{width:100%;box-sizing:border-box;min-height:70px;resize:vertical;font:inherit;font-size:13px;padding:6px 8px;border-radius:8px;border:1px solid rgba(59,52,44,.2)}
+.revize-alan .say{font-size:11px;color:var(--soluk)}
+.revize-alan .hata{font-size:12px;color:#b3261e}
+.revize-alan .dugmeler{flex-wrap:wrap}
+.revize-alan button:disabled{opacity:.5}
+.gecmis .revize-rozet{display:inline-block;font-size:11px;font-weight:600;padding:1px 7px;border-radius:8px;background:rgba(59,52,44,.1)}
+@media (max-width:768px){.kart .revize,.akis-pop .revize,.revize-alan button,.gecmis .revize-rozet+button{min-height:44px}.revize-alan textarea{font-size:16px}.kart .dugmeler{flex-wrap:wrap}}
 .bos{font-size:12.5px;color:var(--soluk);padding:6px 2px}
 .akis-kutu{flex:1 1 0}
 .canli-rozet{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--mercan-k)}
@@ -1746,8 +1755,17 @@ function gecmisListesi(a) {
         c.addEventListener('click', e => { e.stopPropagation(); ceoKaydiAc(k.ust_kosu); });
         chipler.append(c);
       }
+      if (k.revize) {
+        li.append(el('span', 'revize-rozet', 'Revize istendi'));
+        if (k.revize.yeni_kosu_id) {
+          const c = el('button', null, 'Yeni koşu ↗'); c.type = 'button';
+          c.title = k.revize.not || '';
+          c.addEventListener('click', e => { e.stopPropagation(); ajanKosusuAc(k.ajan, k.revize.yeni_kosu_id); });
+          chipler.append(c);
+        }
+      }
       if (chipler.children.length) li.append(chipler);
-      const ac = () => ceoMu ? ceoKaydiAc(k.kosu_id) : ajanKosusuAc(k.ajan, k.kosu_id);
+      const ac =() => ceoMu ? ceoKaydiAc(k.kosu_id) : ajanKosusuAc(k.ajan, k.kosu_id);
       li.addEventListener('click', ac);
       li.addEventListener('keydown', e => { if (e.target === li && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); ac(); } });
       ul.append(li);
@@ -1802,14 +1820,19 @@ function kartlariCiz() {
     const onayB = el('button', 'onay', 'Onayla'); const sonraB = el('button', 'sonra', 'Sonra');
     onayB.onclick = () => { SES.tik(); kartOnayla(k); };
     sonraB.onclick = () => { SES.tik(); k.sonra = true; kartlariCiz(); };
-    dug.append(onayB, sonraB);
+    const revizeB = el('button', 'revize', 'Revize iste'); revizeB.type = 'button';
+    revizeB.onclick = () => { SES.tik(); k.revizeAcik = true; kartlariCiz(); };
+    dug.append(onayB, revizeB, sonraB);
     kart.append(ust, el('h4', null, 'Gözden geçir: ' + (a?.ad || k.ajan) + ' çıktısı'), el('p', null, k.ozet || '(özet yok)'), dug);
+    if (k.revizeAcik) { dug.hidden = true; kart.append(revizeAlani(k, () => kartlariCiz())); }
     const popBaslik = (a?.ad || k.ajan) + ' · çıktı' + (k.zaman ? ' · ' + saatYazi(new Date(k.zaman)) : '');
     const popUrl = !DEMO ?'/api/son-is?ajan=' + encodeURIComponent(k.ajan) + '&kosu=' + encodeURIComponent(k.kosu_id) : '';
     const popAc = () => akisPopAc(popBaslik, k.ozet || '(özet yok)', popUrl, (kap, kapat) => {
       const d = el('div', 'dugmeler'); const b = el('button', 'onay', 'Onayla'); b.type = 'button';
       b.onclick = () => { SES.tik(); kartOnayla(k); kapat(); };
-      d.append(b); kap.append(d);
+      const rb = el('button', 'revize', 'Revize iste'); rb.type = 'button';
+      rb.onclick = () => { SES.tik(); d.hidden = true; kap.append(revizeAlani(k, kapat, () => { d.hidden = false; })); };
+      d.append(b, rb); kap.append(d);
     });
     kart.classList.add('tikla'); kart.tabIndex = 0; kart.setAttribute('role', 'button'); kart.title = 'Tam çıktıyı aç';
     kart.addEventListener('click', e => { if (!e.target.closest('button')) popAc(); });
@@ -1822,6 +1845,32 @@ function kartOnayla(k) {
   k.onay = true; onaylar.add(k.kosu_id); onayKaydet();
   akisEkle(k.ajan, 'Onaylandı: ' + (ajanBul(k.ajan)?.ad || k.ajan) + ' çıktısı', '', 'ok');
   kartlariCiz();
+}
+/* Revize iste: not alanı. kapat() = gönderim sonrası; vazgec() verilmezse kartın revizeAcik bayrağı kapatılıp yeniden çizilir. */
+function revizeAlani(k, bitti, vazgecildi) {
+  const kap = el('div', 'revize-alan');
+  const ta = el('textarea'); ta.maxLength = 1000; ta.rows = 3; ta.value = k.revizeNot || '';
+  ta.placeholder = 'Ajan neyi düzeltsin? (zorunlu, en fazla 1000 karakter)'; ta.setAttribute('aria-label', 'Revize notu');
+  const say = el('div', 'say'), hata = el('div', 'hata'); hata.hidden = true;
+  const dug = el('div', 'dugmeler'), gonder = el('button', 'onay', 'Gönder'), vazgec = el('button', 'sonra', 'Vazgeç');
+  gonder.type = 'button'; vazgec.type = 'button';
+  const guncelle = () => { k.revizeNot = ta.value; say.textContent = ta.value.length + ' / 1000'; gonder.disabled = !ta.value.trim(); };
+  ta.addEventListener('input', guncelle); guncelle();
+  vazgec.onclick = () => { k.revizeAcik = false; kap.remove(); if (vazgecildi) vazgecildi(); else kartlariCiz(); };
+  gonder.onclick = async () => {
+    const nota = ta.value.trim(); if (!nota) return;
+    gonder.disabled = true; hata.hidden = true;
+    let s;
+    try { s = DEMO ? { durum:202, veri:{} } : await postJSON('/api/revize', { ajan:k.ajan, kosu_id:k.kosu_id, not:nota }); }
+    catch { s = { durum:0, veri:{} }; }
+    if (s.durum !== 202) { hata.textContent = s.veri.hata || 'Gönderilemedi'; hata.hidden = false; gonder.disabled = false; return; }
+    k.revize = true; k.onay = true; k.revizeAcik = false; k.revizeNot = ''; onaylar.add(k.kosu_id); onayKaydet();
+    akisEkle(k.ajan, 'Revize istendi: ' + (ajanBul(k.ajan)?.ad || k.ajan), '', 'ok');
+    kartlariCiz(); bitti();
+  };
+  dug.append(gonder, vazgec); kap.append(ta, say, hata, dug);
+  if (k.revizeAcik) setTimeout(() => ta.focus(), 0);
+  return kap;
 }
 $('hepsiniOnayla').onclick = () => { SES.tik(); kartlar.filter(k => !k.onay).forEach(kartOnayla); };
 
