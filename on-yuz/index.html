@@ -139,6 +139,10 @@ h3.kucuk{font-family:"Space Grotesk",sans-serif;font-size:11px;font-weight:600;l
 .yaz input{flex:1;min-width:0;border:1px solid rgba(59,52,44,.12);background:rgba(255,255,255,.75);border-radius:12px;padding:11px 12px;font:inherit;font-size:13px;outline:none;color:var(--murekkep)}
 .yaz input:focus{border-color:rgba(255,122,89,.6)}
 .yaz .gonder{padding:10px 14px;font-size:13px}
+.yaz .ata{flex:0 0 auto;padding:0 12px;border-radius:12px;background:rgba(255,255,255,.7);border:1px solid rgba(59,52,44,.12);font-size:15px;min-width:42px}
+.ekler{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.ekler button{font-size:12px;padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.7);border:1px solid rgba(59,52,44,.12);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.not.son-is{max-height:42vh;overflow-y:auto;overflow-wrap:anywhere;-webkit-overflow-scrolling:touch}
 .ajan-liste{display:flex;flex-direction:column;gap:8px;margin-top:14px}
 .ajan-liste button{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 14px;border-radius:12px;background:rgba(255,255,255,.7);border:1px solid rgba(255,255,255,.95);font-size:13.5px;font-weight:500;text-align:left}
 .ajan-liste button:hover{background:#fff}
@@ -252,6 +256,7 @@ td.sayi,th.sayi{text-align:right}
 .dugme.cikis{text-decoration:none;color:inherit}
 @media (max-width:768px){
   :root{--sag:auto}
+  .yaz input{font-size:16px}.yaz .ata{min-height:44px;min-width:44px}.ekler button{min-height:36px}
   .ustbar{height:52px;gap:8px;padding:0 10px;padding-top:env(safe-area-inset-top)}
   .marka b,.marka small,.saat,#genel,.hap .yazi{display:none}
   .ustbar .cikis{flex:0 0 auto;min-height:36px;padding:0 10px;display:inline-flex;align-items:center}
@@ -1684,7 +1689,11 @@ function ajanPaneli(a) {
   if (a.id !== 'ceo') parcalar.push(el('h3', null, 'Şu an'), canliListe(a));
   if (oda.not) parcalar.push(el('div', 'not', oda.not));
   if (a.id !== 'ceo') parcalar.push(el('h3', null, 'Bağlı araçlar'), aracCipleri(a.izinli_araclar));
-  if (a.sonOzet) parcalar.push(el('h3', null, 'Son iş'), el('div', 'not', a.sonOzet));
+  if (a.sonOzet) {
+    const son = el('div', 'not son-is', a.sonOzet);
+    parcalar.push(el('h3', null, 'Son iş'), son);
+    if (!DEMO && a.id !== 'ceo') getJSON('/api/son-is?ajan=' + encodeURIComponent(a.id)).then(r => { if (r.metin) son.textContent = r.metin + (r.kirpildi ? '\n…(kırpıldı)' : ''); }).catch(() => {});
+  }
   const form = el('form', 'yaz'); form.autocomplete = 'off';
   const inp = el('input'); inp.maxLength = 600;
   const gon = el('button', 'gonder', a.id === 'ceo' ? 'Sor' : 'Ver'); gon.type = 'submit';
@@ -1702,8 +1711,26 @@ function ajanPaneli(a) {
       hazir.append(btn);
     });
     inp.placeholder = 'Görev yaz…';
-    form.onsubmit = e => { e.preventDefault(); const v = inp.value.trim().slice(0, 600); if (v) { gorevVer(a.id, { prompt:v }); inp.value = ''; } };
-    parcalar.push(el('h3', null, 'Hazır görevler'), hazir, el('h3', null, 'Görev ver'), form);
+    /* dosya eki: metin dosyaları okunup göreve veri olarak eklenir (en fazla 3, her biri 40.000 karakter) */
+    let ekler = [];
+    const ekKutu = el('div', 'ekler');
+    const dosya = el('input'); dosya.type = 'file'; dosya.multiple = true; dosya.hidden = true;
+    const ata = el('button', 'ata', '📎'); ata.type = 'button'; ata.title = 'Dosya ekle'; ata.setAttribute('aria-label', 'Dosya ekle');
+    ata.onclick = () => dosya.click();
+    const ekCiz = () => ekKutu.replaceChildren(...ekler.map((x, i) => { const b = el('button', null, x.ad + ' ×'); b.type = 'button'; b.onclick = () => { ekler.splice(i, 1); ekCiz(); }; return b; }));
+    dosya.onchange = async () => {
+      for (const f of dosya.files) {
+        if (ekler.length >= 3) { tost('En fazla 3 dosya eklenebilir.'); break; }
+        const t = await f.text().catch(() => null);
+        if (t == null || t.includes('\u0000')) tost(f.name + ': yalnız metin dosyaları eklenebilir.');
+        else if (t.length > 40000) tost(f.name + ': dosya çok büyük (en fazla 40.000 karakter).');
+        else ekler.push({ ad:f.name, icerik:t });
+      }
+      dosya.value = ''; ekCiz();
+    };
+    form.insertBefore(ata, gon);
+    form.onsubmit = e => { e.preventDefault(); const v = inp.value.trim().slice(0, 600); if (v) { gorevVer(a.id, ekler.length ? { prompt:v, ekler } : { prompt:v }); inp.value = ''; ekler = []; ekCiz(); } };
+    parcalar.push(el('h3', null, 'Hazır görevler'), hazir, el('h3', null, 'Görev ver'), form, ekKutu, dosya);
   }
   panel.replaceChildren(...parcalar);
   panel.classList.add('acik');
