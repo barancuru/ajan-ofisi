@@ -7,12 +7,14 @@
   ilerleme olaylarını olaylar.jsonl'e düşer, sonunda usage + total_cost_usd'yi kaydeder.
 - Çıktıdaki <hafiza_ekle> bloğunu hafiza/<ajan>.md'ye tarihli madde olarak ekler.
 """
+import fcntl
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -21,6 +23,12 @@ import token_sayac  # noqa: E402
 
 YALIN_DIZIN = os.path.join(ortak.KOK, "durum", "yalin-cwd")
 BEKLEME_SN = int(os.environ.get("OFIS_PENCERE_BEKLE", "90"))
+# Same safeguards as beyin/bin/calistir: shared lock, budget cap, time limit, Codex fallback when Claude hits its limit
+KILIT = os.path.expanduser(os.environ.get("OFIS_KILIT", "~/beyin/.cache/calistir.lock"))
+KILIT_BEKLE_SN = int(os.environ.get("OFIS_KILIT_BEKLE", "1800"))
+VARSAYILAN_BUTCE = float(os.environ.get("OFIS_BUTCE_USD", "0.50"))
+ZAMAN_ASIMI_SN = 1800
+LIMIT_DESENI = re.compile(r"usage limit|rate.?limit|limit reached|hit your limit|quota|overloaded|429|529|credit balance", re.I)
 HAFIZA_DESENI = re.compile(r"<hafiza_ekle>(.*?)</hafiza_ekle>", re.S)
 
 GOREV_SABLONU = """Sen Ajan Ofisi'nde "{ad}" ajanısın (oda: {oda}). Bugün {bugun}.
@@ -68,10 +76,55 @@ def hafizaya_ekle(ajan_id, metin):
     return maddeler
 
 
-def komut_kur(ajan, genel_yasak, cikti_dizini):
+def kilit_al():
+    """Shares beyin's runner lock: Office and scheduled runs never run at the same time (protects Pro limits)."""
+    os.makedirs(os.path.dirname(KILIT), exist_ok=True)
+    fd = os.open(KILIT, os.O_RDWR | os.O_CREAT, 0o644)
+    son = time.time() + KILIT_BEKLE_SN
+    uyarildi = False
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return fd
+        except BlockingIOError:
+            if time.time() > son:
+                os.close(fd)
+                return None
+            if not uyarildi:
+                print("⏳ another beyin run is in progress, waiting…", flush=True)
+                uyarildi = True
+            time.sleep(5)
+
+
+def codex_kos(ajan, tam_prompt, calisma_dizini, cikti_dizini, log):
+    """Fallback for when Claude hits its limit. Tool-less agents run read-only; others may write only to their own folders."""
+    codex = shutil.which("codex")
+    if not codex:
+        return None, "Claude is at its limit and codex is not installed"
+    son = os.path.join(cikti_dizini, ".codex-son.txt")
+    kum = "workspace-write" if ajan.get("izinli_araclar") else "read-only"
+    komut = [codex, "exec", "-C", calisma_dizini, "-s", kum, "--skip-git-repo-check", "--ephemeral",
+             "--add-dir", cikti_dizini, "-o", son, "-"]
+    print("\n↪ Claude is at its limit, switching to Codex…", flush=True)
+    try:
+        p = subprocess.run(komut, input=tam_prompt, text=True, capture_output=True, timeout=ZAMAN_ASIMI_SN)
+        log.write(p.stdout + p.stderr)
+        with open(son, encoding="utf-8") as f:
+            metin = f.read().strip()
+        os.remove(son)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return None, f"Codex fallback also failed: {type(e).__name__}"
+    if p.returncode != 0 or not metin:
+        return None, f"Codex fallback also failed (code {p.returncode})"
+    print(metin, flush=True)
+    return {"result": metin, "saglayici": "codex (yedek)"}, None
+
+
+def komut_kur(ajan, genel_yasak, cikti_dizini, butce):
     claude = shutil.which("claude") or "/opt/homebrew/bin/claude"
     komut = [claude, "-p", "--model", ajan["model"], "--output-format", "stream-json",
-             "--verbose", "--no-session-persistence", "--add-dir", cikti_dizini]
+             "--verbose", "--no-session-persistence", "--add-dir", cikti_dizini,
+             "--max-budget-usd", f"{butce:.2f}"]
     if ajan.get("yalin"):
         # Yalın koşu: genel CLAUDE.md/rules/hafıza/MCP yüklenmez; ajan klasörü --add-dir ile okunur.
         # Küçük, sık koşan ajanlarda bağlamı (ve token'ı) belirgin biçimde azaltır.
@@ -137,7 +190,15 @@ def kos(arg_dosyasi):
     gorev = arg["prompt"].replace("{bugun}", ortak.bugun())
     tam_prompt = GOREV_SABLONU.format(ad=ajan["ad"], oda=ajan["oda"], bugun=ortak.bugun(),
                                       hafiza=hafiza_oku(ajan["id"]), gorev=gorev)
-    komut = komut_kur(ajan, veri.get("varsayilan_yasak_araclar", []), cikti_dizini)
+    butce = float(ajan.get("butce_usd") or veri.get("ayarlar", {}).get("butce_usd") or VARSAYILAN_BUTCE)
+    komut = komut_kur(ajan, veri.get("varsayilan_yasak_araclar", []), cikti_dizini, butce)
+
+    kilit = kilit_al()
+    if kilit is None:
+        baglam = {"kosu_id": kosu_id, "ajan": ajan["id"], "oda": ajan["oda"]}
+        bitir(ajan, baglam, None, f"lock not acquired within {KILIT_BEKLE_SN} s (another beyin run is in progress)",
+              time.time(), log_yolu, cikti_dizini)
+        return
 
     baslangic = time.time()
     ortak.durum_yaz(ajan["id"], {"durum": "calisiyor", "kosu_id": kosu_id, "pid": os.getpid(),
@@ -149,12 +210,15 @@ def kos(arg_dosyasi):
 
     sonuc, hata = None, None
     sayac = {"tarih": ortak.bugun(), "tekil": token_sayac.MesajTekil()}
+    ham = []  # non-JSON lines (for detecting limit errors)
     try:
         with open(log_yolu, "w", encoding="utf-8") as log:
             calisma_dizini = YALIN_DIZIN if ajan.get("yalin") else ajan["cwd"]
             os.makedirs(calisma_dizini, exist_ok=True)
             surec = subprocess.Popen(komut, cwd=calisma_dizini, stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            zamanlayici = threading.Timer(ZAMAN_ASIMI_SN, surec.kill)
+            zamanlayici.start()
             surec.stdin.write(tam_prompt)
             surec.stdin.close()
             for satir in surec.stdout:
@@ -164,13 +228,27 @@ def kos(arg_dosyasi):
                     olay = json.loads(satir)
                 except json.JSONDecodeError:
                     print(satir.rstrip(), flush=True)
+                    ham.append(satir)
                     continue
                 sonuc = satiri_isle(olay, baglam, sayac) or sonuc
             kod = surec.wait()
+            zamanlayici.cancel()
             if kod != 0 and not sonuc:
                 hata = f"claude çıkış kodu {kod}"
+            hata_metni = " ".join([*ham[-20:], str(hata or "")])
+            if sonuc and sonuc.get("is_error"):
+                hata_metni += f" {sonuc.get('result') or ''} {sonuc.get('subtype') or ''}"
+            if (hata or (sonuc and sonuc.get("is_error"))) and LIMIT_DESENI.search(hata_metni) \
+                    and os.environ.get("OFIS_YEDEK", "1") == "1":
+                yedek, yedek_hata = codex_kos(ajan, tam_prompt, calisma_dizini, cikti_dizini, log)
+                if yedek:
+                    sonuc, hata = yedek, None
+                else:
+                    hata = yedek_hata
     except Exception as e:  # koşu ne olursa olsun bitiş olayı yazılmalı
         hata = f"{type(e).__name__}: {e}"
+    finally:
+        os.close(kilit)
 
     try:
         token_kesinle(baglam, sonuc, sayac)

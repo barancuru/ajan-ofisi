@@ -175,7 +175,7 @@ def ceo_calistir(metin, kuru=False):
     ortak.olay_yaz({"tur": "ceo_basladi", "kosu_id": ceo_id, "ajan": "ceo", "oda": "ceo"})
     claude = shutil.which("claude") or "/opt/homebrew/bin/claude"
     komut = [claude, "-p", "--model", ceo["model"], "--output-format", "json",
-             "--no-session-persistence", "--tools", "", "--json-schema", json.dumps(CEO_SEMASI)]
+             "--no-session-persistence", "--max-budget-usd", "0.20", "--tools", "", "--json-schema", json.dumps(CEO_SEMASI)]
     baslangic = time.time()
     try:
         surec = subprocess.run(komut, cwd=ortak.KOK, input=ceo_promptu(metin, tablo), text=True,
