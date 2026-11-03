@@ -23,5 +23,34 @@ class CeoOSErrorTesti(unittest.TestCase):
         self.assertIsNone(getattr(sunucu._ceo_acik, "id", None))
 
 
+class CeoCiftIstekTesti(unittest.TestCase):
+    def test_ikinci_istek_409_ve_bayrak_temizlenir(self):
+        import threading
+        basladi, birak = threading.Event(), threading.Event()
+        cagri = []
+
+        def yavas(metin, kuru=False, ekler=None):
+            cagri.append(metin)
+            basladi.set()
+            birak.wait(5)
+            return {"ok": True}
+
+        with mock.patch.object(sunucu, "_ceo_calistir", side_effect=yavas):
+            t = threading.Thread(target=sunucu.ceo_calistir, args=("bir",))
+            t.start()
+            self.assertTrue(basladi.wait(5))
+            with self.assertRaises(sunucu.IstekHatasi) as c:
+                sunucu.ceo_calistir("iki")
+            self.assertEqual(c.exception.kod, 409)
+            birak.set()
+            t.join(5)
+            self.assertEqual(cagri, ["bir"])
+            self.assertEqual(sunucu.ceo_calistir("uc"), {"ok": True})  # bayrak temizlendi
+        with mock.patch.object(sunucu, "_ceo_calistir", side_effect=sunucu.IstekHatasi(502, "x")):
+            with self.assertRaises(sunucu.IstekHatasi):
+                sunucu.ceo_calistir("hata")
+        self.assertFalse(sunucu._ceo_kosuyor)
+
+
 if __name__ == "__main__":
     unittest.main()

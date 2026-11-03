@@ -324,7 +324,24 @@ def ceo_kaydi_yaz(k):
 _ceo_acik = threading.local()  # bu iş parçacığında ceo_basladi yazılmış, ceo_bitti henüz yazılmamış koşunun id'si
 
 
+_ceo_kosuyor = False  # sunucu sürecinde: bir CEO koşusu sürerken ikincisi başlamasın
+_CEO_KILIDI = threading.Lock()  # yalnız _ceo_kosuyor bayrağını korur, koşu boyunca tutulmaz
+
+
 def ceo_calistir(metin, kuru=False, ekler=None):
+    global _ceo_kosuyor
+    with _CEO_KILIDI:
+        if _ceo_kosuyor:
+            raise IstekHatasi(409, "CEO zaten çalışıyor")
+        _ceo_kosuyor = True
+    try:
+        return _ceo_calistir(metin, kuru=kuru, ekler=ekler)
+    finally:
+        with _CEO_KILIDI:
+            _ceo_kosuyor = False
+
+
+def _ceo_calistir(metin, kuru=False, ekler=None):
     veri, tablo = ortak.ajanlari_yukle()
     ceo = tablo.get("ceo")
     if not ceo:
