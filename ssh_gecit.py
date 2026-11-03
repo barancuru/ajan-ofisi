@@ -2,7 +2,8 @@
 """Ajanlar için dar SSH geçidi: ssh_gecit.py <ajan-id> -- <komut>
 
 - Host/user/port/anahtar yalnız ajanlar.json'daki ajanın 'ssh' bölümünden okunur; argümanla verilemez.
-- ssh argv'si burada kurulur, shell kullanılmaz. StrictHostKeyChecking her zaman 'yes'.
+- ssh argv'si burada kurulur, shell kullanılmaz. StrictHostKeyChecking her zaman 'accept-new'
+  (ilk bağlantıda ekler, değişen anahtarı reddeder; no/off ve /dev/null yasak).
 - Özel anahtar dosyası AÇILMAZ/OKUNMAZ; yalnız yolu ssh'a verilir (stat ile var olma + izin denetimi).
 - Komut ssh'a gitmeden önce politikadan geçer: shell metakarakteri yok, izinli kalıp, dizin sınırı.
   Yıkıcı ya da listede olmayan komut çalışmaz; 'onay_bekleyen' olayı yazılır (onay yolu burada yok).
@@ -82,13 +83,26 @@ def komut_karar(ssh, args):
 def argv_kur(ssh, komut):
     kh = os.path.expanduser(ssh.get("known_hosts") or ortak.SSH_VARSAYILAN_KNOWN_HOSTS)
     argv = [SSH_IKILI, "-i", os.path.expanduser(ssh["anahtar"]), "-o", "IdentitiesOnly=yes",
-            "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={kh}",
+            "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", f"UserKnownHostsFile={kh}",
             "-o", "ConnectTimeout=10", "-p", str(ssh.get("port", 22)), f"{ssh['user']}@{ssh['host']}",
             "--", komut]
-    for a in argv[:-1]:  # son koruma: gevşek host anahtarı denetimi hiçbir yolla üretilmesin
-        if re.search(r"stricthostkeychecking\s*=\s*(?!yes\b)", a, re.I):
-            raise ValueError("StrictHostKeyChecking=yes dışında değer üretilemez")
+    for a in argv[:-1]:  # son koruma: yalnız yes/accept-new; no/off/ask vb. ve /dev/null üretilmesin
+        if re.search(r"stricthostkeychecking\s*=\s*(?!(?:yes|accept-new)(?![\w-]))", a, re.I):
+            raise ValueError("StrictHostKeyChecking yalnız yes/accept-new olabilir")
+        if re.search(r"userknownhostsfile\s*=\s*/dev/null", a, re.I):
+            raise ValueError("UserKnownHostsFile=/dev/null üretilemez")
     return argv
+
+
+def known_hosts_hazirla(ssh):
+    """known_hosts yoksa oluşturur (dizin 700, dosya 600). Hata olursa OSError."""
+    kh = os.path.expanduser(ssh.get("known_hosts") or ortak.SSH_VARSAYILAN_KNOWN_HOSTS)
+    dizin = os.path.dirname(kh)
+    if dizin and not os.path.isdir(dizin):
+        os.makedirs(dizin, mode=0o700, exist_ok=True)
+    if not os.path.exists(kh):
+        os.close(os.open(kh, os.O_WRONLY | os.O_CREAT, 0o600))
+    return kh
 
 
 def anahtar_denetle(yol):
@@ -151,9 +165,10 @@ def calistir_gecit(ajan_id, args, tablo, yollar, calistir=subprocess.run, yaz=pr
     if hata:
         yaz(f"RED: {hata}")
         return CIKIS_AYAR
-    if not host_taniniyor(ssh, calistir):
-        yaz("RED: host known_hosts içinde yok, BAĞLANILMADI. Kullanıcı önce elle ilk bağlantı ya da "
-            "ssh-keyscan ile parmak izini doğrulayıp known_hosts'a eklemeli.")
+    try:
+        known_hosts_hazirla(ssh)  # accept-new: ilk bağlantıda anahtar eklenir, değişen anahtar reddedilir
+    except OSError:
+        yaz("RED: known_hosts dosyası/dizini oluşturulamadı")
         return CIKIS_AYAR
     try:
         p = calistir(argv_kur(ssh, komut), capture_output=True, timeout=ZAMAN_ASIMI_SN, stdin=subprocess.DEVNULL)

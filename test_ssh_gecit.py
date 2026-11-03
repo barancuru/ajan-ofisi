@@ -50,28 +50,58 @@ class ArgvTesti(Temel):
         self.assertEqual(kod, 0)
         argv = cagrilar[-1]
         self.assertEqual(argv[:8], ["ssh", "-i", self.anahtar, "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes", "-o"])
-        self.assertIn("StrictHostKeyChecking=yes", argv)
+        self.assertIn("StrictHostKeyChecking=accept-new", argv)
         self.assertIn(f"UserKnownHostsFile={self.kh}", argv)
         self.assertEqual(argv[-3:], ["ofis@sunucu.example", "--", "uptime"])
-        self.assertFalse(any("StrictHostKeyChecking=no" in a or "accept-new" in a for a in argv))
+        self.assertFalse(any("StrictHostKeyChecking=no" in a or "StrictHostKeyChecking=yes" in a for a in argv))
 
     def test_gevsek_host_denetimi_uretilemez(self):
-        for kotu in ("no", "accept-new", "off"):
+        for kotu in ("no", "off", "ask", "accept-new-x"):
             with self.assertRaises(ValueError):
                 with mock.patch.dict(self.ssh, {"known_hosts": f"/x StrictHostKeyChecking={kotu}"}):
                     ssh_gecit.argv_kur(self.ssh, "uptime")
+        for kabul in ("yes", "accept-new"):
+            with mock.patch.dict(self.ssh, {"known_hosts": f"/x StrictHostKeyChecking={kabul}"}):
+                ssh_gecit.argv_kur(self.ssh, "uptime")
+
+    def test_dev_null_known_hosts_uretilemez(self):
+        with mock.patch.dict(self.ssh, {"known_hosts": "/dev/null"}):
+            with self.assertRaises(ValueError):
+                ssh_gecit.argv_kur(self.ssh, "uptime")
+
+    def test_varsayilan_known_hosts_yolu(self):
+        ssh = {k: v for k, v in self.ssh.items() if k != "known_hosts"}
+        argv = ssh_gecit.argv_kur(ssh, "uptime")
+        self.assertIn(f"UserKnownHostsFile={os.path.expanduser(ortak.SSH_VARSAYILAN_KNOWN_HOSTS)}", argv)
+
+    def test_known_hosts_yoksa_olusturulur(self):
+        kh = os.path.join(self.dizin.name, "yeni", ".ssh", "known_hosts")
+        ssh_gecit.known_hosts_hazirla({**self.ssh, "known_hosts": kh})
+        self.assertEqual(os.stat(kh).st_mode & 0o777, 0o600)
+        self.assertEqual(os.stat(os.path.dirname(kh)).st_mode & 0o777, 0o700)
+
+    def test_ilk_baglanti_known_hosts_bos_olsa_da_baglanir(self):
+        os.remove(self.kh)
+        kod, cagrilar, _, _ = self.calistir(["uptime"], tanidik=False)
+        self.assertEqual(kod, 0)
+        self.assertEqual(cagrilar[-1][0], "ssh")
+        self.assertTrue(os.path.isfile(self.kh))
+
+    def test_degisen_host_anahtari_reddi_ssh_cikisi_aktarilir(self):
+        # accept-new değişen anahtarı ssh kendisi reddeder (çıkış 255); geçit bunu olduğu gibi döndürür
+        def sahte(argv, **kw):
+            return subprocess.CompletedProcess(argv, 255, b"", b"Host key verification failed.\n")
+        satirlar = []
+        with mock.patch.object(ortak, "olay_yaz"):
+            kod = ssh_gecit.calistir_gecit("a", ["uptime"], self.tablo, self.yollar, calistir=sahte, yaz=satirlar.append)
+        self.assertEqual(kod, 255)
+        self.assertIn("Host key verification failed", " ".join(satirlar))
 
     def test_tanimsiz_ajan_ve_ssh_siz_ajan_reddedilir(self):
         for ajan in ("yok", "b"):
             kod, cagrilar, _, _ = self.calistir(["uptime"], ajan=ajan)
             self.assertEqual(kod, ssh_gecit.CIKIS_RED)
             self.assertEqual(cagrilar, [])
-
-    def test_known_hosts_te_olmayan_host_baglanmaz(self):
-        kod, cagrilar, satirlar, _ = self.calistir(["uptime"], tanidik=False)
-        self.assertNotEqual(kod, 0)
-        self.assertTrue(all(c[0] != "ssh" for c in cagrilar))
-        self.assertIn("known_hosts", satirlar[0])
 
     def test_gevsek_izinli_anahtar_reddedilir(self):
         os.chmod(self.anahtar, 0o644)
