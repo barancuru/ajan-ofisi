@@ -1702,15 +1702,36 @@ async function gorevVer(ajanId, govde) {
   } catch { tost('Sunucuya ulaşılamadı.'); }
 }
 let ceoBekliyor = false;
-/* CEO dosya eki: metin dosyaları okunur, istekle veri olarak gider (en fazla 3, her biri 40.000 karakter) */
+/* CEO dosya eki: metin dosyaları okunur, görseller base64 gider (en fazla 3; metin 40.000 karakter, görsel 2 MB) */
 let ceoEkler = [];
 function ceoEkCiz() {
   $('komutEk').replaceChildren(...ceoEkler.map((x, i) => { const b = el('button', null, x.ad + ' ×'); b.type = 'button'; b.onclick = () => { ceoEkler.splice(i, 1); ceoEkCiz(); }; return b; }));
+}
+/* görsel eki: base64 olarak gider; 2 MB'ı aşan görsel tuvalde küçültülüp JPEG'e çevrilir */
+function bloptanB64(blob) {
+  return new Promise((ok, hata) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1]); r.onerror = hata; r.readAsDataURL(blob); });
+}
+async function gorselB64(f) {
+  let blob = f;
+  if (f.size > 1900000) {
+    const bmp = await createImageBitmap(f);
+    const o = Math.min(1, 1800 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas'); c.width = Math.round(bmp.width * o); c.height = Math.round(bmp.height * o);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    blob = await new Promise(ok => c.toBlob(ok, 'image/jpeg', 0.85));
+    if (!blob || blob.size > 1900000) return null;
+  }
+  return bloptanB64(blob);
 }
 $('komutAta').onclick = () => $('komutDosya').click();
 $('komutDosya').onchange = async function () {
   for (const f of this.files) {
     if (ceoEkler.length >= 3) { tost('En fazla 3 dosya eklenebilir.'); break; }
+    if (/^image\/(png|jpeg|gif|webp)$/.test(f.type)) {
+      const b64 = await gorselB64(f).catch(() => null);
+      if (b64) ceoEkler.push({ ad:f.name, gorsel_b64:b64 }); else tost(f.name + ': görsel okunamadı ya da çok büyük (en fazla 2 MB).');
+      continue;
+    }
     const t = await f.text().catch(() => null);
     const ikili = t == null || /[\u0000�]/.test(t.slice(0, 8000));
     if (ikili) ceoEkler.push({ ad:f.name, icerik:'[İkili dosya: ' + (f.type || 'bilinmeyen tür') + ', ' + f.size + ' bayt. İçerik iletilmedi, yalnız dosya adı ve türü bilgi olarak verildi.]' });
