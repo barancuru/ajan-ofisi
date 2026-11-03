@@ -230,10 +230,11 @@ td.sayi,th.sayi{text-align:right}
 @media (max-width:768px){.hafiza-kart .madde-gir{font-size:16px}.hafiza-kart .mini{padding:8px 10px}}
 /* ---------- phone layout (≤768px): panel ↔ office scene toggle ---------- */
 .mobil-gecis{display:none}
+.dugme.cikis{text-decoration:none;color:inherit}
 @media (max-width:768px){
   :root{--sag:auto}
   .ustbar{height:52px;gap:8px;padding:0 10px;padding-top:env(safe-area-inset-top)}
-  .marka b,.marka small,.saat,#genel,.hap .yazi{display:none}
+  .marka b,.marka small,.saat,#genel,.cikis,.hap .yazi{display:none}
   .sekmeler{overflow-x:auto;scrollbar-width:none;flex:1;min-width:0}
   .sekmeler::-webkit-scrollbar{display:none}
   .sekmeler button{flex:0 0 auto;padding:0 10px}
@@ -274,6 +275,7 @@ td.sayi,th.sayi{text-align:right}
   <div class="hap"><span class="nokta" id="aktifNokta"></span><b id="aktif">0</b><span class="yazi"> ajan çalışıyor</span></div>
   <span class="saat" id="saat"></span>
   <button class="dugme" id="genel">Genel bakış</button>
+  <a class="dugme cikis" href="/cikis" title="Oturumu kapat">Çıkış</a>
   <button class="dugme mobil-gecis" id="mobilGecis" type="button" aria-pressed="true">Sahne</button>
 </header>
 
