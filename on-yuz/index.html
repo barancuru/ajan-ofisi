@@ -293,6 +293,11 @@ td.sayi,th.sayi{text-align:right}
 .oneri-metin{font-size:12.5px;line-height:1.45;color:#5d5348;margin-top:6px;max-height:220px;overflow:auto}
 .oneri-metin h1,.oneri-metin h2,.oneri-metin h3{font-size:12.5px;margin:8px 0 2px}
 .oneri-kart textarea{width:100%;margin-top:8px}
+.oneri-tara{display:flex;flex-direction:column;gap:8px;margin:0 0 12px;max-width:720px}
+.oneri-tara .satir2{display:flex;gap:8px;flex-wrap:wrap}
+.oneri-tara select{font:inherit;font-size:13.5px;padding:9px 10px;border-radius:10px;border:1px solid rgba(59,52,44,.18);background:#fffdf9;color:var(--murekkep);flex:1;min-width:0}
+.oneri-tara small{font-size:12px;line-height:1.45}
+@media (max-width:768px){.oneri-tara select{font-size:16px}}
 .izgara .kart .oneri-metin p{display:block;-webkit-line-clamp:unset;overflow:visible}
 .rozet.takildi{background:#f7d4d1;color:#9c2f26}
 .gelistirme-kart a.onizleme{display:inline-block;margin-top:6px;font-size:13px;font-weight:600;color:var(--mercan-k)}
@@ -2186,7 +2191,7 @@ async function gelistirmeSayfasi() {
   if (!aktif.length) iz.append(el('p', 'bos', 'Açık geliştirme görevi yok.'));
   const parcalar = [el('h2', null, 'Geliştirme'),
     el('p', 'alt', 'Talimat ver → ajan ayrı bir dalda geliştirir → kontroller → önizleme/paket → sen onaylarsın → canlıya geçer. Boştayken 0 token; görevler 5 dakikada bir kontrol edilir.'),
-    form];
+    form, oneriTaramaSatiri(veri)];
   if (oneriler.length) {
     const izO = el('div', 'izgara gelistirme-izgara'); oneriler.forEach(g => izO.append(oneriKarti(g)));
     parcalar.push(el('h3', 'ara-baslik', 'Ofisin önerileri · ' + oneriler.length), izO);
@@ -2222,6 +2227,25 @@ function gelistirmeKararKur(g, dug, kapat) {
     dug.replaceChildren(gon, vaz); dug.parentNode.insertBefore(t, dug); t.focus();
   };
   dug.append(onay, red);
+}
+function oneriTaramaSatiri(veri) {
+  const k = el('div', 'kart oneri-tara');
+  const proje = el('select'); veri.projeler.forEach(p => { const o = el('option', null, p === 'ajan-ofisi' ? 'Ajan Ofisi' : p === 'homeos' ? 'HomeOS' : p); o.value = p; proje.append(o); });
+  const dug = el('button', 'koyu-dugme', veri.oneri_taraniyor ? 'Taranıyor…' : 'Öneri iste'); dug.type = 'button'; dug.disabled = !!veri.oneri_taraniyor;
+  const acik = (veri.gorevler || []).filter(g => !g.bitti && g.durum === 'oneri').length;
+  const bilgi = el('small', 'alt', veri.oneri_taraniyor
+    ? 'Ofis kodu ve kayıtları inceliyor; öneriler 1–2 dakika içinde aşağıda belirir.'
+    : 'Ofis seçtiğin projeyi salt okunur inceler, en fazla 2 kanıtlı öneri çıkarır (~$0.20–0.80, Pro limitinden). ' + (acik >= 3 ? 'Şu an ' + acik + ' öneri bekliyor; yenisi için önce bunlara karar ver.' : 'Her gün 10:10\'da kendiliğinden de çalışır.'));
+  dug.onclick = async () => {
+    if (DEMO) return tost('Demo modunda tarama yapılamaz');
+    dug.disabled = true; dug.textContent = 'Başlatılıyor…';
+    const { durum, veri: v } = await postJSON('/api/gelistirme', { islem:'oneri-tara', proje: proje.value });
+    tost(durum === 200 ? 'Tarama başladı; öneriler 1–2 dakika içinde burada' : (v.hata || 'hata ' + durum));
+    sekmeAc('gelistirme');
+  };
+  const satir = el('div', 'satir2'); satir.append(proje, dug);
+  k.append(el('h4', null, 'Ofisin önerileri'), satir, bilgi);
+  return k;
 }
 function oneriKarti(g) {
   const k = el('div', 'kart gelistirme-kart oneri-kart');

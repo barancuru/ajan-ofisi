@@ -749,7 +749,32 @@ def gelistirme_yaniti():
                     o = None
                 if o:
                     gorevler.append(o)
-    return {"projeler": gelistirme_projeleri(), "gorevler": gorevler}
+    return {"projeler": gelistirme_projeleri(), "gorevler": gorevler, "oneri_taraniyor": oneri_taraniyor()}
+
+
+ONERI_BIRIMI = "beyin-oneri-elle"
+
+
+def oneri_taraniyor():
+    try:
+        r = subprocess.run(["systemctl", "--user", "is-active", "--quiet", ONERI_BIRIMI], timeout=5)
+        return r.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def oneri_taramasi_baslat(proje):
+    """Manual suggestion scan: same job as the daily one (calistir oneri <proje>), as a transient user unit."""
+    if proje not in gelistirme_projeleri():
+        raise IstekHatasi(400, "bilinmeyen proje")
+    if oneri_taraniyor():
+        raise IstekHatasi(409, "bir öneri taraması zaten sürüyor")
+    r = subprocess.run(["systemd-run", "--user", "--unit", ONERI_BIRIMI, "--collect", "--quiet",
+                        "-E", f"BEYIN={BEYIN}", "-E", "BEYIN_KILIT_BEKLE=900",
+                        os.path.join(BEYIN, "bin", "calistir"), "oneri", proje],
+                       capture_output=True, text=True, timeout=15)
+    if r.returncode != 0:
+        raise IstekHatasi(500, "tarama başlatılamadı: " + (r.stderr or "").strip()[:200])
 
 
 def kosucuyu_durt():
@@ -847,7 +872,10 @@ def gelistirme_degistir(veri):
         if karar == "evet":
             kosucuyu_durt()
         return gelistirme_yaniti()
-    raise IstekHatasi(400, "islem: yeni | onay | oneri")
+    if islem == "oneri-tara":
+        oneri_taramasi_baslat(veri.get("proje"))
+        return gelistirme_yaniti()
+    raise IstekHatasi(400, "islem: yeni | onay | oneri | oneri-tara")
 
 
 # ---------- HTTP ----------
