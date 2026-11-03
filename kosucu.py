@@ -194,6 +194,9 @@ def kos(arg_dosyasi):
     butce = float(ajan.get("butce_usd") or veri.get("ayarlar", {}).get("butce_usd") or VARSAYILAN_BUTCE)
     komut = komut_kur(ajan, veri.get("varsayilan_yasak_araclar", []), cikti_dizini, butce)
 
+    # Kilit beklenirken de ajan (süreç yaşadığı sürece) meşgul sayılsın
+    ortak.durum_yaz(ajan["id"], {"durum": "basliyor", "kosu_id": kosu_id, "pid": os.getpid(),
+                                 "baslangic_ts": time.time()})
     kilit = kilit_al()
     if kilit is None:
         baglam = {"kosu_id": kosu_id, "ajan": ajan["id"], "oda": ajan["oda"]}
