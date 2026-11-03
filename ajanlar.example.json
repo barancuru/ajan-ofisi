@@ -1,5 +1,16 @@
 {
   "_not": "Bu dosyayı ajanlar.json olarak kopyala ve kendi ajanlarını yaz. ajanlar.json .gitignore'dadır; yolların ve prompt'ların repoya girmez.",
+  "_ssh_ornek": {
+    "_not": "Yalnız örnek (yok sayılır). SSH isteyen ajanın nesnesine 'ssh' olarak kopyala ve gerçek değerleri KENDİN doldur. Anahtar parolasız ve chmod 600 olmalı; host önce known_hosts'a elle eklenmeli.",
+    "ssh": {
+      "host": "<host>", "user": "<kullanici>", "port": 22,
+      "anahtar": "<anahtar yolu>",
+      "known_hosts": "~/.ssh/known_hosts",
+      "izinli_komutlar": ["uptime", "df -h", "systemctl status *", "journalctl -n 200 *"],
+      "izinli_dizinler": ["/var/log", "/var/www"],
+      "onay_gerekli": ["rm", "reboot", "shutdown", "systemctl stop|restart|disable", "deploy", "git push"]
+    }
+  },
   "surum": 2,
   "ayarlar": {
     "kullanici": "",

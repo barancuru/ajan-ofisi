@@ -35,6 +35,68 @@ class YapilandirmaHatasi(Exception):
     pass
 
 
+SSH_AD_DESENI = re.compile(r"[A-Za-z0-9._-]+")
+SSH_VARSAYILAN_KNOWN_HOSTS = "~/.ssh/known_hosts"
+
+
+def _ssh_liste(ajan_id, ssh, alan, mutlak=False):
+    deger = ssh.get(alan)
+    if deger is None:
+        return
+    if not isinstance(deger, list) or not all(isinstance(x, str) and x.strip() for x in deger):
+        raise YapilandirmaHatasi(f"ajan {ajan_id}: ssh.{alan} boş olmayan metinlerden oluşan liste olmalı")
+    if mutlak and not all(os.path.isabs(x) for x in deger):
+        raise YapilandirmaHatasi(f"ajan {ajan_id}: ssh.{alan} mutlak yollardan oluşmalı")
+
+
+def ssh_dogrula(ajan_id, ssh):
+    """ajanlar.json'daki ajan başına isteğe bağlı 'ssh' bölümünü doğrular. Hata mesajları yol/değer içermez."""
+    if not isinstance(ssh, dict):
+        raise YapilandirmaHatasi(f"ajan {ajan_id}: ssh bir nesne olmalı")
+    for alan in ("host", "user"):
+        d = ssh.get(alan)
+        if not isinstance(d, str) or not SSH_AD_DESENI.fullmatch(d) or d.startswith("-"):
+            raise YapilandirmaHatasi(f"ajan {ajan_id}: ssh.{alan} geçersiz ([A-Za-z0-9._-]+ olmalı)")
+    port = ssh.get("port", 22)
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+        raise YapilandirmaHatasi(f"ajan {ajan_id}: ssh.port 1-65535 arası tamsayı olmalı")
+    for alan, bosluksuz in (("anahtar", False), ("known_hosts", True)):
+        d = ssh.get(alan, SSH_VARSAYILAN_KNOWN_HOSTS if alan == "known_hosts" else None)
+        if not isinstance(d, str) or not d or any(ord(c) < 32 or ord(c) == 127 for c in d) \
+                or not os.path.isabs(os.path.expanduser(d)) or (bosluksuz and any(c.isspace() for c in d)):
+            raise YapilandirmaHatasi(f"ajan {ajan_id}: ssh.{alan} geçersiz (mutlak dosya yolu olmalı)")
+    _ssh_liste(ajan_id, ssh, "izinli_komutlar")
+    _ssh_liste(ajan_id, ssh, "izinli_dizinler", mutlak=True)
+    _ssh_liste(ajan_id, ssh, "onay_gerekli")
+
+
+def maske_yollari(veri):
+    """Maskelenecek anahtar yolları: tam yol, expanduser hali, dosya adı (uzunluk>=4); uzunlar önce."""
+    kume = set()
+    for ajan in (veri or {}).get("ajanlar", []):
+        ssh = ajan.get("ssh") if isinstance(ajan, dict) else None
+        yol = ssh.get("anahtar") if isinstance(ssh, dict) else None
+        if isinstance(yol, str) and yol:
+            kume.update({yol, os.path.expanduser(yol)})
+            ad = os.path.basename(os.path.expanduser(yol))
+            if len(ad) >= 4:
+                kume.add(ad)
+    return sorted(kume, key=len, reverse=True)
+
+
+OZEL_ANAHTAR_DESENI = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|\Z)", re.S)
+
+
+def maskele(metin, yollar):
+    """Özel anahtar bloklarını '[maskelendi]', anahtar yollarını '[anahtar-yolu]' yapar."""
+    if not isinstance(metin, str):
+        return metin
+    metin = OZEL_ANAHTAR_DESENI.sub("[maskelendi]", metin)
+    for y in yollar or []:
+        metin = metin.replace(y, "[anahtar-yolu]")
+    return metin
+
+
 def ajanlari_yukle():
     try:
         with open(AJANLAR_DOSYASI, encoding="utf-8") as f:
@@ -51,6 +113,8 @@ def ajanlari_yukle():
         oda = ajan.get("oda") or "genel"
         if not isinstance(oda, str) or not ODA_ID_DESENI.fullmatch(oda):
             raise ValueError(f"geçersiz oda id: {oda!r} (ajan {ajan['id']})")
+        if ajan.get("ssh") is not None:
+            ssh_dogrula(ajan["id"], ajan["ssh"])
         kurulu = os.path.isdir(os.path.expanduser(ajan.get("cwd") or ""))
         tablo[ajan["id"]] = {**ajan, "oda": oda, "cwd": os.path.expanduser(ajan.get("cwd") or ""), "kurulu": kurulu}
     return veri, tablo
