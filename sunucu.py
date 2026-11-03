@@ -261,7 +261,7 @@ def kurul_istegi(ham, kurul):
     return k["soru"].strip()[:KURUL_SORU_MAKS], uyeler
 
 
-def kurul_uyesi_sor(uye, soru, metin, claude, sonuclar):
+def kurul_uyesi_sor(uye, soru, metin, claude, sonuclar, ceo_id=None):
     """Tek mentor: araçsız claude -p. Görüş metni VERİ olarak CEO'ya döner."""
     prompt = (
         f"Sen Ajan Ofisi CEO'sunun mentor kurulundasın. Adın: {uye['ad']}. Uzmanlığın: {uye['uzmanlik']}. "
@@ -287,12 +287,23 @@ def kurul_uyesi_sor(uye, soru, metin, claude, sonuclar):
     except (subprocess.TimeoutExpired, json.JSONDecodeError, ValueError, OSError, AttributeError) as e:
         kayit["hata"] = f"{type(e).__name__}: {str(e)[:120]}"
     sonuclar[uye["id"]] = kayit
+    if ceo_id:  # ön yüz kurul odasında bu mentoru "konuştu" gösterir; görüşün tamamı CEO kaydında
+        try:
+            ortak.olay_yaz({"tur": "kurul_gorus", "kosu_id": ceo_id, "ajan": "ceo", "oda": "kurul", "uye": uye["id"],
+                            "ad": uye["ad"], "tamam": bool(kayit["gorus"]), "ozet": (kayit["gorus"] or "")[:200]})
+        except OSError:
+            pass
 
 
-def kurula_danis(soru, uyeler, metin, claude):
+def kurul_olay_ozeti(kurul_kaydi):
+    return {"soru": kurul_kaydi["soru"][:300],
+            "uyeler": [{"uye": g["uye"], "ad": g["ad"], "tamam": bool(g["gorus"])} for g in kurul_kaydi["gorusler"]]}
+
+
+def kurula_danis(soru, uyeler, metin, claude, ceo_id=None):
     """Üyeleri paralel sorar (her biri en çok KURUL_ZAMAN_ASIMI sn). Sıra üye sırasıdır."""
     sonuclar = {}
-    isler = [threading.Thread(target=kurul_uyesi_sor, args=(u, soru, metin, claude, sonuclar), daemon=True)
+    isler = [threading.Thread(target=kurul_uyesi_sor, args=(u, soru, metin, claude, sonuclar, ceo_id), daemon=True)
              for u in uyeler]
     for t in isler:
         t.start()
@@ -499,7 +510,9 @@ def _ceo_calistir(metin, kuru=False, ekler=None):
         istek = kurul_istegi(ham, kurul)
         if istek:
             soru, uyeler = istek
-            gorusler = kurula_danis(soru, uyeler, metin[:ortak.MAKS_GIRDI], claude)
+            ortak.olay_yaz({"tur": "kurul_basladi", "kosu_id": ceo_id, "ajan": "ceo", "oda": "kurul",
+                            "soru": soru[:300], "uyeler": [{"uye": u["id"], "ad": u["ad"]} for u in uyeler]})
+            gorusler = kurula_danis(soru, uyeler, metin[:ortak.MAKS_GIRDI], claude, ceo_id)
             kurul_kaydi = {"soru": soru, "gorusler": gorusler}
             ilk = sonuc
             sonuc = ceo_sor(ceo_promptu(metin, tablo, ekler, gorusler=kurul_kaydi), CEO_SEMASI, f"{ceo_id}-2")
@@ -520,7 +533,8 @@ def _ceo_calistir(metin, kuru=False, ekler=None):
         except OSError:
             cikti = None
         ortak.olay_yaz({"tur": "ceo_bitti", "kosu_id": ceo_id, "ajan": "ceo", "oda": "ceo",
-                        "durum": "hata", "hata": hata, "sure_sn": sure, "istek": metin[:300], "cikti": cikti})
+                        "durum": "hata", "hata": hata, "sure_sn": sure, "istek": metin[:300], "cikti": cikti,
+                        **({"kurul": kurul_olay_ozeti(kurul_kaydi)} if kurul_kaydi else {})})
         _ceo_acik.id = None
         raise IstekHatasi(502, "CEO geçerli bir plan döndürmedi; koşu başlatılmadı") from e
 
@@ -542,9 +556,7 @@ def _ceo_calistir(metin, kuru=False, ekler=None):
                            "atamalar": atamalar, "reddedilen": reddedilen, "kurul": kurul_kaydi})
     ortak.olay_yaz({"tur": "ceo_bitti", "kosu_id": ceo_id, "ajan": "ceo", "oda": "ceo", "durum": "basarili",
                     "sure_sn": sure, "cevap": cevap, "istek": metin[:300], "cikti": cikti,
-                    **({"kurul": {"soru": kurul_kaydi["soru"][:300],
-                                  "uyeler": [{"uye": g["uye"], "ad": g["ad"], "tamam": bool(g["gorus"])}
-                                             for g in kurul_kaydi["gorusler"]]}} if kurul_kaydi else {}),
+                    **({"kurul": kurul_olay_ozeti(kurul_kaydi)} if kurul_kaydi else {}),
                     "atamalar": [{"ajan": a["ajan"], "prompt": a["prompt"][:300], "kosu_id": a["kosu_id"]}
                                  for a in atamalar],
                     "baslatilan": baslatilan, "reddedilen": reddedilen, "kuru": kuru,
@@ -605,6 +617,19 @@ def gecmis_yaniti(ajan_id=None, sayfa=0):
     return {"kayitlar": kayitlar, "sayfa": sayfa, "daha_var": len(biten) > (sayfa + 1) * GECMIS_SAYFA}
 
 
+def kurul_gecmis_yaniti(sayfa=0):
+    """Kurula danışılmış CEO isteklerinin geçmişi (yeniden eskiye). Görüşlerin tamamı /api/ceo-kayit'te."""
+    biten = [o for o in olaylari_oku(eski=True) if o.get("tur") == "ceo_bitti" and isinstance(o.get("kurul"), dict)]
+    biten.reverse()
+    sayfa = max(0, sayfa)
+    dilim = biten[sayfa * GECMIS_SAYFA:(sayfa + 1) * GECMIS_SAYFA]
+    kayitlar = [{"kosu_id": o.get("kosu_id"), "zaman": o.get("zaman"), "durum": o.get("durum"),
+                 "istek": o.get("istek"), "soru": o["kurul"].get("soru"), "uyeler": o["kurul"].get("uyeler") or [],
+                 "karar": o.get("cevap"), "atamalar": o.get("atamalar") or [], "maliyet_usd": o.get("maliyet_usd"),
+                 "sure_sn": o.get("sure_sn"), "hata": o.get("hata")} for o in dilim]
+    return {"kayitlar": kayitlar, "sayfa": sayfa, "daha_var": len(biten) > (sayfa + 1) * GECMIS_SAYFA}
+
+
 def ceo_kayit_yaniti(ceo_id):
     """Bir CEO isteğinin yapılandırılmış kaydı (cikti/ceo/<id>.json). Yoksa (eski kayıt) olaydan eksik haliyle kurulur."""
     if not KOSU_ID_DESENI.match(ceo_id or ""):
@@ -648,7 +673,9 @@ def ajanlar_yaniti():
             "kosu_id", "durum", "bitis", "sure_sn", "ozet", "hata", "maliyet_usd") if k in d} or None})
     odalar = [o for o in (veri.get("odalar") or []) if isinstance(o, dict) and isinstance(o.get("id"), str)
               and ortak.ODA_ID_DESENI.fullmatch(o["id"])]
-    return {"ajanlar": liste, "odalar": odalar, "ayarlar": ortak.ayarlar(veri), "tmux_oturum": TMUX_OTURUM}
+    kurul = [{k: u[k] for k in ("id", "ad", "uzmanlik", "tecrube")} for u in kurul_yukle()]
+    return {"ajanlar": liste, "odalar": odalar, "ayarlar": ortak.ayarlar(veri), "tmux_oturum": TMUX_OTURUM,
+            "kurul": kurul}
 
 
 def sayac_yaniti():
@@ -1206,7 +1233,7 @@ class Isleyici(SimpleHTTPRequestHandler):
                 return self._json(200, son_is_yaniti((q.get("ajan") or [""])[0], (q.get("kosu") or [""])[0] or None))
             except IstekHatasi as e:
                 return self._json(e.kod, {"hata": str(e)})
-        if yol.path in ("/api/gecmis", "/api/ceo-kayit"):
+        if yol.path in ("/api/gecmis", "/api/ceo-kayit", "/api/kurul-gecmis"):
             try:
                 q = parse_qs(yol.query)
                 if yol.path == "/api/ceo-kayit":
@@ -1215,6 +1242,8 @@ class Isleyici(SimpleHTTPRequestHandler):
                     sayfa = int((q.get("sayfa") or ["0"])[0])
                 except ValueError:
                     sayfa = 0
+                if yol.path == "/api/kurul-gecmis":
+                    return self._json(200, kurul_gecmis_yaniti(sayfa))
                 return self._json(200, gecmis_yaniti((q.get("ajan") or [""])[0] or None, sayfa))
             except IstekHatasi as e:
                 return self._json(e.kod, {"hata": str(e)})

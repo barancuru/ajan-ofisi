@@ -104,6 +104,10 @@ cevabında `"kurul": {"soru", "uyeler"}` döndürür. Sunucu seçilen mentorlar�
 Basit işlerde kurula danışılmaz, ek çağrı da yapılmaz. Görüşler CEO kaydında (`cikti/ceo/<id>.json/.md`) durur.
 Kurulu değiştirmek istersen kök klasöre `kurul.json` koy:
 `{"uyeler": [{"id", "ad", "uzmanlik", "tecrube", "model"}]}` (en fazla 7 üye).
+Ofiste kurulun kendi odası var ("Mentor Kurulu"): mentorlar yuvarlak masanın çevresinde oturur. CEO danışınca soru masanın
+üstünde balon olarak çıkar, sorulan mentorlar "düşünüyor…" olur, her görüş gelince etiketleri yeşile döner
+(`kurul_basladi` / `kurul_gorus` olayları). Odaya tıklayınca mentorlar ve kurul kararlarının geçmişi açılır
+(`GET /api/kurul-gecmis?sayfa=N`); bir karara tıklayınca soru, tüm görüşler ve CEO'nun kararı görünür.
 
 ### Her ajan = bir proje klasörü
 Ajan kendi `cwd`'sinde çalışır ve `oda` alanındaki odaya oturur. Odalar ajanlardan türer: CEO ortada, diğerleri
