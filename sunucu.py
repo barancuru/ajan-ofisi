@@ -1266,7 +1266,13 @@ class Isleyici(SimpleHTTPRequestHandler):
             return self._sse(parse_qs(yol.query))
         if yol.path.startswith("/api/"):
             return self._json(404, {"hata": "yok"})
+        self._statik = True   # on-yuz/ dosyaları: her açılışta Last-Modified ile doğrula (eski kedi.js önbellekte kalmasın)
         return super().do_GET()
+
+    def end_headers(self):
+        if getattr(self, "_statik", False):
+            self.send_header("Cache-Control", "no-cache")
+        super().end_headers()
 
     def do_POST(self):
         if not self._guvenlik():

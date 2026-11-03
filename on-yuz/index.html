@@ -1424,12 +1424,13 @@ function cayBirak(a) {   // ajanın masasına bir bardak çay (ilk seferde kurul
   }
   a.cayMesh.visible = true; a.cayBitis = performance.now() + CAY_OMUR;
 }
+const tepkiVer = (k, ad) => { if (typeof k?.tepki === 'function') k.tepki(ad); };
 function cayciVardi(c) {
   if (c.oda.cay) {   // çay odası: demlik doldu, arabaya iki tur bardak
     c.iceride = true; c.durum = 'orada'; c.bekT = 4; c.adim = 1; c.ajan = null; c.kalan = ODALAR.length; c.gez = new Set([c.oda]);
     c.soz = 'Demlik taze, bardaklar tepside. Yakından başlayıp bütün masalara bırakıyorum.';
     c.bardaklar.forEach(b => { b.visible = true; });
-    c.kedi.tepki('selam');
+    tepkiVer(c.kedi, 'selam');
     return;
   }
   c.kalan--;
@@ -1439,23 +1440,23 @@ function cayciVardi(c) {
   c.iceride = true; c.durum = 'orada'; c.bekT = 9; c.adim = 0;
   c.ajan = ajanlar.length ? rastgele(ajanlar) : null;
   c.soz = cayciSoz(c.ajan);
-  c.kedi.tepki('selam');
+  tepkiVer(c.kedi, 'selam');
   const a = c.ajan;
-  if (a && !['calisiyor', 'dusunuyor'].includes(a.durum)) a.kedi.tepki(a.durum === 'uyku' || a.durum === 'bekliyor' ? 'esne' : 'selam');
+  if (a && !['calisiyor', 'dusunuyor'].includes(a.durum)) tepkiVer(a.kedi, a.durum === 'uyku' || a.durum === 'bekliyor' ? 'esne' : 'selam');
 }
 function cayciOrada(c, dt) {
   c.bekT -= dt;
   if (c.adim === 0 && c.bekT < 5.8) {   // ikinci perde: ajan yanıt verir, odadaki diğer kediler meraklanır
     c.adim = 1;
     const a = c.ajan, ajanlar = AJANLAR.filter(x => x.oda === c.oda.id && x !== a);
-    c.kedi.tepki('gul');
-    ajanlar.forEach(x => { if (!['calisiyor', 'dusunuyor'].includes(x.durum)) x.kedi.tepki(Math.random() < .5 ? 'bak' : 'gul'); });
+    tepkiVer(c.kedi, 'gul');
+    ajanlar.forEach(x => { if (!['calisiyor', 'dusunuyor'].includes(x.durum)) tepkiVer(x.kedi, Math.random() < .5 ? 'bak' : 'gul'); });
     if (a) {
       const calisiyor = a.durum === 'calisiyor' || a.durum === 'dusunuyor', uyku = a.durum === 'uyku' || a.durum === 'bekliyor';
       if (!(a.balon && Date.now() < a.balonBitis)) {   // CEO cevabı gibi önemli bir balon varsa ezme
         a.balon = rastgele(calisiyor ? CAYCI_YANIT_ISTE : uyku ? CAYCI_YANIT_UYKU : CAYCI_YANIT_UYANIK); a.balonBitis = Date.now() + 3800;
       }
-      if (!calisiyor && !uyku) a.kedi.tepki('gul');
+      if (!calisiyor && !uyku) tepkiVer(a.kedi, 'gul');
     }
   }
   if (c.bekT <= 0) { c.durum = 'yuru'; c.yol2 = []; }
@@ -3114,6 +3115,13 @@ function cekirdekGuncelle(t, dt) {
   cekirdek.isik.intensity = 2 + p * 9;
   cekirdek.g.scale.setScalar(1 + p * .12);
 }
+const animHataZaman = {};
+function animGuvenli(ad, fn, t, dt) {   // bir animasyonun hatası tüm döngüyü durdurmasın; log en çok 10 sn'de bir
+  try { fn(t, dt); } catch (e) {
+    const simdi = performance.now();
+    if (!animHataZaman[ad] || simdi - animHataZaman[ad] > 10000) { animHataZaman[ad] = simdi; console.error(`${ad} animasyonu hatası:`, e); }
+  }
+}
 function dongu() {
   const dt = Math.min(saat.getDelta(), .05), t = saat.elapsedTime;
   gecisGuncelle(dt);
@@ -3126,7 +3134,7 @@ function dongu() {
     new Set(AJANLAR.filter(a => a.durum === 'calisiyor').map(a => a.oda)).forEach(id => isikAkit(id));
     if (KURUL.some(m => m.durum === 'dinliyor')) isikAkit('kurul', false, '#d6ad52');
   }
-  kurulAnimasyon(t, dt); cayciAnimasyon(t, dt);
+  animGuvenli('kurul', kurulAnimasyon, t, dt); animGuvenli('çaycı', cayciAnimasyon, t, dt);
   altMasalar.forEach(m => { if (t - m.zaman > .5) { m.zaman = t; altMasaCiz(m); m.ekran.t.needsUpdate = true; } });
   if (t - panelZaman > .5) { panelZaman = t; if (panelAjan && ajanBul(panelAjan)?.durum !== 'uyku') panelYenile(); }
   controls.update();
