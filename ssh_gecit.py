@@ -5,8 +5,8 @@
 - ssh argv'si burada kurulur, shell kullanılmaz. StrictHostKeyChecking her zaman 'accept-new'
   (ilk bağlantıda ekler, değişen anahtarı reddeder; no/off ve /dev/null yasak).
 - Özel anahtar dosyası AÇILMAZ/OKUNMAZ; yalnız yolu ssh'a verilir (stat ile var olma + izin denetimi).
-- Komut ssh'a gitmeden önce politikadan geçer: shell metakarakteri yok, izinli kalıp, dizin sınırı.
-  Yıkıcı ya da listede olmayan komut çalışmaz; 'onay_bekleyen' olayı yazılır (onay yolu burada yok).
+- Komut ssh'a gitmeden önce politikadan geçer: shell metakarakteri yok; token listesi ssh.birebir_komutlar
+  girişlerinden biriyle tam eşit olmalı. Eşleşmeyen her komut kesin red (önek/onay yolu yok).
 - Sunucu çıktısı VERİ'dir: çerçevelenir, 20 KB ile kırpılır, anahtar yolu/içeriği maskelenir.
 """
 import os
@@ -18,38 +18,15 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ortak  # noqa: E402
 
-SSH_IKILI = "ssh"
+SSH_IKILI = "/usr/bin/ssh"
 MAKS_CIKTI = 20 * 1024
 ZAMAN_ASIMI_SN = 120
 CIKIS_ONAY, CIKIS_RED, CIKIS_AYAR = 3, 2, 4
-
-VARSAYILAN_IZINLI = ["uptime", "df", "free", "ls", "cat", "tail", "systemctl status", "journalctl",
-                     "git status", "git log", "git diff"]
-VARSAYILAN_ONAY = ["rm", "reboot", "shutdown", "systemctl stop|restart|disable", "deploy", "git push"]
-# Dizin sınırına tabi komutlar: tüm yol argümanları izinli_dizinler altında olmalı
-YOL_KOMUTLARI = {"ls", "cat", "tail", "head"}
 YASAK_CHARLAR = ortak.SSH_YASAK_CHARLAR
-# Okuma komutlarına eklenip dosya yazdırabilen/yapılandırma değiştiren seçenekler
-YASAK_SECENEKLER = ("--output", "--vacuum", "--rotate", "--flush", "--sync", "--relinquish", "--exec-path",
-                    "--upload-pack", "--receive-pack", "--ext-diff", "--textconv", "--config",
-                    "-exec", "-execdir", "-delete", "-fprint", "-ok")
-
-
-def _kalip_uyar(kalip, tokenlar):
-    """Kalıp sözcükleri token'ların ÖNEKİ olmalı; 'a|b' alternatif; sondaki '*' kalan her şeyi kabul eder."""
-    kt = kalip.split()
-    if not kt:
-        return False
-    for i, k in enumerate(kt):
-        if k == "*" and i == len(kt) - 1:
-            return True
-        if i >= len(tokenlar) or tokenlar[i] not in k.split("|"):
-            return False
-    return True
 
 
 def komut_karar(ssh, args):
-    """(karar, neden, komut) döner. karar: 'izin' | 'red' | 'onay'."""
+    """(karar, neden, komut) döner. karar: 'izin' | 'red'."""
     komut = " ".join(args)
     if not komut.strip():
         return "red", "komut boş", komut
@@ -63,29 +40,8 @@ def komut_karar(ssh, args):
             if giris.split() == tokenlar:
                 return "izin", "", " ".join(giris.split())
         return "red", "komut birebir izinli listede değil", komut
-    # birebir_komutlar tanımlı değil: en az ayrıcalık, onay/önek yoluna düşme
+    # birebir_komutlar tanımlı değil: en az ayrıcalık, komut çalıştırılmaz
     return "red", "ssh.birebir_komutlar tanımlı değil; komut çalıştırılamaz", komut
-    for t in tokenlar:  # noqa: unreachable (eski önek/onay kolu)
-        if ".." in t.split("/"):
-            return "red", "'..' içeren yol yasak", komut
-        if t.startswith(YASAK_SECENEKLER) or (tokenlar[0] == "git" and t == "-c"):
-            return "red", "yazma/yapılandırma yapabilen seçenek yasak", komut
-    onay = ssh.get("onay_gerekli") if ssh.get("onay_gerekli") is not None else VARSAYILAN_ONAY
-    if any(_kalip_uyar(k, tokenlar) for k in onay):
-        return "onay", "yıkıcı komut: onay gerekli", komut
-    izinli = ssh.get("izinli_komutlar") if ssh.get("izinli_komutlar") is not None else VARSAYILAN_IZINLI
-    if not any(_kalip_uyar(k, tokenlar) for k in izinli):
-        return "onay", "komut izinli listede yok: onay gerekli", komut
-    if tokenlar[0] in YOL_KOMUTLARI:
-        dizinler = [os.path.normpath(d) for d in (ssh.get("izinli_dizinler") or [])]
-        yollar = [t for t in tokenlar[1:] if not t.startswith("-") and not t.isdigit()]
-        if not yollar:
-            return "red", f"{tokenlar[0]} için izinli dizin altında bir yol belirt", komut
-        for y in yollar:
-            n = os.path.normpath(y)
-            if not os.path.isabs(y) or not any(n == d or n.startswith(d.rstrip("/") + "/") for d in dizinler):
-                return "red", "yol izinli_dizinler dışında", komut
-    return "izin", "", komut
 
 
 def argv_kur(ssh, komut):

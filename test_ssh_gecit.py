@@ -50,7 +50,7 @@ class ArgvTesti(Temel):
         kod, cagrilar, _, _ = self.calistir(["uptime"])
         self.assertEqual(kod, 0)
         argv = cagrilar[-1]
-        self.assertEqual(argv[:8], ["ssh", "-i", self.anahtar, "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes", "-o"])
+        self.assertEqual(argv[:8], ["/usr/bin/ssh", "-i", self.anahtar, "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes", "-o"])
         self.assertIn("StrictHostKeyChecking=accept-new", argv)
         self.assertIn(f"UserKnownHostsFile={self.kh}", argv)
         self.assertEqual(argv[-3:], ["ofis@sunucu.example", "--", "uptime"])
@@ -85,7 +85,7 @@ class ArgvTesti(Temel):
         os.remove(self.kh)
         kod, cagrilar, _, _ = self.calistir(["uptime"], tanidik=False)
         self.assertEqual(kod, 0)
-        self.assertEqual(cagrilar[-1][0], "ssh")
+        self.assertEqual(cagrilar[-1][0], "/usr/bin/ssh")
         self.assertTrue(os.path.isfile(self.kh))
 
     def test_degisen_host_anahtari_reddi_ssh_cikisi_aktarilir(self):
@@ -232,7 +232,7 @@ class BirebirTesti(Temel):
             kod, cagrilar, _, olay = self.calistir([k])
             self.assertEqual(kod, 0, k)
             argv = cagrilar[-1]
-            self.assertEqual(argv[:3], ["ssh", "-i", self.anahtar], k)
+            self.assertEqual(argv[:3], ["/usr/bin/ssh", "-i", self.anahtar], k)
             self.assertEqual(argv[-2:], ["--", k], k)
             self.assertIn("StrictHostKeyChecking=accept-new", argv)
             birlesik = " ".join(argv)
