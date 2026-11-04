@@ -163,12 +163,14 @@ def codex_kos(ajan, tam_prompt, calisma_dizini, cikti_dizini, log):
 
 
 API_ANAHTAR_ORTAM = "ANTHROPIC_API_KEY"  # yalnız ortam değişkeni adı; değer hiçbir yere yazılmaz
-API_URL = "https://api.anthropic.com/v1/messages"
+API_URL = "https://api.anthropic.com/v1/messages"  # yalnız --ping
 API_ZAMAN_ASIMI_SN = 120
 API_MAKS_DENEME = 2
-API_MAKS_TOKEN_UST = 8192  # OFIS_YEDEK_MAX_TOKEN ne olursa olsun aşılmayan sabit üst sınır
 API_TEKRARSIZ_KODLAR = (402, 429, 529)  # kota/kredi/aşırı yük: yeniden deneme yok
 API_ANAHTAR_DESENI = re.compile(r"sk-ant-[A-Za-z0-9_\-]+")
+API_SAGLAYICI = "claude (API yedeği)"
+API_EK_YASAK = ["Read(/proc/**)"]  # ikinci katman: ortamdaki anahtar /proc/self/environ'dan okunamasın
+GIZLI_DEGERLER = []  # kullanılan anahtar değerleri (dosyadan okunan dahil); maskele() bunları da gizler
 
 
 API_ANAHTAR_DOSYASI = os.path.expanduser("~/.config/ofis-kapi/anthropic.env")  # hidden from the sandbox
@@ -209,12 +211,49 @@ def api_modeli(ajan):
     return "claude-sonnet-5-5", None
 
 
-def api_max_token():
-    try:
-        deger = int(os.environ.get("OFIS_YEDEK_MAX_TOKEN", "4096"))
-    except ValueError:
-        deger = 4096
-    return max(1, min(deger, API_MAKS_TOKEN_UST))
+def api_komutu(komut, model):
+    """Same claude command for the API-key run: only --model changes (capped by api_modeli) and Read(/proc/**) is
+    denied as well. Tools, permission rules, budget and the rest stay identical."""
+    yeni = list(komut)
+    if "--model" in yeni:
+        i = yeni.index("--model")
+        if i + 1 < len(yeni):
+            yeni[i + 1] = model
+    if "--disallowedTools" in yeni:
+        i = yeni.index("--disallowedTools") + 1
+        yeni[i:i] = [y for y in API_EK_YASAK if y not in yeni]
+    else:
+        yeni += ["--disallowedTools", *API_EK_YASAK]
+    return yeni
+
+
+def api_ortami(anahtar):
+    """Env for that child process only; our own os.environ is never modified."""
+    if anahtar not in GIZLI_DEGERLER:
+        GIZLI_DEGERLER.append(anahtar)
+    return {**os.environ, API_ANAHTAR_ORTAM: anahtar}
+
+
+def pro_ortami():
+    """Env for the first (Pro) run: without the key, even if the service got it via EnvironmentFile; otherwise claude
+    would bill the API from the very first run."""
+    return {k: v for k, v in os.environ.items() if k != API_ANAHTAR_ORTAM}
+
+
+def api_yedegi_acik():
+    """Is the 'second Claude Code' (API key) step enabled? (OFIS_YEDEK=1 and OFIS_YEDEK_SAGLAYICI zincir|claude-api)"""
+    saglayici = os.environ.get("OFIS_YEDEK_SAGLAYICI", "zincir").strip().lower() or "zincir"
+    return os.environ.get("OFIS_YEDEK", "1") == "1" and saglayici in ("zincir", "claude-api")
+
+
+def limit_hatasi_mi(sonuc, hata, ham_metin=""):
+    """Did the claude run end with a limit error? (exit code/is_error + LIMIT_DESENI)"""
+    if not (hata or (sonuc and sonuc.get("is_error"))):
+        return False
+    metin = f"{ham_metin} {hata or ''}"
+    if sonuc and sonuc.get("is_error"):
+        metin += f" {sonuc.get('result') or ''} {sonuc.get('subtype') or ''}"
+    return bool(LIMIT_DESENI.search(metin))
 
 
 def api_mesaj_gonder(anahtar, model, prompt, max_token):
@@ -248,45 +287,41 @@ def api_mesaj_gonder(anahtar, model, prompt, max_token):
     return None, hata
 
 
-def claude_api_kos(ajan, tam_prompt, log):
-    """Claude limit yedeği: Messages API, tek istek, araçsız. Dönüş codex_kos ile aynı biçimde."""
-    if ajan.get("ssh") or ajan.get("izinli_araclar"):  # araçsız kapsam; sessiz yetki farkı olmasın
-        return None, "Claude is at its limit; this agent uses SSH/tools and the Claude API fallback (tool-less) is disabled for it"
+def claude_code_api_kos(ajan, komut, tam_prompt, calisma_dizini, log, baglam, sayac):
+    """Second Claude Code: the same claude command, this time with the API key in the child's env only.
+    Tools, permission rules (SSH/git gateways), budget and time limit are unchanged; open to every agent."""
+    if not komut:
+        return None, "Claude is at its limit; no command for the Claude Code API fallback"
     anahtar, anahtar_hata = api_anahtari()
     if not anahtar:
         return None, f"Claude is at its limit and {anahtar_hata}"
     model, model_notu = api_modeli(ajan)
-    max_token = api_max_token()
-    print("\n↪ Claude is at its limit, switching to the Claude API…", flush=True)
-    yanit, hata = api_mesaj_gonder(anahtar, model, tam_prompt, max_token)
-    if hata:
-        return None, maskele(f"Claude API fallback also failed: {hata}")
-    metin = "".join(p.get("text", "") for p in (yanit.get("content") or []) if isinstance(p, dict)
-                    and p.get("type") == "text").strip()
-    if not metin:
-        return None, "Claude API fallback also failed: empty response"
-    if yanit.get("stop_reason") == "max_tokens":
-        metin += f"\n\n[yanıt max_tokens={max_token} sınırında kesildi]"
-    if model_notu:
-        metin += f"\n\n[yedek: {model_notu}]"
-    metin = maskele(metin)
+    env = api_ortami(anahtar)
+    print("\n↪ Claude is at its limit, rerunning Claude Code with the API key…", flush=True)
     if log is not None:
-        log.write(metin + "\n")
-    print(metin, flush=True)
-    sonuc = {"result": metin, "saglayici": "claude-api (yedek)"}
-    if isinstance(yanit.get("usage"), dict):
-        sonuc["usage"] = yanit["usage"]
+        log.write(f"\n--- {API_SAGLAYICI} · model {model} ---\n")
+    sonuc, hata, _ = claude_akis_kos(api_komutu(komut, model), calisma_dizini, tam_prompt, log, baglam, sayac, env=env)
+    if hata or not sonuc or sonuc.get("is_error"):
+        neden = hata or (sonuc or {}).get("result") or (sonuc or {}).get("subtype") or "no result"
+        return None, maskele(f"Claude Code API fallback also failed: {str(neden)[:300]}")
+    sonuc = {**sonuc, "saglayici": API_SAGLAYICI}
+    if model_notu:
+        sonuc["result"] = f"{sonuc.get('result') or ''}\n\n[yedek: {model_notu}]"
     return sonuc, None
 
 
-def yedek_kos(ajan, tam_prompt, calisma_dizini, cikti_dizini, log):
-    """OFIS_YEDEK_SAGLAYICI=zincir|claude-api|codex|yok (varsayılan zincir: Claude Code → Claude API → Codex).
-    Zincirde ilk basamak (Claude Code) çağıran koşucudur; burada 2. Claude API, 3. Codex denenir."""
+def yedek_kos(ajan, tam_prompt, calisma_dizini, cikti_dizini, log, komut=None, baglam=None, sayac=None):
+    """OFIS_YEDEK_SAGLAYICI=zincir|claude-api|codex|yok (varsayılan zincir: Claude Code (Pro) → Claude Code (API
+    anahtarı) → Codex). İlk basamak çağıran koşucudur; burada 2. ikinci Claude Code, 3. Codex (yalnız SSH'siz) denenir."""
     saglayici = os.environ.get("OFIS_YEDEK_SAGLAYICI", "zincir").strip().lower() or "zincir"
+    baglam = baglam or {}
+
+    def api():
+        return claude_code_api_kos(ajan, komut, tam_prompt, calisma_dizini, log, baglam, sayac)
+
     if saglayici == "zincir":
         hatalar = []
-        for kos in (lambda: claude_api_kos(ajan, tam_prompt, log),
-                    lambda: codex_kos(ajan, tam_prompt, calisma_dizini, cikti_dizini, log)):
+        for kos in (api, lambda: codex_kos(ajan, tam_prompt, calisma_dizini, cikti_dizini, log)):
             sonuc, hata = kos()
             if sonuc is not None:
                 return sonuc, None
@@ -295,7 +330,7 @@ def yedek_kos(ajan, tam_prompt, calisma_dizini, cikti_dizini, log):
     if saglayici == "codex":
         return codex_kos(ajan, tam_prompt, calisma_dizini, cikti_dizini, log)
     if saglayici == "claude-api":
-        return claude_api_kos(ajan, tam_prompt, log)
+        return api()
     if saglayici == "yok":
         return None, "Claude is at its limit and the fallback provider is disabled (OFIS_YEDEK_SAGLAYICI=yok)"
     return None, "Claude is at its limit; OFIS_YEDEK_SAGLAYICI must be zincir, claude-api, codex or yok"
@@ -358,9 +393,9 @@ def komut_kur(ajan, genel_yasak, cikti_dizini, butce):
 def maskele(metin):
     metin = ortak.maskele(metin, MASKE_YOLLARI)
     if isinstance(metin, str):
-        anahtar = os.environ.get(API_ANAHTAR_ORTAM)
-        if anahtar:
-            metin = metin.replace(anahtar, "[maskelendi]")
+        for anahtar in [os.environ.get(API_ANAHTAR_ORTAM), *GIZLI_DEGERLER]:
+            if anahtar:
+                metin = metin.replace(anahtar, "[maskelendi]")
         metin = API_ANAHTAR_DESENI.sub("[maskelendi]", metin)
     return metin
 
@@ -400,6 +435,40 @@ def satiri_isle(olay, baglam, sayac=None):
     elif tur == "result":
         return olay
     return None
+
+
+def claude_akis_kos(komut, calisma_dizini, tam_prompt, log, baglam, sayac, env=None):
+    """Runs one claude -p stream-json process: log, events, token counter. Returns: (sonuc, hata, ham_satirlar).
+    env=None: the runner's environment without the key (Pro run); the API fallback passes a copy with the key."""
+    sonuc, hata = None, None
+    ham = []  # non-JSON lines (for detecting limit errors)
+    surec = subprocess.Popen(komut, cwd=calisma_dizini, stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                             env=pro_ortami() if env is None else env)
+    zamanlayici = threading.Timer(ZAMAN_ASIMI_SN, surec.kill)
+    zamanlayici.start()
+    try:
+        surec.stdin.write(tam_prompt)
+        surec.stdin.close()
+        for satir in surec.stdout:
+            satir = maskele(satir)
+            if log is not None:
+                log.write(satir)
+                log.flush()
+            try:
+                olay = json.loads(satir)
+            except json.JSONDecodeError:
+                print(satir.rstrip(), flush=True)
+                ham.append(satir)
+                continue
+            if isinstance(olay, dict):
+                sonuc = satiri_isle(olay, baglam, sayac) or sonuc
+        kod = surec.wait()
+    finally:
+        zamanlayici.cancel()
+    if kod != 0 and not sonuc:
+        hata = f"claude çıkış kodu {kod}"
+    return sonuc, hata, ham
 
 
 def kos(arg_dosyasi):
@@ -450,38 +519,14 @@ def kos(arg_dosyasi):
 
     sonuc, hata = None, None
     sayac = {"tarih": ortak.bugun(), "tekil": token_sayac.MesajTekil()}
-    ham = []  # non-JSON lines (for detecting limit errors)
     try:
         with open(log_yolu, "w", encoding="utf-8") as log:
             calisma_dizini = YALIN_DIZIN if ajan.get("yalin") else ajan["cwd"]
             os.makedirs(calisma_dizini, exist_ok=True)
-            surec = subprocess.Popen(komut, cwd=calisma_dizini, stdin=subprocess.PIPE,
-                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-            zamanlayici = threading.Timer(ZAMAN_ASIMI_SN, surec.kill)
-            zamanlayici.start()
-            surec.stdin.write(tam_prompt)
-            surec.stdin.close()
-            for satir in surec.stdout:
-                satir = maskele(satir)
-                log.write(satir)
-                log.flush()
-                try:
-                    olay = json.loads(satir)
-                except json.JSONDecodeError:
-                    print(satir.rstrip(), flush=True)
-                    ham.append(satir)
-                    continue
-                sonuc = satiri_isle(olay, baglam, sayac) or sonuc
-            kod = surec.wait()
-            zamanlayici.cancel()
-            if kod != 0 and not sonuc:
-                hata = f"claude çıkış kodu {kod}"
-            hata_metni = " ".join([*ham[-20:], str(hata or "")])
-            if sonuc and sonuc.get("is_error"):
-                hata_metni += f" {sonuc.get('result') or ''} {sonuc.get('subtype') or ''}"
-            if (hata or (sonuc and sonuc.get("is_error"))) and LIMIT_DESENI.search(hata_metni) \
-                    and os.environ.get("OFIS_YEDEK", "1") == "1":
-                yedek, yedek_hata = yedek_kos(ajan, tam_prompt, calisma_dizini, cikti_dizini, log)
+            sonuc, hata, ham = claude_akis_kos(komut, calisma_dizini, tam_prompt, log, baglam, sayac)
+            if limit_hatasi_mi(sonuc, hata, " ".join(ham[-20:])) and os.environ.get("OFIS_YEDEK", "1") == "1":
+                yedek, yedek_hata = yedek_kos(ajan, tam_prompt, calisma_dizini, cikti_dizini, log,
+                                              komut=komut, baglam=baglam, sayac=sayac)
                 if yedek:
                     sonuc, hata = yedek, None
                 else:
@@ -526,6 +571,7 @@ def bitir(ajan, baglam, sonuc, hata, baslangic, log_yolu, cikti_dizini, durum_id
         "maliyet_usd": (sonuc or {}).get("total_cost_usd"),
         "tur_sayisi": (sonuc or {}).get("num_turns"),
         "claude_sure_ms": (sonuc or {}).get("duration_ms"),
+        **({"saglayici": sonuc["saglayici"]} if (sonuc or {}).get("saglayici") else {}),
         "hafiza_eklendi": eklenen,
         "log": os.path.relpath(log_yolu, ortak.KOK),
         "cikti": os.path.relpath(cikti_yolu, ortak.KOK),

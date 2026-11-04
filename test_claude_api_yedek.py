@@ -1,13 +1,20 @@
-"""Claude API yedeği: ağsız birim testleri (urlopen taklit edilir, gerçek istek yok)."""
+"""Yedek zinciri: Claude Code (Pro) → Claude Code (API anahtarı) → Codex, ve CEO yedeği.
+Ağsız birim testleri: subprocess/urlopen taklit edilir, gerçek claude ya da API çağrısı yok."""
+import contextlib
 import io
 import json
+import os
+import subprocess
+import tempfile
 import unittest
 import urllib.error
 from unittest import mock
 
 import kosucu
+import sunucu
 
 SAHTE_ANAHTAR = "sk-ant-TEST-0123456789"
+DOSYA_ANAHTARI = "dosyadan-gelen-gizli-deger-42"  # sk-ant- kalıbına uymayan anahtar da maskelenmeli
 
 
 class Yanit:
@@ -34,31 +41,46 @@ def tamam(metin="merhaba", stop="end_turn"):
                   "usage": {"input_tokens": 5, "output_tokens": 3}})
 
 
-class ClaudeApiYedekTest(unittest.TestCase):
-    def setUp(self):
-        env = {"ANTHROPIC_API_KEY": SAHTE_ANAHTAR}
-        p = mock.patch.dict("os.environ", env)
-        p.start()
-        self.addCleanup(p.stop)
-        s = mock.patch.object(kosucu.time, "sleep")
-        self.uyku = s.start()
-        self.addCleanup(s.stop)
-        self.log = io.StringIO()
+class SahteGirdi:
+    def __init__(self):
+        self.yazilan = ""
 
-    def kos(self, ajan=None):
-        return kosucu.claude_api_kos(ajan or {"id": "a"}, "gorev", self.log)
+    def write(self, s):
+        self.yazilan += s
 
-    def test_anahtar_yoksa_acik_hata_istek_yok(self):
-        with mock.patch.dict("os.environ", clear=True), \
-                mock.patch.object(kosucu, "API_ANAHTAR_DOSYASI", "/nonexistent/anthropic.env"), \
-                mock.patch.object(kosucu.urllib.request, "urlopen") as u:
-            sonuc, hata = self.kos()
-        self.assertIsNone(sonuc)
-        self.assertIn("ANTHROPIC_API_KEY", hata)
-        u.assert_not_called()
+    def close(self):
+        pass
 
+
+class SahteSurec:
+    def __init__(self, satirlar, kod=0):
+        self.stdout = iter(satirlar)
+        self.stdin = SahteGirdi()
+        self.kod = kod
+
+    def wait(self):
+        return self.kod
+
+    def kill(self):
+        pass
+
+
+def limit_sureci():
+    return SahteSurec([json.dumps({"type": "result", "is_error": True, "subtype": "success",
+                                   "result": "You've hit your limit · resets 5pm"}) + "\n"], kod=1)
+
+
+def basarili_surec(metin="bitti"):
+    return SahteSurec([
+        json.dumps({"type": "assistant", "message": {"id": "m1", "content": [
+            {"type": "text", "text": f"çalışıyorum {DOSYA_ANAHTARI}"},
+            {"type": "tool_use", "name": "Bash", "input": {"command": "ls"}}]}}) + "\n",
+        json.dumps({"type": "result", "is_error": False, "result": metin, "num_turns": 2,
+                    "usage": {"input_tokens": 10, "output_tokens": 4}, "total_cost_usd": 0.01}) + "\n"])
+
+
+class ApiYardimcilariTest(unittest.TestCase):
     def test_anahtar_dosyadan_okunur_ve_gevsek_izin_reddedilir(self):
-        import os, tempfile
         with tempfile.TemporaryDirectory() as d:
             yol = os.path.join(d, "anthropic.env")
             with open(yol, "w") as f:
@@ -87,152 +109,215 @@ class ClaudeApiYedekTest(unittest.TestCase):
         for metin in ("dosyada 5290 satır var", "line 429 of sunucu.py", "1.0.429", "port 15290"):
             self.assertIsNone(kosucu.LIMIT_DESENI.search(metin), metin)
 
-    def test_basarili_yanit(self):
-        with mock.patch.object(kosucu.urllib.request, "urlopen", return_value=tamam()) as u:
-            sonuc, hata = self.kos()
-        self.assertIsNone(hata)
-        self.assertEqual(sonuc["result"], "merhaba")
-        self.assertEqual(sonuc["saglayici"], "claude-api (yedek)")
-        self.assertEqual(sonuc["usage"]["output_tokens"], 3)
-        istek = u.call_args[0][0]
-        self.assertEqual(u.call_args[1]["timeout"], 120)
-        govde = json.loads(istek.data)
-        self.assertEqual(govde["model"], "claude-sonnet-5-5")
-        self.assertEqual(govde["max_tokens"], 4096)
-        self.assertNotIn("tools", govde)
-        self.assertNotIn("stream", govde)
+    def test_limit_hatasi_mi(self):
+        self.assertTrue(kosucu.limit_hatasi_mi({"is_error": True, "result": "You've hit your limit"}, None))
+        self.assertTrue(kosucu.limit_hatasi_mi(None, "claude çıkış kodu 1", "Error: usage limit reached"))
+        self.assertFalse(kosucu.limit_hatasi_mi(None, "claude çıkış kodu 1", "syntax error"))
+        self.assertFalse(kosucu.limit_hatasi_mi({"is_error": False, "result": "rate limit hakkında rapor"}, None))
 
-    def test_429_529_402_yeniden_denemez(self):
+    def test_api_komutu_yalniz_model_ve_proc_yasagi_degisir(self):
+        ajan = {"id": "a", "model": "opus", "cwd": "/tmp", "izinli_araclar": ["Read"]}
+        komut = kosucu.komut_kur(ajan, ["Bash", "WebFetch"], "/tmp/cikti", 0.5)
+        yeni = kosucu.api_komutu(komut, "claude-sonnet-5-5")
+        self.assertEqual(yeni[yeni.index("--model") + 1], "claude-sonnet-5-5")
+        self.assertIn("Read(/proc/**)", yeni[yeni.index("--disallowedTools"):])
+        self.assertEqual(yeni[yeni.index("--max-budget-usd") + 1], "0.50")
+        geri = [x for x in yeni if x != "Read(/proc/**)"]
+        geri[geri.index("--model") + 1] = "opus"
+        self.assertEqual(geri, komut)  # araçlar, izin kuralları, bütçe aynı
+        self.assertEqual(komut[komut.index("--model") + 1], "opus")  # ilk komut değişmez
+        # --disallowedTools hiç yoksa eklenir
+        self.assertEqual(kosucu.api_komutu(["claude", "-p", "--model", "x"], "m")[-2:],
+                         ["--disallowedTools", "Read(/proc/**)"])
+
+    def test_maskele_dosyadan_gelen_anahtar(self):
+        with mock.patch.dict("os.environ", clear=True):
+            env = kosucu.api_ortami(DOSYA_ANAHTARI)
+            self.assertNotIn("ANTHROPIC_API_KEY", os.environ)  # kendi ortamımıza konmaz
+        self.assertEqual(env["ANTHROPIC_API_KEY"], DOSYA_ANAHTARI)
+        self.assertNotIn(DOSYA_ANAHTARI, kosucu.maskele(f"x {DOSYA_ANAHTARI} y"))
+        self.assertNotIn("sk-ant-BASKA", kosucu.maskele("sk-ant-BASKA-123"))
+
+
+class PingTest(unittest.TestCase):
+    """api_mesaj_gonder yalnız --ping için kaldı."""
+
+    def setUp(self):
+        s = mock.patch.object(kosucu.time, "sleep")
+        self.uyku = s.start()
+        self.addCleanup(s.stop)
+
+    def test_429_529_402_yeniden_denemez_anahtar_sizmaz(self):
         for kod in (429, 529, 402):
             with mock.patch.object(kosucu.urllib.request, "urlopen", side_effect=http_hata(kod)) as u:
-                sonuc, hata = self.kos()
-            self.assertIsNone(sonuc)
+                yanit, hata = kosucu.api_mesaj_gonder(SAHTE_ANAHTAR, "m", "ping", 16)
+            self.assertIsNone(yanit)
             self.assertIn(str(kod), hata)
+            self.assertNotIn("sk-ant", hata)
             self.assertEqual(u.call_count, 1)
 
     def test_500_iki_deneme_ustel_bekleme(self):
         with mock.patch.object(kosucu.urllib.request, "urlopen", side_effect=[http_hata(500), http_hata(500)]) as u:
-            sonuc, hata = self.kos()
-        self.assertIsNone(sonuc)
+            yanit, _ = kosucu.api_mesaj_gonder(SAHTE_ANAHTAR, "m", "ping", 16)
+        self.assertIsNone(yanit)
         self.assertEqual(u.call_count, 2)
         self.uyku.assert_called_once_with(1)
 
-    def test_baglanti_hatasi_iki_deneme_sonra_basari(self):
-        with mock.patch.object(kosucu.urllib.request, "urlopen",
-                               side_effect=[urllib.error.URLError("down"), tamam("ok")]) as u:
-            sonuc, hata = self.kos()
-        self.assertEqual(u.call_count, 2)
-        self.assertEqual(sonuc["result"], "ok")
+    def test_basarili(self):
+        with mock.patch.object(kosucu.urllib.request, "urlopen", return_value=tamam()):
+            yanit, hata = kosucu.api_mesaj_gonder(SAHTE_ANAHTAR, "m", "ping", 16)
+        self.assertIsNone(hata)
+        self.assertEqual(yanit["usage"]["output_tokens"], 3)
 
-    def test_zaman_asimi(self):
-        with mock.patch.object(kosucu.urllib.request, "urlopen", side_effect=TimeoutError("t")) as u:
-            sonuc, hata = self.kos()
-        self.assertIsNone(sonuc)
-        self.assertIn("connection error", hata)
-        self.assertEqual(u.call_count, 2)
 
-    def test_max_tokens_env_ve_ust_sinir(self):
-        for env, beklenen in (("100", 100), ("999999", kosucu.API_MAKS_TOKEN_UST), ("abc", 4096)):
-            with mock.patch.dict("os.environ", {"OFIS_YEDEK_MAX_TOKEN": env}), \
-                    mock.patch.object(kosucu.urllib.request, "urlopen", return_value=tamam()) as u:
-                self.kos()
-            self.assertEqual(json.loads(u.call_args[0][0].data)["max_tokens"], beklenen)
+class KosuYedekTest(unittest.TestCase):
+    """kos() uçtan uca: Popen taklit edilir; kilit, durum, olay ve bitiş yakalanır."""
 
-    def test_model_env(self):
-        with mock.patch.dict("os.environ", {"OFIS_YEDEK_MODEL": "claude-haiku-5-5"}), \
-                mock.patch.object(kosucu.urllib.request, "urlopen", return_value=tamam()) as u:
-            self.kos()
-        self.assertEqual(json.loads(u.call_args[0][0].data)["model"], "claude-haiku-5-5")
+    def setUp(self):
+        self.d = tempfile.mkdtemp()
+        self.olaylar = []
+        self.bitis = {}
+        ortam = {k: v for k, v in os.environ.items() if k not in ("ANTHROPIC_API_KEY", "OFIS_YEDEK",
+                                                                  "OFIS_YEDEK_SAGLAYICI", "OFIS_YEDEK_MODEL")}
+        yamalar = [
+            mock.patch.dict("os.environ", ortam, clear=True),
+            mock.patch.object(kosucu.ortak, "KOSU_DIZINI", self.d),
+            mock.patch.object(kosucu.ortak, "CIKTI_DIZINI", self.d),
+            mock.patch.object(kosucu.ortak, "HAFIZA_DIZINI", self.d),
+            mock.patch.object(kosucu.ortak, "durum_yaz"),
+            mock.patch.object(kosucu.ortak, "olay_yaz", side_effect=self.olaylar.append),
+            mock.patch.object(kosucu.ortak, "maske_yollari", return_value=[]),
+            mock.patch.object(kosucu, "kilit_al", side_effect=lambda: os.open(os.devnull, os.O_RDONLY)),
+            mock.patch.object(kosucu, "token_isle"),
+            mock.patch.object(kosucu, "token_kesinle"),
+            mock.patch.object(kosucu, "bitir", side_effect=self.bitti),
+        ]
+        for y in yamalar:
+            y.start()
+            self.addCleanup(y.stop)
 
-    def test_kirpma_isaretlenir(self):
-        with mock.patch.dict("os.environ", {"OFIS_YEDEK_MAX_TOKEN": "50"}), \
-                mock.patch.object(kosucu.urllib.request, "urlopen", return_value=tamam("kisa", "max_tokens")):
-            sonuc, hata = self.kos()
-        self.assertIn("kesildi", sonuc["result"])
-        self.assertIn("max_tokens=50", sonuc["result"])
+    def bitti(self, ajan, baglam, sonuc, hata, *a, **k):
+        self.bitis.update(sonuc=sonuc, hata=hata)
 
-    def test_anahtar_sizmaz(self):
-        sizdir = tamam(f"yanit {SAHTE_ANAHTAR}")
-        with mock.patch.object(kosucu.urllib.request, "urlopen", return_value=sizdir):
-            sonuc, _ = self.kos()
-        self.assertNotIn(SAHTE_ANAHTAR, sonuc["result"])
-        self.assertNotIn(SAHTE_ANAHTAR, self.log.getvalue())
-        with mock.patch.object(kosucu.urllib.request, "urlopen", side_effect=http_hata(401)):
-            _, hata = self.kos()
-        self.assertNotIn(SAHTE_ANAHTAR, hata)
-        self.assertNotIn("sk-ant", hata)
-        self.assertNotIn(SAHTE_ANAHTAR, kosucu.maskele(f"x {SAHTE_ANAHTAR} y"))
-        self.assertNotIn("sk-ant-BASKA", kosucu.maskele("sk-ant-BASKA-123"))
+    def kos(self, ajan, surecler, anahtar=(SAHTE_ANAHTAR, None), codex=None):
+        ajan = {"id": "a", "ad": "A", "oda": "o", "model": "opus", "cwd": self.d, **ajan}
+        arg = os.path.join(self.d, "arg.json")
+        with open(arg, "w") as f:
+            json.dump({"ajan": "a", "kosu_id": "k1", "prompt": "görev"}, f)
+        cx = None
+        with contextlib.ExitStack() as yigin:
+            yigin.enter_context(mock.patch.object(kosucu.ortak, "ajanlari_yukle", return_value=(
+                {"varsayilan_yasak_araclar": ["Bash"]}, {"a": ajan})))
+            yigin.enter_context(mock.patch.object(kosucu, "api_anahtari", return_value=anahtar))
+            popen = yigin.enter_context(mock.patch.object(kosucu.subprocess, "Popen", side_effect=surecler))
+            if codex is not None:
+                cx = yigin.enter_context(mock.patch.object(kosucu, "codex_kos", return_value=codex))
+            kosucu.kos(arg)
+        with open(os.path.join(self.d, "k1.log"), encoding="utf-8") as f:
+            self.log = f.read()
+        return popen, cx
 
-    def test_ssh_li_ya_da_aracli_ajanda_kapali(self):
-        for ajan in ({"ssh": {"anahtar": "k"}}, {"izinli_araclar": ["Read"]}):
-            with mock.patch.object(kosucu.urllib.request, "urlopen") as u:
-                sonuc, hata = self.kos(ajan)
-            self.assertIsNone(sonuc)
-            self.assertIn("disabled", hata)
-            u.assert_not_called()
+    def test_limitte_ikinci_kosu_anahtarla_ayni_komutla_baslar(self):
+        popen, _ = self.kos({"izinli_araclar": ["Read", "Edit"]}, [limit_sureci(), basarili_surec()],
+                            anahtar=(DOSYA_ANAHTARI, None))
+        self.assertEqual(popen.call_count, 2)
+        ilk, ikinci = popen.call_args_list
+        self.assertNotIn("ANTHROPIC_API_KEY", ilk.kwargs["env"])  # Pro koşusu anahtarsız
+        self.assertEqual(ikinci.kwargs["env"]["ANTHROPIC_API_KEY"], DOSYA_ANAHTARI)
+        self.assertNotIn("ANTHROPIC_API_KEY", os.environ)
+        k1, k2 = ilk.args[0], ikinci.args[0]
+        self.assertEqual(k2[k2.index("--model") + 1], "claude-sonnet-5-5")  # opus → en fazla Sonnet
+        self.assertIn("Read(/proc/**)", k2)
+        self.assertEqual(k2[k2.index("--allowedTools"):k2.index("--disallowedTools")],
+                         k1[k1.index("--allowedTools"):k1.index("--disallowedTools")])
+        self.assertEqual(k2[k2.index("--max-budget-usd") + 1], k1[k1.index("--max-budget-usd") + 1])
+        sonuc = self.bitis["sonuc"]
+        self.assertIsNone(self.bitis["hata"])
+        self.assertEqual(sonuc["saglayici"], "claude (API yedeği)")
+        self.assertTrue(sonuc["result"].startswith("bitti"))
+        self.assertIn("[yedek:", sonuc["result"])  # opus → Sonnet notu
+        # stream-json ikinci koşuda da işlendi: araç olayı yazıldı, token sayacı çağrıldı
+        self.assertTrue(any(o.get("tur") == "ilerledi" and o.get("arac") == "Bash" for o in self.olaylar))
+        self.assertTrue(kosucu.token_isle.called)
+        # anahtar hiçbir yerde görünmez
+        self.assertNotIn(DOSYA_ANAHTARI, self.log)
+        self.assertIn("[maskelendi]", self.log)
+        self.assertNotIn(DOSYA_ANAHTARI, json.dumps(self.olaylar))
+        self.assertNotIn(DOSYA_ANAHTARI, json.dumps(sonuc))
 
-    def test_eslesmeyen_hatada_yedek_tetiklenmez(self):
-        self.assertIsNone(kosucu.LIMIT_DESENI.search("claude çıkış kodu 1 syntax error"))
-        self.assertTrue(kosucu.LIMIT_DESENI.search("You've hit your limit"))
+    def test_anahtarsiz_ortamda_codexe_duser(self):
+        popen, cx = self.kos({}, [limit_sureci()], anahtar=(None, "ANTHROPIC_API_KEY is not set"),
+                             codex=({"result": "c", "saglayici": "codex (yedek)"}, None))
+        self.assertEqual(popen.call_count, 1)
+        cx.assert_called_once()
+        self.assertEqual(self.bitis["sonuc"]["saglayici"], "codex (yedek)")
+
+    def test_sshli_ajan_codexe_dusmez(self):
+        ssh = {"ssh": {"anahtar": "~/.ssh/sahte", "birebir_komutlar": ["uptime"]}}
+        with mock.patch.object(kosucu.subprocess, "run") as run:
+            popen, _ = self.kos(ssh, [limit_sureci()], anahtar=(None, "ANTHROPIC_API_KEY is not set"))
+        self.assertEqual(popen.call_count, 1)
+        run.assert_not_called()  # codex/bwrap hiç çağrılmadı
+        self.assertNotIn("saglayici", self.bitis["sonuc"] or {})
+        self.assertIn("SSH", self.bitis["hata"])
+
+    def test_sshli_ajanda_ikinci_claude_code_acik(self):
+        ssh = {"ssh": {"anahtar": "~/.ssh/sahte", "birebir_komutlar": ["uptime"]}}
+        popen, _ = self.kos(ssh, [limit_sureci(), basarili_surec()])
+        self.assertEqual(popen.call_count, 2)
+        k1, k2 = (c.args[0] for c in popen.call_args_list)
+        self.assertTrue(any("ssh_gecit.py" in x for x in k2))  # SSH geçidi kuralı aynen
+        self.assertEqual([x for x in k1 if "ssh" in x.lower()], [x for x in k2 if "ssh" in x.lower()])
+        self.assertEqual(self.bitis["sonuc"]["saglayici"], "claude (API yedeği)")
+
+    def test_servis_ortamindaki_anahtar_pro_kosusuna_gecmez(self):
+        os.environ["ANTHROPIC_API_KEY"] = SAHTE_ANAHTAR  # EnvironmentFile ile gelmiş gibi (setUp yaması geri alır)
+        popen, _ = self.kos({}, [basarili_surec()])
+        self.assertEqual(popen.call_count, 1)
+        self.assertNotIn("ANTHROPIC_API_KEY", popen.call_args.kwargs["env"])
+        self.assertNotIn(SAHTE_ANAHTAR, self.log)
+
+    def test_limit_disi_hatada_yedek_yok(self):
+        hatali = SahteSurec(["Error: syntax error\n"], kod=1)
+        popen, _ = self.kos({}, [hatali])
+        self.assertEqual(popen.call_count, 1)
+        self.assertIn("çıkış kodu 1", self.bitis["hata"])
+
+    def test_api_kosusu_da_limitteyse_codexe_gecer_hatalar_maskeli(self):
+        popen, cx = self.kos({}, [limit_sureci(), limit_sureci()], codex=(None, "codex yok"))
+        self.assertEqual(popen.call_count, 2)
+        self.assertNotIn("saglayici", self.bitis["sonuc"] or {})
+        self.assertIn("Claude Code API fallback also failed", self.bitis["hata"])
+        self.assertIn("codex yok", self.bitis["hata"])
+        self.assertNotIn(SAHTE_ANAHTAR, self.bitis["hata"])
 
 
 class SaglayiciSecimiTest(unittest.TestCase):
-    def cagir(self, env):
-        with mock.patch.dict("os.environ", env, clear=False), \
+    def cagir(self, env, api_donus=("a", None)):
+        with mock.patch.dict("os.environ", env), \
                 mock.patch.object(kosucu, "codex_kos", return_value=("c", None)) as c, \
-                mock.patch.object(kosucu, "claude_api_kos", return_value=("a", None)) as a:
-            r = kosucu.yedek_kos({}, "p", "/tmp", "/tmp", None)
-        return r, c, a
-
-    def varsayilan(self, api_donus):
-        import os
-        with mock.patch.dict("os.environ"):
-            os.environ.pop("OFIS_YEDEK_SAGLAYICI", None)
-            with mock.patch.object(kosucu, "codex_kos", return_value=("c", None)) as c, \
-                    mock.patch.object(kosucu, "claude_api_kos", return_value=api_donus) as a:
-                r = kosucu.yedek_kos({}, "p", "/tmp", "/tmp", None)
+                mock.patch.object(kosucu, "claude_code_api_kos", return_value=api_donus) as a:
+            if "OFIS_YEDEK_SAGLAYICI" not in env:
+                os.environ.pop("OFIS_YEDEK_SAGLAYICI", None)
+            r = kosucu.yedek_kos({}, "p", "/tmp", "/tmp", None, komut=["claude"])
         return r, c, a
 
     def test_zincir_api_basarili_codex_cagrilmaz(self):
-        r, c, a = self.varsayilan(("a", None))
+        r, c, a = self.cagir({})
         self.assertEqual(r, ("a", None))
         c.assert_not_called()
 
     def test_zincir_api_anahtari_yok_codexe_duser(self):
-        r, c, a = self.varsayilan((None, "ANTHROPIC_API_KEY is not set"))
+        r, c, a = self.cagir({}, (None, "ANTHROPIC_API_KEY is not set"))
         self.assertEqual(r, ("c", None))
         a.assert_called_once()
-
-    def test_zincir_api_hata_codexe_duser(self):
-        r, c, a = self.varsayilan((None, "HTTP 500"))
-        self.assertEqual(r, ("c", None))
-
-    def test_zincir_hepsi_basarisiz_hatalar_birlesir_maskeli(self):
-        with mock.patch.dict("os.environ", {"ANTHROPIC_API_KEY": SAHTE_ANAHTAR}), \
-                mock.patch.object(kosucu, "codex_kos", return_value=(None, "codex yok")), \
-                mock.patch.object(kosucu, "claude_api_kos", return_value=(None, f"x {SAHTE_ANAHTAR}")):
-            r = kosucu.yedek_kos({}, "p", "/tmp", "/tmp", None)
-        self.assertIsNone(r[0])
-        self.assertIn("codex yok", r[1])
-        self.assertNotIn(SAHTE_ANAHTAR, r[1])
-
-    def test_zincir_aracli_ajanda_api_atlanir_codexe_gecer(self):
-        import os
-        with mock.patch.dict("os.environ", {"ANTHROPIC_API_KEY": SAHTE_ANAHTAR}), \
-                mock.patch.object(kosucu, "codex_kos", return_value=("c", None)), \
-                mock.patch.object(kosucu.urllib.request, "urlopen") as u:
-            os.environ.pop("OFIS_YEDEK_SAGLAYICI", None)
-            r = kosucu.yedek_kos({"ssh": {"anahtar": "k"}}, "p", "/tmp", "/tmp", None)
-        self.assertEqual(r, ("c", None))
-        u.assert_not_called()
 
     def test_codex_tek_saglayici(self):
         r, c, a = self.cagir({"OFIS_YEDEK_SAGLAYICI": "codex"})
         self.assertEqual(r, ("c", None))
         a.assert_not_called()
 
-    def test_claude_api(self):
+    def test_claude_api_ikinci_claude_code(self):
         r, c, a = self.cagir({"OFIS_YEDEK_SAGLAYICI": "claude-api"})
         self.assertEqual(r, ("a", None))
         c.assert_not_called()
@@ -243,6 +328,106 @@ class SaglayiciSecimiTest(unittest.TestCase):
             self.assertIsNone(r[0])
             c.assert_not_called()
             a.assert_not_called()
+
+    def test_api_yedegi_acik(self):
+        for env, beklenen in (({}, True), ({"OFIS_YEDEK_SAGLAYICI": "claude-api"}, True),
+                              ({"OFIS_YEDEK_SAGLAYICI": "codex"}, False), ({"OFIS_YEDEK_SAGLAYICI": "yok"}, False),
+                              ({"OFIS_YEDEK": "0"}, False)):
+            with mock.patch.dict("os.environ", env):
+                if "OFIS_YEDEK_SAGLAYICI" not in env:
+                    os.environ.pop("OFIS_YEDEK_SAGLAYICI", None)
+                if "OFIS_YEDEK" not in env:
+                    os.environ.pop("OFIS_YEDEK", None)
+                self.assertEqual(kosucu.api_yedegi_acik(), beklenen, env)
+
+
+def tamamlanan(stdout, kod=0, stderr=""):
+    return subprocess.CompletedProcess([], kod, stdout=stdout, stderr=stderr)
+
+
+CEO_LIMIT = json.dumps({"type": "result", "is_error": True, "result": "You've hit your limit · resets 5pm"})
+CEO_TAMAM = json.dumps({"type": "result", "is_error": False, "result": "",
+                        "structured_output": {"cevap": "tamam", "atamalar": []}, "total_cost_usd": 0.02})
+
+
+class CeoYedekTest(unittest.TestCase):
+    def setUp(self):
+        self.d = tempfile.mkdtemp()
+        self.olaylar = []
+        self.kayitlar = []
+        ortam = {k: v for k, v in os.environ.items() if k not in ("ANTHROPIC_API_KEY", "OFIS_YEDEK",
+                                                                  "OFIS_YEDEK_SAGLAYICI", "OFIS_YEDEK_MODEL")}
+        yamalar = [
+            mock.patch.dict("os.environ", ortam, clear=True),
+            mock.patch.object(sunucu.ortak, "KOSU_DIZINI", self.d),
+            mock.patch.object(sunucu.ortak, "ajanlari_yukle", return_value=({}, {"ceo": {"model": "opus"}})),
+            mock.patch.object(sunucu.ortak, "olay_yaz", side_effect=self.olaylar.append),
+            mock.patch.object(sunucu, "ceo_ekleri_kaydet", return_value=[]),
+            mock.patch.object(sunucu, "ceo_promptu", return_value="istem"),
+            mock.patch.object(sunucu, "kurul_yukle", return_value=None),
+            mock.patch.object(sunucu, "ceo_kaydi_yaz", side_effect=lambda k: self.kayitlar.append(k) or "x.md"),
+        ]
+        for y in yamalar:
+            y.start()
+            self.addCleanup(y.stop)
+
+    def calistir(self, cikislar, anahtar=(SAHTE_ANAHTAR, None)):
+        with mock.patch.object(sunucu.subprocess, "run", side_effect=cikislar) as run, \
+                mock.patch.object(kosucu, "api_anahtari", return_value=anahtar):
+            try:
+                sonuc = sunucu.ceo_calistir("merhaba", kuru=True)
+            except sunucu.IstekHatasi as e:
+                sonuc = e
+        logs = ""
+        for ad in os.listdir(self.d):
+            with open(os.path.join(self.d, ad), encoding="utf-8") as f:
+                logs += f.read()
+        return run, sonuc, logs
+
+    def test_limitte_ayni_komut_anahtarla_bir_kez_daha(self):
+        run, sonuc, logs = self.calistir([tamamlanan(CEO_LIMIT, 1), tamamlanan(CEO_TAMAM)])
+        self.assertEqual(sonuc["cevap"], "tamam")
+        self.assertEqual(run.call_count, 2)
+        ilk, ikinci = run.call_args_list
+        self.assertNotIn("ANTHROPIC_API_KEY", ilk.kwargs["env"])
+        self.assertEqual(ikinci.kwargs["env"]["ANTHROPIC_API_KEY"], SAHTE_ANAHTAR)
+        self.assertNotIn("ANTHROPIC_API_KEY", os.environ)
+        k1, k2 = ilk.args[0], ikinci.args[0]
+        for bayrak in ("--json-schema", "--max-budget-usd", "--tools"):
+            self.assertEqual(k2[k2.index(bayrak) + 1], k1[k1.index(bayrak) + 1], bayrak)
+        self.assertEqual(k2[k2.index("--model") + 1], "claude-sonnet-5-5")
+        self.assertIn("Read(/proc/**)", k2)
+        self.assertEqual(self.kayitlar[-1]["saglayici"], "claude (API yedeği)")
+        bitti = [o for o in self.olaylar if o.get("tur") == "ceo_bitti"][-1]
+        self.assertEqual(bitti["saglayici"], "claude (API yedeği)")
+        self.assertNotIn(SAHTE_ANAHTAR, logs + json.dumps(self.olaylar) + json.dumps(self.kayitlar))
+
+    def test_ikinci_kosu_ciktisindaki_anahtar_loga_maskeli_yazilir(self):
+        _, _, logs = self.calistir([tamamlanan(CEO_LIMIT, 1), tamamlanan(CEO_TAMAM, stderr=f"debug {SAHTE_ANAHTAR}")])
+        self.assertNotIn(SAHTE_ANAHTAR, logs)
+        self.assertIn("claude (API yedeği)", logs)
+
+    def test_normal_kosu_tek_cagri(self):
+        run, sonuc, _ = self.calistir([tamamlanan(CEO_TAMAM)])
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(self.kayitlar[-1]["saglayici"], "claude")
+
+    def test_anahtarsizsa_tek_cagri_502(self):
+        run, sonuc, logs = self.calistir([tamamlanan(CEO_LIMIT, 1)], anahtar=(None, "ANTHROPIC_API_KEY is not set"))
+        self.assertEqual(run.call_count, 1)
+        self.assertIsInstance(sonuc, sunucu.IstekHatasi)
+        self.assertEqual(sonuc.kod, 502)
+        self.assertIn("atlandı", logs)
+
+    def test_limit_disi_hatada_yedek_yok(self):
+        run, sonuc, _ = self.calistir([tamamlanan("", 1, stderr="boom")])
+        self.assertEqual(run.call_count, 1)
+        self.assertIsInstance(sonuc, sunucu.IstekHatasi)
+
+    def test_yedek_kapaliysa_tek_cagri(self):
+        with mock.patch.dict("os.environ", {"OFIS_YEDEK_SAGLAYICI": "yok"}):
+            run, sonuc, _ = self.calistir([tamamlanan(CEO_LIMIT, 1)])
+        self.assertEqual(run.call_count, 1)
 
 
 if __name__ == "__main__":

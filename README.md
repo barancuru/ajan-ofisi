@@ -141,12 +141,17 @@ en fazla 50 iş). Bozuk dosya `.bozuk-<zaman>` olarak yana alınır.
   `python3 zamanlayici.py --kur`. Bu, `durum/systemd/.degisti`'yi izleyen bir `.path` birimi kurar; değişince
   `zamanlayici.py --esle` birimleri doğrulanmış `tekrarlar.json`'dan yeniden üretip `~/.config/systemd/user/`'a
   eşler (yalnız `ajan-ofisi-tekrar-*` dosyalarına dokunur). Kurulum yapılmadıysa sayfa uyarır; işler kaydedilir ama koşmaz.
-- **Limit yedeği sırası:** Claude Code (ana koşu) → Claude API (`ANTHROPIC_API_KEY` varsa; SSH/araçlı ajanlarda atlanır)
-  → Codex. Bir basamak başarısızsa sıradakine geçilir; hepsi başarısızsa hatalar tek mesajda birleşir (anahtar maskeli).
-  `OFIS_YEDEK_SAGLAYICI` (`zincir` varsayılan, `claude-api`, `codex`, `yok`) tek sağlayıcıyı zorlayabilir.
-  İş servisleri anahtarı `EnvironmentFile=-%h/.config/ofis-kapi/anthropic.env` ile alır (dosya yoksa servis yine başlar;
-  içeriği repoya/loga girmez, dosya 0600 olmalı). Mevcut kurulu birimleri güncellemek için `python3 zamanlayici.py --esle`.
-  Not: ortam değişkeni alt süreçlere (`claude`, `codex`) miras kalabilir.
+- **Limit yedeği sırası:** Claude Code (Pro) → Claude Code (API anahtarı) → Codex. Pro limit hatasıyla bitince
+  aynı `claude` komutu, `ANTHROPIC_API_KEY` yalnız o alt sürecin ortamına konarak bir kez daha çalışır: araçlar, izin
+  kuralları (SSH/git geçitleri dahil), `--max-budget-usd` ve süre aynı; ek olarak `Read(/proc/**)` yasaklanır. Model
+  ajanın modelidir, en fazla Sonnet (`OFIS_YEDEK_MODEL` ezer). Bu basamak bütün ajanlara açıktır; kayıtta sağlayıcı
+  `claude (API yedeği)` olur. Codex yalnız SSH'siz ajanlar içindir (kum havuzunda). Bir basamak başarısızsa sıradakine
+  geçilir; hepsi başarısızsa hatalar tek mesajda birleşir (anahtar maskeli). CEO da limitte aynı komutu (`--json-schema`,
+  bütçe aynı) anahtarla bir kez daha çalıştırır; CEO'da Codex basamağı yoktur, kayda `saglayici` yazılır.
+  `OFIS_YEDEK_SAGLAYICI` (`zincir` varsayılan, `claude-api` = yalnız ikinci Claude Code, `codex`, `yok`) zinciri daraltır.
+  Anahtar ortamda yoksa koşucu `~/.config/ofis-kapi/anthropic.env` (0600) dosyasından okur; değer log, olay ve çıktıya
+  yazılmaz. İş servisleri dosyayı `EnvironmentFile=-%h/.config/ofis-kapi/anthropic.env` ile de alır; mevcut kurulu
+  birimleri güncellemek için `python3 zamanlayici.py --esle`. `python3 kosucu.py --ping` anahtarı tek kısa istekle dener.
 - Ay günü ve hafta günü ikisi de kısıtlı cron (klasik cron'da VEYA) systemd'ye çevrilemez, reddedilir.
 - Ofis sunucusu kapalıyken de koşar. Bilgisayar kapalıyken kaçan çalışma açılışta **en çok 1 kez** telafi edilir.
 - Timer boşta model çağırmaz. Vakti gelince `zamanlayici.py --tetikle <id>` işi `gorev_baslat` ile (kaynak `tekrar`)

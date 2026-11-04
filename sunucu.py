@@ -21,6 +21,7 @@ from urllib.parse import urlparse, parse_qs, quote
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ortak  # noqa: E402
 import kopru  # noqa: E402
+import kosucu  # noqa: E402  (CEO limit yedeği: aynı anahtar/model/limit kuralları)
 import token_sayac  # noqa: E402
 import zamanlayici  # noqa: E402
 
@@ -673,15 +674,41 @@ def _ceo_calistir(metin, kuru=False, ekler=None):
     ek_kayit = []
     kurul_kaydi = None
     claude = shutil.which("claude") or "/opt/homebrew/bin/claude"
+    saglayicilar = []
 
     def ceo_sor(prompt, sema, log_adi):
         komut = [claude, "-p", "--model", ceo["model"], "--output-format", "json",
                  "--no-session-persistence", "--max-budget-usd", "0.20", "--tools", "", "--json-schema", json.dumps(sema)]
         surec = subprocess.run(komut, cwd=ortak.KOK, input=prompt, text=True,
-                               capture_output=True, timeout=CEO_ZAMAN_ASIMI)
+                               capture_output=True, timeout=CEO_ZAMAN_ASIMI, env=kosucu.pro_ortami())
+        kayit =surec.stdout + ("\n--- stderr ---\n" + surec.stderr if surec.stderr else "")
+        saglayici = "claude"
+        try:
+            ilk = json.loads(surec.stdout)
+        except ValueError:
+            ilk = None
+        ilk = ilk if isinstance(ilk, dict) else None
+        hata = f"claude çıkış kodu {surec.returncode}" if surec.returncode != 0 else None
+        if kosucu.limit_hatasi_mi(ilk, hata, surec.stderr + ("" if ilk else surec.stdout)) \
+                and kosucu.api_yedegi_acik():
+            # Limit yedeği: aynı komut, yalnız bu alt sürecin env'inde API anahtarıyla bir kez daha (CEO'da Codex yok)
+            anahtar, anahtar_hata = kosucu.api_anahtari()
+            if anahtar:
+                model, _ = kosucu.api_modeli(ceo)
+                surec = subprocess.run(kosucu.api_komutu(komut, model), cwd=ortak.KOK, input=prompt, text=True,
+                                       capture_output=True, timeout=CEO_ZAMAN_ASIMI, env=kosucu.api_ortami(anahtar))
+                saglayici = kosucu.API_SAGLAYICI
+                kayit += (f"\n--- {saglayici} · model {model} ---\n" + surec.stdout
+                          + ("\n--- stderr ---\n" + surec.stderr if surec.stderr else ""))
+            else:
+                kayit += f"\n--- {kosucu.API_SAGLAYICI} atlandı: {anahtar_hata} ---\n"
+        saglayicilar.append(saglayici)
         with open(os.path.join(ortak.KOSU_DIZINI, f"{log_adi}.log"), "w", encoding="utf-8") as f:
-            f.write(surec.stdout + ("\n--- stderr ---\n" + surec.stderr if surec.stderr else ""))
+            f.write(kosucu.maskele(kayit))
         return json.loads(surec.stdout)
+
+    def saglayici_ozeti():
+        return kosucu.API_SAGLAYICI if kosucu.API_SAGLAYICI in saglayicilar else ("claude" if saglayicilar else None)
 
     baslangic = time.time()
     try:
@@ -712,11 +739,12 @@ def _ceo_calistir(metin, kuru=False, ekler=None):
             cikti = ceo_kaydi_yaz({"ceo_id": ceo_id, "zaman": ortak.simdi_iso(), "istek": metin[:ortak.MAKS_GIRDI],
                                    "ekler": ek_kayit, "kuru": kuru, "durum": "hata", "hata": hata, "sure_sn": sure,
                                    "maliyet_usd": None, "cevap": None, "atamalar": [], "reddedilen": [],
-                                   "kurul": kurul_kaydi})
+                                   "kurul": kurul_kaydi, "saglayici": saglayici_ozeti()})
         except OSError:
             cikti = None
         ortak.olay_yaz({"tur": "ceo_bitti", "kosu_id": ceo_id, "ajan": "ceo", "oda": "ceo",
                         "durum": "hata", "hata": hata, "sure_sn": sure, "istek": metin[:300], "cikti": cikti,
+                        "saglayici": saglayici_ozeti(),
                         **({"kurul": kurul_olay_ozeti(kurul_kaydi)} if kurul_kaydi else {})})
         _ceo_acik.id = None
         raise IstekHatasi(502, "CEO geçerli bir plan döndürmedi; koşu başlatılmadı") from e
@@ -741,9 +769,11 @@ def _ceo_calistir(metin, kuru=False, ekler=None):
     cikti = ceo_kaydi_yaz({"ceo_id": ceo_id, "zaman": ortak.simdi_iso(), "istek": metin[:ortak.MAKS_GIRDI],
                            "ekler": ek_kayit, "kuru": kuru, "durum": "basarili", "hata": None, "sure_sn": sure,
                            "maliyet_usd": sonuc.get("total_cost_usd"), "cevap": cevap,
-                           "atamalar": atamalar, "reddedilen": reddedilen, "kurul": kurul_kaydi})
+                           "atamalar": atamalar, "reddedilen": reddedilen, "kurul": kurul_kaydi,
+                           "saglayici": saglayici_ozeti()})
     ortak.olay_yaz({"tur": "ceo_bitti", "kosu_id": ceo_id, "ajan": "ceo", "oda": "ceo", "durum": "basarili",
                     "sure_sn": sure, "cevap": cevap, "istek": metin[:300], "cikti": cikti,
+                    "saglayici": saglayici_ozeti(),
                     **({"kurul": kurul_olay_ozeti(kurul_kaydi)} if kurul_kaydi else {}),
                     "atamalar": [{"ajan": a["ajan"], "prompt": a["prompt"][:300], "kosu_id": a["kosu_id"]}
                                  for a in atamalar],
