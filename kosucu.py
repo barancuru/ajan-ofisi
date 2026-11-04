@@ -104,6 +104,8 @@ def kilit_al():
             time.sleep(5)
 
 
+KUM_KORUMALI = [os.path.expanduser(p) for p in ("~/beyin/bin", "~/beyin/sistem/gelistirme", "~/beyin/.claude",
+                                                  "~/ajan-ofisi/.git")]
 KUM_GIZLI = [os.path.expanduser(p) for p in ("~/.ssh", "~/.config/ofis-kapi", "~/.claude", "~/.gnupg", "~/.config/gh",
                                                "~/.git-credentials", "~/.netrc", "~/.claude.json")]
 
@@ -129,6 +131,14 @@ def codex_kos(ajan, tam_prompt, calisma_dizini, cikti_dizini, log):
     for d in yazilabilir:
         if os.path.exists(d):
             komut += ["--bind", d, d]
+    # re-protect inside writable dirs: code the runner executes outside the sandbox (git hooks, runner, adapters,
+    # skills) stays read-only, otherwise Codex could plant something that runs later with full permissions
+    for d in yazilabilir:
+        if os.path.exists(os.path.join(d, ".git")):
+            komut += ["--ro-bind", os.path.join(d, ".git"), os.path.join(d, ".git")]
+        for k in KUM_KORUMALI:
+            if (k + "/").startswith(d.rstrip("/") + "/") and os.path.exists(k):
+                komut += ["--ro-bind", k, k]
     for d in KUM_GIZLI:
         if os.path.isdir(d):
             komut += ["--tmpfs", d]
