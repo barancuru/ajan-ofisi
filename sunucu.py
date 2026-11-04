@@ -1197,6 +1197,26 @@ def son_bolum(govde):
     return govde[i + 1:][:1800].strip()
 
 
+def aksiyonlari_cikar(govde, en_cok=8, en_uzun=200):
+    """Open '- [ ]' items plus list lines of the '## Kullanıcı kararı gerektiren noktalar' section (pure, read-only)."""
+    sonuc = []
+    karar = False
+    for s in govde.splitlines():
+        if s.startswith("#"):
+            karar = s.startswith("## ") and s[3:].strip().lower().startswith("kullanıcı kararı gerektiren")
+            continue
+        t = s.strip()
+        m = re.match(r"[-*+]\s+\[ \]\s+(.*)", t)
+        if not m and karar:
+            m = re.match(r"(?:[-*+]|\d+[.)])\s+(?!\[[xX]\])(.*)", t)
+        if m and m.group(1).strip():
+            metin = m.group(1).strip()
+            sonuc.append(metin if len(metin) <= en_uzun else metin[:en_uzun - 1].rstrip() + "…")
+            if len(sonuc) >= en_cok:
+                break
+    return sonuc
+
+
 def gorev_ozeti(yol, bitti=False):
     with open(yol, encoding="utf-8", errors="replace") as f:  # one bad byte must not hide the task or break the approval
         metin = f.read()
@@ -1209,7 +1229,7 @@ def gorev_ozeti(yol, bitti=False):
             "durum": durum, "onay": fm.get("onay", ""), "surum": fm.get("surum", ""), "sha256": fm.get("sha256", ""),
             "model": fm.get("model", ""), "olusturma": fm.get("olusturma", ""),
             "guncelleme": datetime.fromtimestamp(os.path.getmtime(yol)).isoformat(timespec="seconds"),
-            "son_bolum": son_bolum(govde)}
+            "son_bolum": son_bolum(govde), "aksiyonlar": aksiyonlari_cikar(govde)}
     if fm.get("proje") == "ajan-ofisi" and durum == "uat":
         ozet["onizleme"] = ":8444"
     if durum == "oneri":

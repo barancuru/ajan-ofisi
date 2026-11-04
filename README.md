@@ -134,7 +134,7 @@ prompt + 5 alanlı cron; aç/kapa, sil). Kayıtlar `durum/tekrarlar.json`'da dur
 en fazla 50 iş). Bozuk dosya `.bozuk-<zaman>` olarak yana alınır.
 
 ### Operatör Panosu
-"Operatör Panosu" sekmesi (Öngörülebilirlik'in yanında) `GET /api/gelistirme` yanıtından senden karar/girdi bekleyen açık görevleri (`uat`, `oneri`, `takildi`) salt okunur listeler; onay/ret Geliştirme sekmesinde kalır.
+"Operatör Panosu" sekmesi (Öngörülebilirlik'in yanında) `GET /api/gelistirme` yanıtından senden karar/girdi bekleyen açık görevleri (`uat`, `oneri`, `takildi`) salt okunur listeler. Bitmemiş geliştirme görevlerinin gövdesindeki açık `- [ ]` maddeleri ve "Kullanıcı kararı gerektiren noktalar" bölümü de (`aksiyonlar` alanı, en çok 8 madde) kartta gösterilir; aksiyonu olan `calisiyor`/`hazir` görevler de panoya girer. Onay/ret Geliştirme sekmesinde kalır.
 - **İş başına systemd timer.** Her ekle/sil/aç/kapat sonrası sunucu `durum/systemd/` altına
   `ajan-ofisi-tekrar-<id>.timer` (`OnCalendar=` cron'dan çevrilir, `Persistent=true`) ve `.service` üretir
   (`ExecStart` yalnız iş id'sini alır; prompt birime girmez). Sunucu `~/.config`'e yazmaz. **Bir kez** sen kur:

@@ -332,6 +332,7 @@ td.sayi,th.sayi{text-align:right}
 @media (max-width:768px){.oneri-tara select{font-size:16px}}
 .izgara .kart .oneri-metin p{display:block;-webkit-line-clamp:unset;overflow:visible}
 .rozet.takildi{background:#f7d4d1;color:#9c2f26}
+.operator-aksiyon{margin:6px 0 8px;padding-left:18px;font-size:13px;text-align:left}.operator-aksiyon li{margin:3px 0;overflow-wrap:anywhere;white-space:normal}
 @media (max-width:768px){.operator-izgara{grid-template-columns:1fr}.operator-izgara .kart button.operator-git{min-height:44px;padding:10px 14px}}
 .gelistirme-kart a.onizleme{display:inline-block;margin-top:6px;font-size:13px;font-weight:600;color:var(--mercan-k)}
 .gelistirme-kart .sha{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11.5px;color:var(--soluk);flex-wrap:wrap}
@@ -3034,8 +3035,9 @@ const OPERATOR_NE = { uat:'Önizlemede dene, onay: evet/hayir', oneri:'Öneriyi 
 let operatorZaman = null;
 function operatorIsleri(gorevler) {
   const sira = { uat:0, oneri:1, takildi:2 };
-  return (gorevler || []).filter(g => !g.bitti && g.durum in OPERATOR_NE)
-    .sort((a, b) => (sira[a.durum] - sira[b.durum]) || String(b.guncelleme || '').localeCompare(String(a.guncelleme || '')));
+  const aks = g => Array.isArray(g.aksiyonlar) ? g.aksiyonlar : [];
+  return (gorevler || []).filter(g => !g.bitti && (g.durum in OPERATOR_NE || aks(g).length))
+    .sort((a, b) => ((a.durum in sira ? sira[a.durum] : 3) - (b.durum in sira ? sira[b.durum] : 3)) || String(b.guncelleme || '').localeCompare(String(a.guncelleme || '')));
 }
 async function operatorSayfasi() {
   clearInterval(operatorZaman);
@@ -3056,11 +3058,20 @@ async function operatorSayfasi() {
     ust.append(el('span', 'rozet ' + g.durum, (GDURUM[g.durum] || [g.durum])[0]), el('span', null, g.proje || ''), el('span', null, ongTarih(g.guncelleme)));
     const git = el('button', 'git operator-git', 'Geliştirme\'ye git →'); git.type = 'button';
     git.onclick = () => { SES.tik(); sekmeAc('gelistirme'); };
-    k.append(ust, el('h4', null, g.baslik), el('p', null, OPERATOR_NE[g.durum]), git);
+    k.append(ust, el('h4', null, g.baslik));
+    if (OPERATOR_NE[g.durum]) k.append(el('p', null, OPERATOR_NE[g.durum]));
+    const aks = Array.isArray(g.aksiyonlar) ? g.aksiyonlar : [];
+    if (aks.length) {
+      const ul = el('ul', 'operator-aksiyon');
+      aks.forEach(a => ul.append(el('li', null, String(a))));
+      k.append(ul);
+    }
+    k.append(git);
     iz.append(k);
   });
   if (!isler.length) iz.append(el('p', 'bos', 'Şu an senden bekleyen iş yok.'));
-  return [...bas, el('p', 'alt', isler.length + ' iş bekliyor. Onay/ret Geliştirme sekmesinde yapılır.'), iz];
+  const topAks = isler.reduce((n, g) => n + (Array.isArray(g.aksiyonlar) ? g.aksiyonlar.length : 0), 0);
+  return [...bas, el('p', 'alt', isler.length + ' iş, ' + topAks + ' aksiyon bekliyor. Onay/ret Geliştirme sekmesinde yapılır.'), iz];
 }
 async function ongorulebilirlikSayfasi() {
   clearInterval(ongZaman);
