@@ -1197,6 +1197,29 @@ def son_bolum(govde):
     return govde[i + 1:][:1800].strip()
 
 
+def gelistirme_rapor_yaniti(dosya):
+    """Görev dosyasının son '## ' bölümü, kırpmasız (tavan MAKS_SON_IS). Yol yalnız GOREV_DIZINI köklerinden ve basename ile kurulur."""
+    if (not isinstance(dosya, str) or not dosya.endswith(".md") or dosya != os.path.basename(dosya)
+            or dosya.startswith(".") or "\x00" in dosya):
+        raise IstekHatasi(400, "geçersiz dosya")
+    for alt in ("", "bitti"):
+        kok = os.path.realpath(os.path.join(GOREV_DIZINI, alt))
+        yol = os.path.realpath(os.path.join(kok, dosya))
+        if os.path.dirname(yol) != kok or not os.path.isfile(yol):
+            continue
+        with open(yol, encoding="utf-8", errors="replace") as f:
+            metin = f.read(MAKS_SON_IS * 4 + 1)
+        fm, govde = on_bilgi(metin)
+        if fm.get("tur") != "gelistirme":
+            break
+        i = govde.rfind("\n## ")
+        if i < 0:
+            break
+        rapor = govde[i + 1:].strip()
+        return {"metin": rapor[:MAKS_SON_IS], "kirpildi": len(rapor) > MAKS_SON_IS}
+    raise IstekHatasi(404, "rapor yok")
+
+
 def aksiyonlari_cikar(govde, en_cok=8, en_uzun=200):
     """Open '- [ ]' items plus list lines of the '## Kullanıcı kararı gerektiren noktalar' section (pure, read-only)."""
     sonuc = []
@@ -1541,6 +1564,11 @@ class Isleyici(SimpleHTTPRequestHandler):
             return self._json(200, hafiza_yaniti())
         if yol.path == "/api/gelistirme":
             return self._json(200, gelistirme_yaniti())
+        if yol.path == "/api/gelistirme/rapor":
+            try:
+                return self._json(200, gelistirme_rapor_yaniti((parse_qs(yol.query).get("dosya") or [""])[0]))
+            except IstekHatasi as e:
+                return self._json(e.kod, {"hata": str(e)})
         if yol.path == "/api/ongorulebilirlik":
             return self._json(200, ongorulebilirlik_yaniti())
         if yol.path == "/api/dizin/indir":

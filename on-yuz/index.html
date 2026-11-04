@@ -2647,6 +2647,7 @@ async function gelistirmeSayfasi() {
   // refresh every 20 s while open, but never wipe text you're typing
   gelistirmeZaman = setInterval(() => {
     if (aktifSekme !== 'gelistirme') return clearInterval(gelistirmeZaman);
+    if (akisPop && !akisPop.hidden) return;
     const yaziyor = [...sayfa.querySelectorAll('textarea,input')].some(x => x.value.trim() && x.type !== 'hidden');
     if (!yaziyor && !sayfa.querySelector('details[open]')) sekmeAc('gelistirme');
   }, 20000);
@@ -2774,12 +2775,17 @@ function gelistirmeKarti(g) {
   }
   const kararBekliyor = g.durum === 'uat' && g.onay !== 'evet';
   if (g.son_bolum) {
+    const raporPopAc = () => akisPopAc((g.baslik || 'Görev') + ' · son rapor', g.son_bolum,
+      DEMO ? '' : '/api/gelistirme/rapor?dosya=' + encodeURIComponent(g.dosya), kararBekliyor ? (kap, kapat) => {
+        const d2 = el('div', 'dugmeler'); kap.append(d2); gelistirmeKararKur(g, d2, kapat);
+      } : null);
     const d = el('details'); d.append(el('summary', null, 'Son rapor'), el('pre', null, g.son_bolum));
     const pb = el('button', 'mini', 'Popup\'ta aç'); pb.type = 'button';
-    pb.onclick = () => akisPopAc((g.baslik || 'Görev') + ' · son rapor', g.son_bolum, '', kararBekliyor ? (kap, kapat) => {
-      const d2 = el('div', 'dugmeler'); kap.append(d2); gelistirmeKararKur(g, d2, kapat);
-    } : null);
+    pb.onclick = raporPopAc;
     d.append(pb); k.append(d);
+    k.classList.add('tikla'); k.tabIndex = 0; k.setAttribute('role', 'button'); k.title = 'Tam raporu aç';
+    k.addEventListener('click', e => { if (!e.target.closest('button, a, summary, details, textarea')) raporPopAc(); });
+    k.addEventListener('keydown', e => { if (e.target === k && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); raporPopAc(); } });
   }
   if (kararBekliyor) {
     const dug = el('div', 'dugmeler'); k.append(dug); gelistirmeKararKur(g, dug, null);

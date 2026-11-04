@@ -171,7 +171,7 @@ class DepoTesti(unittest.TestCase):
             with open(os.path.join(z.birim_dizini(), ad), encoding="utf-8") as f:
                 metin = f.read()
             self.assertNotIn("GIZLI", metin)
-            self.assertNotIn("rapor", metin)
+            self.assertNotIn("rapor", metin.replace(z.ortak.KOK, ""))  # klasör yolu (dal adı) sayılmaz
             if ad.endswith(".timer"):
                 self.assertIn("OnCalendar=*-*-* 09:00:00\nPersistent=true\n", metin)
             else:
