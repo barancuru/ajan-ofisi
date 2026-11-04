@@ -31,7 +31,7 @@ KILIT_BEKLE_SN = int(os.environ.get("OFIS_KILIT_BEKLE", "1800"))
 VARSAYILAN_BUTCE = float(os.environ.get("OFIS_BUTCE_USD", "0.50"))
 ZAMAN_ASIMI_SN = 1800
 # 429/529 only as an error code ("HTTP 429", "status 529", "error: 429", "429 Too Many Requests"); "5290" or "line 429" doesn't match
-LIMIT_DESENI = re.compile(r"usage limit|rate.?limit|limit reached|hit your limit|quota|overloaded|credit balance"
+LIMIT_DESENI = re.compile(r"usage limit|rate.?limit|limit reached|hit your\b[^.\n]{0,40}\blimit|(?:weekly|session|daily|hourly|monthly|\d+-hour) limit|quota|overloaded|credit balance"
                           r"|(?:http|status|error|code|hata)\W{0,3}(?:429|529)\b|\b(?:429|529)\s+(?:too many requests|overloaded)", re.I)
 HAFIZA_DESENI = re.compile(r"<hafiza_ekle>(.*?)</hafiza_ekle>", re.S)
 SSH_GECIT = os.path.join(ortak.KOK, "ssh_gecit.py")

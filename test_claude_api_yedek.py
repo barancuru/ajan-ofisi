@@ -103,6 +103,13 @@ class ApiYardimcilariTest(unittest.TestCase):
         with mock.patch.dict("os.environ", {"OFIS_YEDEK_MODEL": "claude-opus-5-5"}):
             self.assertEqual(kosucu.api_modeli({"model": "haiku"})[0], "claude-opus-5-5")
 
+    def test_gercek_limit_mesajlari_taninir(self):
+        # 2026-11-04 gerçek olay: "weekly" araya girince yedek hiç tetiklenmedi
+        for metin in ("You've hit your weekly limit · resets Nov 8, 5pm (Europe/Istanbul)",
+                      "You've hit your session limit · resets 11pm", "You've hit your limit", "5-hour limit reached"):
+            self.assertTrue(kosucu.LIMIT_DESENI.search(metin), metin)
+        self.assertIsNone(kosucu.LIMIT_DESENI.search("kod sınırı: limit parametresi hatalı"))
+
     def test_429_529_yalniz_hata_kodu_olarak(self):
         for metin in ("API Error: 429 Too Many Requests", "HTTP 529 overloaded_error", "status: 429"):
             self.assertTrue(kosucu.LIMIT_DESENI.search(metin), metin)
