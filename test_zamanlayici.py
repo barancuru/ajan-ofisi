@@ -373,7 +373,9 @@ class HavuzTesti(unittest.TestCase):
         self.assertEqual(len(glob.glob(sunucu.kuyruk_yolu() + ".bozuk-*")), 1)
 
     def test_ceo_eszamanli_sinir(self):
-        with mock.patch.object(sunucu, "_ceo_kosuyor", sunucu.MAKS_ALT + 1):
+        # yuvalar dolu ve CEO kuyruğu da dolu: 429 (yuva dolu ama kuyruk boşsa istek kuyruğa girer)
+        with mock.patch.object(sunucu, "_ceo_kosuyor", sunucu.MAKS_ALT + 1), \
+                mock.patch.object(sunucu, "_ceo_sira", [object() for _ in range(sunucu.MAKS_KUYRUK)]):
             with self.assertRaises(sunucu.IstekHatasi) as h:
                 sunucu.ceo_calistir("merhaba")
         self.assertEqual(h.exception.kod, 429)
