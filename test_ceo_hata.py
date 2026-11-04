@@ -25,26 +25,33 @@ class CeoOSErrorTesti(unittest.TestCase):
 
 class CeoCiftIstekTesti(unittest.TestCase):
     def test_ikinci_istek_409_ve_bayrak_temizlenir(self):
+        # Tasarım: CEO aynı anda 1 + MAKS_ALT koşu yapabilir; sınır aşılınca 429 (README)
         import threading
-        basladi, birak = threading.Event(), threading.Event()
-        cagri = []
+        sinir = 1 + sunucu.MAKS_ALT
+        sayac = []
+        hepsi_basladi, birak = threading.Event(), threading.Event()
+        kilit = threading.Lock()
 
         def yavas(metin, kuru=False, ekler=None):
-            cagri.append(metin)
-            basladi.set()
+            with kilit:
+                sayac.append(metin)
+                if len(sayac) == sinir:
+                    hepsi_basladi.set()
             birak.wait(5)
             return {"ok": True}
 
         with mock.patch.object(sunucu, "_ceo_calistir", side_effect=yavas):
-            t = threading.Thread(target=sunucu.ceo_calistir, args=("bir",))
-            t.start()
-            self.assertTrue(basladi.wait(5))
+            ts = [threading.Thread(target=sunucu.ceo_calistir, args=(f"is{i}",)) for i in range(sinir)]
+            for t in ts:
+                t.start()
+            self.assertTrue(hepsi_basladi.wait(5))
             with self.assertRaises(sunucu.IstekHatasi) as c:
-                sunucu.ceo_calistir("iki")
-            self.assertEqual(c.exception.kod, 409)
+                sunucu.ceo_calistir("fazla")
+            self.assertEqual(c.exception.kod, 429)
             birak.set()
-            t.join(5)
-            self.assertEqual(cagri, ["bir"])
+            for t in ts:
+                t.join(5)
+            self.assertEqual(len(sayac), sinir)
             self.assertEqual(sunucu.ceo_calistir("uc"), {"ok": True})  # bayrak temizlendi
         with mock.patch.object(sunucu, "_ceo_calistir", side_effect=sunucu.IstekHatasi(502, "x")):
             with self.assertRaises(sunucu.IstekHatasi):

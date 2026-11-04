@@ -12,7 +12,7 @@ class OlayDonmeTesti(unittest.TestCase):
     def test_boyut_asilinca_dondurur(self):
         with tempfile.TemporaryDirectory() as d:
             yol = os.path.join(d, "olaylar.jsonl")
-            with mock.patch.object(ortak, "OLAYLAR", yol), mock.patch.object(ortak, "OLAY_MAKS_BAYT", 200):
+            with mock.patch.object(ortak, "OLAYLAR", yol), mock.patch.object(ortak, "OLAY_MAKS_BAYT", 400):  # tek döndürme: .1 yalnız bir yedek tutar, ikinci döndürme öncekini ezer
                 for i in range(10):
                     ortak.olay_yaz({"tur": "x", "i": i})
             self.assertTrue(os.path.exists(yol + ".1"))

@@ -75,7 +75,7 @@ class OlayOkumaTesti(unittest.TestCase):
                 self.assertEqual([k["kosu_id"] for k in s["kayitlar"]], ["k2", "c1", "k1"])
                 self.assertFalse(s["daha_var"])
                 b = sunucu.gecmis_yaniti(ajan_id="b")
-                self.assertEqual([k["kosu_id"] for k in b["kayitlar"]], ["k2", "c1"])
+                self.assertEqual([k["kosu_id"] for k in b["kayitlar"]], ["k2"])  # ajan süzgeci CEO kaydını içermez (README)
 
     def test_kurul_ve_ceo_kayit_yanitlari(self):
         with tempfile.TemporaryDirectory() as d:
