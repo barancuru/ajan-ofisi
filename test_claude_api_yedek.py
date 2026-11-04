@@ -50,11 +50,42 @@ class ClaudeApiYedekTest(unittest.TestCase):
 
     def test_anahtar_yoksa_acik_hata_istek_yok(self):
         with mock.patch.dict("os.environ", clear=True), \
+                mock.patch.object(kosucu, "API_ANAHTAR_DOSYASI", "/nonexistent/anthropic.env"), \
                 mock.patch.object(kosucu.urllib.request, "urlopen") as u:
             sonuc, hata = self.kos()
         self.assertIsNone(sonuc)
         self.assertIn("ANTHROPIC_API_KEY", hata)
         u.assert_not_called()
+
+    def test_anahtar_dosyadan_okunur_ve_gevsek_izin_reddedilir(self):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as d:
+            yol = os.path.join(d, "anthropic.env")
+            with open(yol, "w") as f:
+                f.write('export ANTHROPIC_API_KEY="sk-ant-test-dosya"\n')
+            os.chmod(yol, 0o600)
+            with mock.patch.dict("os.environ", clear=True), mock.patch.object(kosucu, "API_ANAHTAR_DOSYASI", yol):
+                self.assertEqual(kosucu.api_anahtari(), ("sk-ant-test-dosya", None))
+                os.chmod(yol, 0o644)
+                anahtar, hata = kosucu.api_anahtari()
+                self.assertIsNone(anahtar)
+                self.assertIn("chmod 600", hata)
+
+    def test_model_ajani_izler_en_fazla_sonnet(self):
+        with mock.patch.dict("os.environ", clear=True):
+            self.assertEqual(kosucu.api_modeli({"model": "haiku"})[0], "claude-haiku-5-5")
+            self.assertEqual(kosucu.api_modeli({"model": "sonnet"}), ("claude-sonnet-5-5", None))
+            model, notu = kosucu.api_modeli({"model": "opus"})
+            self.assertEqual(model, "claude-sonnet-5-5")
+            self.assertIn("opus", notu)
+        with mock.patch.dict("os.environ", {"OFIS_YEDEK_MODEL": "claude-opus-5-5"}):
+            self.assertEqual(kosucu.api_modeli({"model": "haiku"})[0], "claude-opus-5-5")
+
+    def test_429_529_yalniz_hata_kodu_olarak(self):
+        for metin in ("API Error: 429 Too Many Requests", "HTTP 529 overloaded_error", "status: 429"):
+            self.assertTrue(kosucu.LIMIT_DESENI.search(metin), metin)
+        for metin in ("dosyada 5290 satır var", "line 429 of sunucu.py", "1.0.429", "port 15290"):
+            self.assertIsNone(kosucu.LIMIT_DESENI.search(metin), metin)
 
     def test_basarili_yanit(self):
         with mock.patch.object(kosucu.urllib.request, "urlopen", return_value=tamam()) as u:

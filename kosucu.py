@@ -30,7 +30,9 @@ KILIT = os.path.expanduser(os.environ.get("OFIS_KILIT", "~/beyin/.cache/calistir
 KILIT_BEKLE_SN = int(os.environ.get("OFIS_KILIT_BEKLE", "1800"))
 VARSAYILAN_BUTCE = float(os.environ.get("OFIS_BUTCE_USD", "0.50"))
 ZAMAN_ASIMI_SN = 1800
-LIMIT_DESENI = re.compile(r"usage limit|rate.?limit|limit reached|hit your limit|quota|overloaded|429|529|credit balance", re.I)
+# 429/529 only as an error code ("HTTP 429", "status 529", "error: 429", "429 Too Many Requests"); "5290" or "line 429" doesn't match
+LIMIT_DESENI = re.compile(r"usage limit|rate.?limit|limit reached|hit your limit|quota|overloaded|credit balance"
+                          r"|(?:http|status|error|code|hata)\W{0,3}(?:429|529)\b|\b(?:429|529)\s+(?:too many requests|overloaded)", re.I)
 HAFIZA_DESENI = re.compile(r"<hafiza_ekle>(.*?)</hafiza_ekle>", re.S)
 SSH_GECIT = os.path.join(ortak.KOK, "ssh_gecit.py")
 GIT_OKU = os.path.expanduser("~/beyin/bin/git-oku")
@@ -159,6 +161,44 @@ API_TEKRARSIZ_KODLAR = (402, 429, 529)  # kota/kredi/aşırı yük: yeniden dene
 API_ANAHTAR_DESENI = re.compile(r"sk-ant-[A-Za-z0-9_\-]+")
 
 
+API_ANAHTAR_DOSYASI = os.path.expanduser("~/.config/ofis-kapi/anthropic.env")  # hidden from the sandbox
+
+
+def api_anahtari():
+    """Key from the environment, otherwise from API_ANAHTAR_DOSYASI (the runner reads it itself: tmux / the service
+    environment doesn't carry it). The file must not be readable by group/others. The value is never printed."""
+    anahtar = os.environ.get(API_ANAHTAR_ORTAM)
+    if anahtar:
+        return anahtar, None
+    try:
+        st = os.stat(API_ANAHTAR_DOSYASI)
+    except OSError:
+        return None, f"{API_ANAHTAR_ORTAM} is not set"
+    if st.st_mode & 0o077:
+        return None, f"{API_ANAHTAR_ORTAM} file permissions are too open (chmod 600)"
+    try:
+        with open(API_ANAHTAR_DOSYASI, encoding="utf-8") as f:
+            for satir in f:
+                m = re.match(r"\s*(?:export\s+)?" + API_ANAHTAR_ORTAM + r"\s*=\s*['\"]?([^'\"\s]+)", satir)
+                if m:
+                    return m.group(1), None
+    except OSError:
+        pass
+    return None, f"{API_ANAHTAR_ORTAM} is not set"
+
+
+def api_modeli(ajan):
+    """Fallback model follows the agent's model, capped at Sonnet (the API is billed per use). OFIS_YEDEK_MODEL overrides."""
+    if os.environ.get("OFIS_YEDEK_MODEL"):
+        return os.environ["OFIS_YEDEK_MODEL"], None
+    m = str(ajan.get("model") or "").lower()
+    if "haiku" in m:
+        return "claude-haiku-5-5", None
+    if "opus" in m:
+        return "claude-sonnet-5-5", "ajan modeli opus; yedekte maliyet sınırı nedeniyle claude-sonnet-5-5 kullanıldı"
+    return "claude-sonnet-5-5", None
+
+
 def api_max_token():
     try:
         deger = int(os.environ.get("OFIS_YEDEK_MAX_TOKEN", "4096"))
@@ -202,10 +242,10 @@ def claude_api_kos(ajan, tam_prompt, log):
     """Claude limit yedeği: Messages API, tek istek, araçsız. Dönüş codex_kos ile aynı biçimde."""
     if ajan.get("ssh") or ajan.get("izinli_araclar"):  # araçsız kapsam; sessiz yetki farkı olmasın
         return None, "Claude is at its limit; this agent uses SSH/tools and the Claude API fallback (tool-less) is disabled for it"
-    anahtar = os.environ.get(API_ANAHTAR_ORTAM)
+    anahtar, anahtar_hata = api_anahtari()
     if not anahtar:
-        return None, f"Claude is at its limit and {API_ANAHTAR_ORTAM} is not set"
-    model = os.environ.get("OFIS_YEDEK_MODEL") or "claude-sonnet-5-5"
+        return None, f"Claude is at its limit and {anahtar_hata}"
+    model, model_notu = api_modeli(ajan)
     max_token = api_max_token()
     print("\n↪ Claude is at its limit, switching to the Claude API…", flush=True)
     yanit, hata = api_mesaj_gonder(anahtar, model, tam_prompt, max_token)
@@ -217,6 +257,8 @@ def claude_api_kos(ajan, tam_prompt, log):
         return None, "Claude API fallback also failed: empty response"
     if yanit.get("stop_reason") == "max_tokens":
         metin += f"\n\n[yanıt max_tokens={max_token} sınırında kesildi]"
+    if model_notu:
+        metin += f"\n\n[yedek: {model_notu}]"
     metin = maskele(metin)
     if log is not None:
         log.write(metin + "\n")
@@ -251,9 +293,9 @@ def yedek_kos(ajan, tam_prompt, calisma_dizini, cikti_dizini, log):
 
 def api_ping():
     """Elle canlı deneme (--ping): tek kısa istek, max_tokens=16. Testler ve koşucu bunu çağırmaz."""
-    anahtar = os.environ.get(API_ANAHTAR_ORTAM)
+    anahtar, anahtar_hata = api_anahtari()
     if not anahtar:
-        sys.exit(f"{API_ANAHTAR_ORTAM} is not set")
+        sys.exit(anahtar_hata)
     yanit, hata = api_mesaj_gonder(anahtar, os.environ.get("OFIS_YEDEK_MODEL") or "claude-sonnet-5-5", "ping", 16)
     if hata:
         sys.exit(maskele(f"ping failed: {hata}"))
