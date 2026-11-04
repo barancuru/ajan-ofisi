@@ -332,6 +332,7 @@ td.sayi,th.sayi{text-align:right}
 @media (max-width:768px){.oneri-tara select{font-size:16px}}
 .izgara .kart .oneri-metin p{display:block;-webkit-line-clamp:unset;overflow:visible}
 .rozet.takildi{background:#f7d4d1;color:#9c2f26}
+@media (max-width:768px){.operator-izgara{grid-template-columns:1fr}.operator-izgara .kart button.operator-git{min-height:44px;padding:10px 14px}}
 .gelistirme-kart a.onizleme{display:inline-block;margin-top:6px;font-size:13px;font-weight:600;color:var(--mercan-k)}
 .gelistirme-kart .sha{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11.5px;color:var(--soluk);flex-wrap:wrap}
 .gelistirme-kart .sha code{font-size:11px;overflow-wrap:anywhere;flex:1;min-width:0;color:var(--murekkep)}
@@ -429,6 +430,7 @@ td.sayi,th.sayi{text-align:right}
     <button data-sekme="maliyet">Maliyet</button>
     <button data-sekme="dizin">Dizin</button>
     <button data-sekme="ongorulebilirlik">Öngörülebilirlik</button>
+    <button data-sekme="operator">Operatör Panosu</button>
   </nav>
   <div class="bosluk"></div>
   <div class="hap"><span class="nokta" id="aktifNokta"></span><b id="aktif">0</b><span class="yazi"> ajan çalışıyor</span></div>
@@ -2616,7 +2618,7 @@ async function sekmeAc(ad) {
   document.querySelectorAll('#sekmeler button').forEach(b => b.classList.toggle('secili', b.dataset.sekme === ad));
   if (ad === 'ofis') { sayfa.classList.remove('acik'); return; }
   panelKapat();
-  const icerik = ad === 'odalar' ? odalarSayfasi() : ad === 'hafiza' ? await hafizaSayfasi() : ad === 'gelistirme' ? await gelistirmeSayfasi() : ad === 'dizin' ? await dizinSayfasi() : ad === 'ongorulebilirlik' ? await ongorulebilirlikSayfasi() : maliyetSayfasi();
+  const icerik = ad === 'odalar' ? odalarSayfasi() : ad === 'hafiza' ? await hafizaSayfasi() : ad === 'gelistirme' ? await gelistirmeSayfasi() : ad === 'dizin' ? await dizinSayfasi() : ad === 'ongorulebilirlik' ? await ongorulebilirlikSayfasi() : ad === 'operator' ? await operatorSayfasi() : maliyetSayfasi();
   if (aktifSekme !== ad) return;
   sayfa.replaceChildren(...icerik); sayfa.classList.add('acik');
 }
@@ -3026,6 +3028,39 @@ function ongTarih(iso) {
   if (!iso) return '—';
   const t = new Date(iso); if (isNaN(t)) return iso;
   return t.toLocaleString('tr-TR', { weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
+}
+/* Operatör Panosu: kullanıcıdan karar/girdi bekleyen açık geliştirme görevleri (salt okunur) */
+const OPERATOR_NE = { uat:'Önizlemede dene, onay: evet/hayir', oneri:'Öneriyi değerlendir', takildi:'Nedeni oku, girdi ver' };
+let operatorZaman = null;
+function operatorIsleri(gorevler) {
+  const sira = { uat:0, oneri:1, takildi:2 };
+  return (gorevler || []).filter(g => !g.bitti && g.durum in OPERATOR_NE)
+    .sort((a, b) => (sira[a.durum] - sira[b.durum]) || String(b.guncelleme || '').localeCompare(String(a.guncelleme || '')));
+}
+async function operatorSayfasi() {
+  clearInterval(operatorZaman);
+  const bas = [el('h2', null, 'Operatör Panosu')];
+  if (DEMO) return [...bas, el('p', 'alt', 'Demo modunda operatör işleri gösterilmez.')];
+  let veri;
+  try { veri = await getJSON('/api/gelistirme'); }
+  catch { return [...bas, el('p', 'alt', 'Operatör işleri alınamadı.')]; }
+  operatorZaman = setInterval(() => {
+    if (aktifSekme !== 'operator') return clearInterval(operatorZaman);
+    sekmeAc('operator');
+  }, 60000);
+  const isler = operatorIsleri(veri.gorevler);
+  const iz = el('div', 'izgara operator-izgara');
+  isler.forEach(g => {
+    const k = el('div', 'kart');
+    const ust = el('div', 'ust');
+    ust.append(el('span', 'rozet ' + g.durum, (GDURUM[g.durum] || [g.durum])[0]), el('span', null, g.proje || ''), el('span', null, ongTarih(g.guncelleme)));
+    const git = el('button', 'git operator-git', 'Geliştirme\'ye git →'); git.type = 'button';
+    git.onclick = () => { SES.tik(); sekmeAc('gelistirme'); };
+    k.append(ust, el('h4', null, g.baslik), el('p', null, OPERATOR_NE[g.durum]), git);
+    iz.append(k);
+  });
+  if (!isler.length) iz.append(el('p', 'bos', 'Şu an senden bekleyen iş yok.'));
+  return [...bas, el('p', 'alt', isler.length + ' iş bekliyor. Onay/ret Geliştirme sekmesinde yapılır.'), iz];
 }
 async function ongorulebilirlikSayfasi() {
   clearInterval(ongZaman);

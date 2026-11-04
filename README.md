@@ -132,6 +132,9 @@ koşan otomatik işler; salt okunur, metin olarak), (b) senin eklediğin tekrar 
 prompt + 5 alanlı cron; aç/kapa, sil). Kayıtlar `durum/tekrarlar.json`'da durur ve her okuma/yazmada doğrulanır
 (bilinen, kurulu, CEO olmayan ajan; hazır görev ya da prompt'tan tam biri; sır kalıbı yok; en sık 15 dakikada bir;
 en fazla 50 iş). Bozuk dosya `.bozuk-<zaman>` olarak yana alınır.
+
+### Operatör Panosu
+"Operatör Panosu" sekmesi (Öngörülebilirlik'in yanında) `GET /api/gelistirme` yanıtından senden karar/girdi bekleyen açık görevleri (`uat`, `oneri`, `takildi`) salt okunur listeler; onay/ret Geliştirme sekmesinde kalır.
 - **İş başına systemd timer.** Her ekle/sil/aç/kapat sonrası sunucu `durum/systemd/` altına
   `ajan-ofisi-tekrar-<id>.timer` (`OnCalendar=` cron'dan çevrilir, `Persistent=true`) ve `.service` üretir
   (`ExecStart` yalnız iş id'sini alır; prompt birime girmez). Sunucu `~/.config`'e yazmaz. **Bir kez** sen kur:
