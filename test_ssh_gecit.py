@@ -339,6 +339,19 @@ class KosucuTesti(Temel):
         for beklenen in (f"Read({self.anahtar})", "Read(~/.ssh/**)", "Bash(cat ~/.ssh:*)", "Bash(ssh:*)"):
             self.assertIn(beklenen, yasak)
 
+    def test_ssh_li_ajanda_dar_kural_ve_genel_bash_yasagi_kalkar(self):
+        ajan = {"id": "gorevci", "model": "sonnet", "cwd": "/tmp", "izinli_araclar": ["Read"], "ssh": self.ssh}
+        komut = kosucu.komut_kur(ajan, ["Bash", "Bash(rm:*)"], "/tmp/c", 0.5)
+        izinli = komut[komut.index("--allowedTools") + 1:komut.index("--disallowedTools")]
+        yasak = komut[komut.index("--disallowedTools") + 1:]
+        self.assertIn(f"Bash(python3 {kosucu.SSH_GECIT} gorevci --:*)", izinli)
+        self.assertNotIn("Bash", izinli)
+        self.assertNotIn("Bash", yasak)
+        self.assertIn("Bash(ssh:*)", yasak)
+        # ssh'sız ajanda genel Bash yasağı korunur
+        komut2 = kosucu.komut_kur({"model": "sonnet", "cwd": "/tmp"}, ["Bash"], "/tmp/c", 0.5)
+        self.assertIn("Bash", komut2[komut2.index("--disallowedTools") + 1:])
+
     def test_codex_yedegi_ssh_li_ajanda_kapali(self):
         with mock.patch.object(kosucu.shutil, "which", return_value="/bin/codex"), \
                 mock.patch.object(kosucu.subprocess, "run") as r:

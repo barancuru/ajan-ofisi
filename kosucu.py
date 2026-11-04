@@ -139,7 +139,11 @@ def komut_kur(ajan, genel_yasak, cikti_dizini, butce):
     yasak = [*genel_yasak, *(ajan.get("yasak_araclar") or [])]
     if ajan.get("ssh"):
         # Ham ssh verilmez: yalnız dar geçit. Anahtara başka yoldan erişim de kapatılır.
-        izinli.append(f"Bash(python3 {SSH_GECIT}:*)")
+        # Genel "Bash" yasağı (deny allow'u ezer) dar geçit kuralını da kapatırdı: yalnız bu ajan için kaldırılır;
+        # ham Bash yine verilmez, çünkü izinli listede yalnız geçit kalıbı var.
+        yasak = [y for y in yasak if y != "Bash"]
+        izinli.append(f"Bash(python3 {SSH_GECIT} {ajan['id']} --:*)" if ajan.get("id")
+                      else f"Bash(python3 {SSH_GECIT}:*)")
         anahtar = ajan["ssh"]["anahtar"]
         yasak += [f"Read({anahtar})", f"Read({os.path.expanduser(anahtar)})", "Read(~/.ssh/**)",
                   "Bash(cat ~/.ssh:*)", "Bash(head ~/.ssh:*)", "Bash(tail ~/.ssh:*)", "Bash(less ~/.ssh:*)",
