@@ -28,7 +28,7 @@ VARSAYILAN_IZINLI = ["uptime", "df", "free", "ls", "cat", "tail", "systemctl sta
 VARSAYILAN_ONAY = ["rm", "reboot", "shutdown", "systemctl stop|restart|disable", "deploy", "git push"]
 # Dizin sınırına tabi komutlar: tüm yol argümanları izinli_dizinler altında olmalı
 YOL_KOMUTLARI = {"ls", "cat", "tail", "head"}
-YASAK_CHARLAR = set(";|&$`><()\\'\"*?[]{}~!#")
+YASAK_CHARLAR = ortak.SSH_YASAK_CHARLAR
 # Okuma komutlarına eklenip dosya yazdırabilen/yapılandırma değiştiren seçenekler
 YASAK_SECENEKLER = ("--output", "--vacuum", "--rotate", "--flush", "--sync", "--relinquish", "--exec-path",
                     "--upload-pack", "--receive-pack", "--ext-diff", "--textconv", "--config",
@@ -63,7 +63,9 @@ def komut_karar(ssh, args):
             if giris.split() == tokenlar:
                 return "izin", "", " ".join(giris.split())
         return "red", "komut birebir izinli listede değil", komut
-    for t in tokenlar:
+    # birebir_komutlar tanımlı değil: en az ayrıcalık, onay/önek yoluna düşme
+    return "red", "ssh.birebir_komutlar tanımlı değil; komut çalıştırılamaz", komut
+    for t in tokenlar:  # noqa: unreachable (eski önek/onay kolu)
         if ".." in t.split("/"):
             return "red", "'..' içeren yol yasak", komut
         if t.startswith(YASAK_SECENEKLER) or (tokenlar[0] == "git" and t == "-c"):

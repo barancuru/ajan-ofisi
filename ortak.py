@@ -39,6 +39,18 @@ SSH_AD_DESENI = re.compile(r"[A-Za-z0-9._-]+")
 SSH_VARSAYILAN_KNOWN_HOSTS = "~/.ssh/known_hosts"
 
 
+SSH_YASAK_CHARLAR = set(";|&$`><()\\'\"*?[]{}~!#")  # tek kaynak: geçit ve izin kuralı doğrulaması
+
+
+def _ssh_birebir(ajan_id, ssh):
+    for giris in ssh.get("birebir_komutlar") or []:
+        kotu = any(c in SSH_YASAK_CHARLAR or ord(c) < 32 or ord(c) == 127 or (c.isspace() and c != " ")
+                   for c in giris)
+        if kotu or ":*" in giris or giris.startswith("-"):
+            raise YapilandirmaHatasi(f"ajan {ajan_id}: ssh.birebir_komutlar girişi shell metakarakteri/joker/"
+                                     "kontrol karakteri içeremez")
+
+
 def _ssh_liste(ajan_id, ssh, alan, mutlak=False):
     deger = ssh.get(alan)
     if deger is None:
@@ -67,6 +79,7 @@ def ssh_dogrula(ajan_id, ssh):
             raise YapilandirmaHatasi(f"ajan {ajan_id}: ssh.{alan} geçersiz (mutlak dosya yolu olmalı)")
     _ssh_liste(ajan_id, ssh, "izinli_komutlar")
     _ssh_liste(ajan_id, ssh, "birebir_komutlar")
+    _ssh_birebir(ajan_id, ssh)
     _ssh_liste(ajan_id, ssh, "izinli_dizinler", mutlak=True)
     _ssh_liste(ajan_id, ssh, "onay_gerekli")
 

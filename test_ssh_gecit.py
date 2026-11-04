@@ -25,7 +25,8 @@ class Temel(unittest.TestCase):
         with open(self.kh, "w") as f:
             f.write("x\n")
         self.ssh = {"host": "sunucu.example", "user": "ofis", "port": 22, "anahtar": self.anahtar,
-                    "known_hosts": self.kh, "izinli_dizinler": ["/var/log", "/var/www"]}
+                    "known_hosts": self.kh, "izinli_dizinler": ["/var/log", "/var/www"],
+                    "birebir_komutlar": ["uptime", "df -h"]}
         self.tablo = {"a": {"id": "a", "oda": "kod", "ssh": self.ssh},
                       "b": {"id": "b", "oda": "kod"}}
         self.yollar = ortak.maske_yollari({"ajanlar": [self.tablo["a"]]})
@@ -128,8 +129,7 @@ class PolitikaTesti(Temel):
         return ssh_gecit.komut_karar(self.ssh, komut.split(" ") if "\n" not in komut else [komut])[0]
 
     def test_izinli(self):
-        for k in ("uptime", "df -h", "free -m", "systemctl status nginx", "journalctl -n 200 -u nginx",
-                  "tail -n 50 /var/log/syslog", "cat /var/www/a.txt", "ls /var/log", "git status"):
+        for k in ("uptime", "df -h"):
             self.assertEqual(self.karar(k), "izin", k)
 
     def test_reddedilmeli(self):
@@ -139,14 +139,22 @@ class PolitikaTesti(Temel):
                   "ls /var/logx"):
             self.assertNotEqual(self.karar(k), "izin", k)
 
-    def test_onay_olay_yazar_ve_calistirmaz(self):
+    def test_yikici_komut_red_olay_yok_calistirmaz(self):
         kod, cagrilar, _, olay = self.calistir(["systemctl", "restart", "nginx"])
-        self.assertEqual(kod, ssh_gecit.CIKIS_ONAY)
+        self.assertEqual(kod, ssh_gecit.CIKIS_RED)
         self.assertEqual(cagrilar, [])
-        self.assertEqual(olay.call_args[0][0]["tur"], "onay_bekleyen")
+        olay.assert_not_called()
 
-    def test_listede_olmayan_onay_ister(self):
-        self.assertEqual(self.karar("whoami"), "onay")
+    def test_listede_olmayan_red(self):
+        self.assertEqual(self.karar("whoami"), "red")
+
+    def test_birebir_komutlar_yoksa_her_sey_red(self):
+        del self.ssh["birebir_komutlar"]
+        for k in ("uptime", "systemctl restart x", "whoami", "df -h"):
+            kod, cagrilar, _, olay = self.calistir(k.split(" "))
+            self.assertEqual(kod, ssh_gecit.CIKIS_RED, k)
+            self.assertEqual(cagrilar, [], k)
+            olay.assert_not_called()
 
     def test_dogrulama(self):
         iyi = {"host": "a.b", "user": "u", "anahtar": "/k", "port": 2222}
@@ -167,7 +175,7 @@ class GorevciDarListeTesti(Temel):
     def setUp(self):
         super().setUp()
         self.ssh.update({"izinli_komutlar": self.LISTE, "izinli_dizinler": ["/etc/os-release"],
-                         "onay_gerekli": self.ONAY})
+                         "onay_gerekli": self.ONAY, "birebir_komutlar": self.LISTE})
 
     def karar(self, komut):
         return ssh_gecit.komut_karar(self.ssh, komut.split(" "))[0]
@@ -282,6 +290,21 @@ class BirebirTesti(Temel):
         self.ssh["birebir_komutlar"] = []
         self.assertEqual(ssh_gecit.komut_karar(self.ssh, ["uptime"])[0], "red")
 
+    def test_metakarakterli_giris_yapilandirma_hatasi(self):
+        iyi = {"host": "a.b", "user": "u", "anahtar": "/k"}
+        for kotu in ("uptime; id", "df -h && id", "uptime | cat", "uptime $(id)", "uptime `id`", "ls *",
+                     "uptime\nid", "uptime:*", "echo (x)", "uptime id"):
+            with self.assertRaises(ortak.YapilandirmaHatasi, msg=kotu):
+                ortak.ssh_dogrula("x", {**iyi, "birebir_komutlar": [kotu]})
+        ortak.ssh_dogrula("x", {**iyi, "birebir_komutlar": self.LISTE})
+
+    def test_zincirli_komutlar_gecitte_red_ve_calistirmaz(self):
+        for k in ("uptime; id", "df -h && id", "uptime | cat", "uptime $(id)"):
+            kod, cagrilar, _, olay = self.calistir(k.split(" "))
+            self.assertEqual(kod, ssh_gecit.CIKIS_RED, k)
+            self.assertEqual(cagrilar, [], k)
+            olay.assert_not_called()
+
 
 class MaskelemeTesti(Temel):
     def test_cikti_cerceve_ve_maske(self):
@@ -332,8 +355,7 @@ class KosucuTesti(Temel):
         ajan = {"model": "sonnet", "cwd": "/tmp", "izinli_araclar": ["Read"], "ssh": self.ssh}
         komut = kosucu.komut_kur(ajan, self.GENEL, "/tmp/c", 0.5)
         izinli = komut[komut.index("--allowedTools") + 1:komut.index("--disallowedTools")]
-        self.assertEqual(izinli[0], "Read")
-        self.assertEqual(izinli[1], f"Bash(python3 {kosucu.SSH_GECIT}:*)")
+        self.assertEqual(izinli, ["Read"])  # id yok: hiç Bash izni verilmez
         self.assertNotIn("Bash(ssh:*)", izinli)
         yasak = komut[komut.index("--disallowedTools") + 1:]
         for beklenen in (f"Read({self.anahtar})", "Read(~/.ssh/**)", "Bash(cat ~/.ssh:*)", "Bash(ssh:*)"):
@@ -344,10 +366,33 @@ class KosucuTesti(Temel):
         komut = kosucu.komut_kur(ajan, ["Bash", "Bash(rm:*)"], "/tmp/c", 0.5)
         izinli = komut[komut.index("--allowedTools") + 1:komut.index("--disallowedTools")]
         yasak = komut[komut.index("--disallowedTools") + 1:]
-        self.assertIn(f"Bash(python3 {kosucu.SSH_GECIT} gorevci --:*)", izinli)
+        beklenen = [f"Bash(python3 {kosucu.SSH_GECIT} gorevci -- {k})" for k in self.ssh["birebir_komutlar"]]
+        self.assertEqual(izinli, ["Read", *beklenen])
         self.assertNotIn("Bash", izinli)
         self.assertNotIn("Bash", yasak)
         self.assertIn("Bash(ssh:*)", yasak)
+        self.assertIn("Bash(rm:*)", yasak)
+        # izin listesinde yalnız tam-eşleşmeli geçit kuralları var: joker/öncelik yok
+        bash_kurallari = [i for i in izinli if i.startswith("Bash")]
+        self.assertEqual(bash_kurallari, beklenen)
+        for kural in izinli:
+            if kural.startswith("Bash"):
+                self.assertNotIn("*", kural)
+                self.assertNotIn(":", kural)
+        for yok in ("Bash", "Bash(ssh:*)", "Bash(python3:*)", f"Bash(python3 {kosucu.SSH_GECIT}:*)"):
+            self.assertNotIn(yok, izinli)
+        for beklenen_yasak in (f"Read({self.anahtar})", "Read(~/.ssh/**)", "Bash(scp:*)", "Bash(ssh-add:*)"):
+            self.assertIn(beklenen_yasak, yasak)
+
+    def test_birebir_yoksa_ya_da_bossa_bash_izni_uretilmez(self):
+        for ssh in ({k: v for k, v in self.ssh.items() if k != "birebir_komutlar"},
+                    {**self.ssh, "birebir_komutlar": []}):
+            ajan = {"id": "gorevci", "model": "sonnet", "cwd": "/tmp", "izinli_araclar": ["Read"], "ssh": ssh}
+            komut = kosucu.komut_kur(ajan, ["Bash"], "/tmp/c", 0.5)
+            izinli = komut[komut.index("--allowedTools") + 1:komut.index("--disallowedTools")]
+            yasak = komut[komut.index("--disallowedTools") + 1:]
+            self.assertEqual(izinli, ["Read"])
+            self.assertIn("Bash", yasak)  # kural yoksa genel Bash yasağı da korunur
         # ssh'sız ajanda genel Bash yasağı korunur
         komut2 = kosucu.komut_kur({"model": "sonnet", "cwd": "/tmp"}, ["Bash"], "/tmp/c", 0.5)
         self.assertIn("Bash", komut2[komut2.index("--disallowedTools") + 1:])
