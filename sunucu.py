@@ -1494,6 +1494,36 @@ def ongorulebilirlik_degistir(veri):
     return {**ongorulebilirlik_yaniti(), "id": is_id}
 
 
+# ---------- code graph tab (Graphify output, built by ~/beyin/bin/graf-guncelle) ----------
+GRAF_KOK = os.path.expanduser("~/.local/share/graphify")
+GRAF_PROJELER = ("ajan-ofisi", "homeos", "turnusol")  # fixed list: the path is never built from user input
+GRAF_CSP = ("sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' https://unpkg.com; "
+            "style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'")
+
+
+# graph.html has a fixed 280px sidebar: on narrow screens the graph goes on top, the panel below it
+GRAF_TELEFON_STIL = (b"<style>@media (max-width:700px){body{flex-direction:column!important}"
+                     b"#graph{flex:none!important;width:100%!important;height:62%!important}"
+                     b"#sidebar{width:100%!important;flex:1!important;min-height:0;border-left:0!important}}</style>")
+
+
+def kod_grafi_yaniti():
+    liste = []
+    for ad in GRAF_PROJELER:
+        yol = os.path.join(GRAF_KOK, ad, "src", "graphify-out", "graph.html")
+        if not os.path.isfile(yol):
+            continue
+        try:
+            with open(os.path.join(GRAF_KOK, ad, "src", "graphify-out", "graph.json"), encoding="utf-8") as f:
+                g = json.load(f)
+            dugum, bag = len(g.get("nodes", [])), len(g.get("links", g.get("edges", [])))
+        except (OSError, ValueError):
+            dugum, bag = None, None
+        liste.append({"proje": ad, "dugum": dugum, "baglanti": bag,
+                      "guncelleme": datetime.fromtimestamp(os.path.getmtime(yol)).isoformat(timespec="minutes")})
+    return {"projeler": liste}
+
+
 # ---------- HTTP ----------
 
 class Isleyici(SimpleHTTPRequestHandler):
@@ -1564,6 +1594,27 @@ class Isleyici(SimpleHTTPRequestHandler):
         if not self._guvenlik():
             return
         yol = urlparse(self.path)
+        if yol.path == "/api/kod-grafi":
+            return self._json(200, kod_grafi_yaniti())
+        if yol.path == "/api/kod-grafi/goster":
+            ad = (parse_qs(yol.query).get("proje") or [""])[0]
+            if ad not in GRAF_PROJELER:
+                return self._json(404, {"hata": "bilinmeyen proje"})
+            try:
+                with open(os.path.join(GRAF_KOK, ad, "src", "graphify-out", "graph.html"), "rb") as f:
+                    govde = f.read()
+            except OSError:
+                return self._json(404, {"hata": "bu projenin grafı henüz yok"})
+            govde = govde.replace(b"</head>", GRAF_TELEFON_STIL + b"</head>", 1)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(govde)))
+            self.send_header("Content-Security-Policy", GRAF_CSP)  # content comes from code text: isolated origin
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(govde)
+            return None
         if yol.path == "/api/ajanlar":
             return self._json(200, ajanlar_yaniti())
         if yol.path == "/api/sayac":

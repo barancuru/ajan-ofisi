@@ -384,6 +384,11 @@ td.sayi,th.sayi{text-align:right}
 .ong-hata{color:#9c2f26 !important}
 .ong-onizle{min-height:1.2em}
 @media (max-width:768px){.ong-kart{max-width:none}.ong-is{flex-direction:column;align-items:stretch}.ong-dugmeler button,.ong-hizli button{min-height:44px;padding:10px 14px}.ong-dugmeler button{flex:1}.ong-form .koyu-dugme{align-self:stretch;min-height:44px}.ong-form select,.ong-form input,.ong-form textarea{width:100%;font-size:16px;min-height:44px}}
+.kod-grafi-ust{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:6px 0 10px}
+.kod-grafi-ust select{font:inherit;font-size:13.5px;padding:8px 10px;border-radius:10px;border:1px solid rgba(59,52,44,.18);background:#fffdf9;color:var(--murekkep)}
+.kod-grafi-ac{font-size:13px;font-weight:600;color:var(--mercan-k);margin-left:auto}
+.kod-grafi-cerceve{width:100%;height:calc(100vh - 290px);min-height:360px;border:1px solid rgba(59,52,44,.14);border-radius:12px;background:#fff;display:block}
+@media (max-width:768px){.kod-grafi-ust select{font-size:16px}.kod-grafi-cerceve{height:calc(100vh - 330px)}}
 /* ---------- phone layout (≤768px): panel ↔ office scene toggle ---------- */
 .mobil-gecis{display:none}
 .dugme.cikis{text-decoration:none;color:inherit}
@@ -431,6 +436,7 @@ td.sayi,th.sayi{text-align:right}
     <button data-sekme="hafiza">Hafıza</button>
     <button data-sekme="maliyet">Maliyet</button>
     <button data-sekme="dizin">Dizin</button>
+    <button data-sekme="kodgrafi">Kod Grafı</button>
     <button data-sekme="ongorulebilirlik">Öngörülebilirlik</button>
     <button data-sekme="operator">Operatör Panosu</button>
   </nav>
@@ -2620,7 +2626,7 @@ async function sekmeAc(ad) {
   document.querySelectorAll('#sekmeler button').forEach(b => b.classList.toggle('secili', b.dataset.sekme === ad));
   if (ad === 'ofis') { sayfa.classList.remove('acik'); return; }
   panelKapat();
-  const icerik = ad === 'odalar' ? odalarSayfasi() : ad === 'hafiza' ? await hafizaSayfasi() : ad === 'gelistirme' ? await gelistirmeSayfasi() : ad === 'dizin' ? await dizinSayfasi() : ad === 'ongorulebilirlik' ? await ongorulebilirlikSayfasi() : ad === 'operator' ? await operatorSayfasi() : maliyetSayfasi();
+  const icerik = ad === 'kodgrafi' ? await kodGrafiSayfasi() : ad === 'odalar' ? odalarSayfasi() : ad === 'hafiza' ? await hafizaSayfasi() : ad === 'gelistirme' ? await gelistirmeSayfasi() : ad === 'dizin' ? await dizinSayfasi() : ad === 'ongorulebilirlik' ? await ongorulebilirlikSayfasi() : ad === 'operator' ? await operatorSayfasi() : maliyetSayfasi();
   if (aktifSekme !== ad) return;
   sayfa.replaceChildren(...icerik); sayfa.classList.add('acik');
 }
@@ -2921,6 +2927,32 @@ function dizinMdCiz(metin) {
   }
   parBit();
   return kok;
+}
+let kodGrafiProje = '';
+async function kodGrafiSayfasi() {
+  const bas = [el('h2', null, 'Kod Grafı'), el('p', 'alt', 'Projelerin kod haritası (main dalı). Düğüme tıkla, ara, sürükle. main değişince kendiliğinden yenilenir; salt okunurdur.')];
+  let liste = [];
+  try { liste = DEMO ? [] : (await getJSON('/api/kod-grafi')).projeler; }
+  catch { return [...bas, el('p', 'alt', 'Graf listesi alınamadı.')]; }
+  if (!liste.length) return [...bas, el('p', 'bos', 'Henüz graf üretilmedi.')];
+  if (!liste.some(p => p.proje === kodGrafiProje)) kodGrafiProje = liste[0].proje;
+  const etiket = { 'ajan-ofisi':'Ajan Ofisi', homeos:'HomeOS', turnusol:'Turnusol' };
+  const sec = el('select'); sec.setAttribute('aria-label', 'Proje');
+  liste.forEach(p => { const o = el('option', null, etiket[p.proje] || p.proje); o.value = p.proje; sec.append(o); });
+  sec.value = kodGrafiProje;
+  const bilgi = el('small', 'alt');
+  const ac = el('a', 'kod-grafi-ac', 'Tam ekran ↗'); ac.target = '_blank'; ac.rel = 'noopener';
+  const cerceve = el('iframe', 'kod-grafi-cerceve'); cerceve.title = 'Kod grafı';
+  cerceve.setAttribute('sandbox', 'allow-scripts'); cerceve.setAttribute('referrerpolicy', 'no-referrer');
+  const goster = () => {
+    const p = liste.find(x => x.proje === sec.value); kodGrafiProje = p.proje;
+    const url = '/api/kod-grafi/goster?proje=' + encodeURIComponent(p.proje);
+    cerceve.src = url; ac.href = url;
+    bilgi.textContent = (p.dugum ?? '?') + ' düğüm · ' + (p.baglanti ?? '?') + ' bağlantı · ' + String(p.guncelleme || '').replace('T', ' ');
+  };
+  sec.onchange = goster; goster();
+  const ust = el('div', 'kod-grafi-ust'); ust.append(sec, bilgi, ac);
+  return [...bas, ust, cerceve];
 }
 async function dizinSayfasi() {
   if (DEMO) return [el('h2', null, 'Dizin'), el('p', 'alt', 'Demo modunda dizin gezilemez.')];
