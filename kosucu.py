@@ -228,15 +228,25 @@ def claude_api_kos(ajan, tam_prompt, log):
 
 
 def yedek_kos(ajan, tam_prompt, calisma_dizini, cikti_dizini, log):
-    """OFIS_YEDEK_SAGLAYICI=claude-api|codex|yok (varsayılan codex: eski davranış)."""
-    saglayici = os.environ.get("OFIS_YEDEK_SAGLAYICI", "codex").strip().lower()
+    """OFIS_YEDEK_SAGLAYICI=zincir|claude-api|codex|yok (varsayılan zincir: Claude Code → Claude API → Codex).
+    Zincirde ilk basamak (Claude Code) çağıran koşucudur; burada 2. Claude API, 3. Codex denenir."""
+    saglayici = os.environ.get("OFIS_YEDEK_SAGLAYICI", "zincir").strip().lower() or "zincir"
+    if saglayici == "zincir":
+        hatalar = []
+        for kos in (lambda: claude_api_kos(ajan, tam_prompt, log),
+                    lambda: codex_kos(ajan, tam_prompt, calisma_dizini, cikti_dizini, log)):
+            sonuc, hata = kos()
+            if sonuc is not None:
+                return sonuc, None
+            hatalar.append(str(hata))
+        return None, maskele(" | ".join(hatalar))
     if saglayici == "codex":
         return codex_kos(ajan, tam_prompt, calisma_dizini, cikti_dizini, log)
     if saglayici == "claude-api":
         return claude_api_kos(ajan, tam_prompt, log)
     if saglayici == "yok":
         return None, "Claude is at its limit and the fallback provider is disabled (OFIS_YEDEK_SAGLAYICI=yok)"
-    return None, "Claude is at its limit; OFIS_YEDEK_SAGLAYICI must be claude-api, codex or yok"
+    return None, "Claude is at its limit; OFIS_YEDEK_SAGLAYICI must be zincir, claude-api, codex or yok"
 
 
 def api_ping():

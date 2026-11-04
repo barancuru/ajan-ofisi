@@ -358,6 +358,7 @@ def birim_metinleri(is_id, takvim, kok=None, python=None):
                "[Service]\nType=oneshot\n"
                "KillMode=process\n"  # tmux sunucusunu bu servis açtıysa servis bitince öldürülmesin
                "Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin\n"
+               "EnvironmentFile=-%h/.config/ofis-kapi/anthropic.env\n"  # yalnız yol; dosya yoksa servis yine başlar
                f"WorkingDirectory={kok}\n"
                f'ExecStart="{python}" "{kok}/zamanlayici.py" --tetikle {is_id}\n')
     return {f"{ad}.timer": timer, f"{ad}.service": service}

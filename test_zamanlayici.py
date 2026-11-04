@@ -177,6 +177,9 @@ class DepoTesti(unittest.TestCase):
             else:
                 self.assertIn(f"zamanlayici.py\" --tetikle {is_id}\n", metin)
                 self.assertIn("KillMode=process\n", metin)
+                self.assertIn("EnvironmentFile=-%h/.config/ofis-kapi/anthropic.env\n", metin)
+                self.assertNotIn("sk-ant", metin)
+                self.assertNotIn("ANTHROPIC_API_KEY", metin)
         self.assertTrue(os.path.exists(os.path.join(z.birim_dizini(), ".degisti")))
         z.degistir({"islem": "kapat", "id": is_id}, self.tablo)
         self.assertEqual(self.birim_dosyalari(), [])  # kapalı iş: timer yok

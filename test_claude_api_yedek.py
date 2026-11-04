@@ -154,11 +154,50 @@ class SaglayiciSecimiTest(unittest.TestCase):
             r = kosucu.yedek_kos({}, "p", "/tmp", "/tmp", None)
         return r, c, a
 
-    def test_varsayilan_codex(self):
+    def varsayilan(self, api_donus):
+        import os
         with mock.patch.dict("os.environ"):
-            import os
             os.environ.pop("OFIS_YEDEK_SAGLAYICI", None)
-            r, c, a = self.cagir({})
+            with mock.patch.object(kosucu, "codex_kos", return_value=("c", None)) as c, \
+                    mock.patch.object(kosucu, "claude_api_kos", return_value=api_donus) as a:
+                r = kosucu.yedek_kos({}, "p", "/tmp", "/tmp", None)
+        return r, c, a
+
+    def test_zincir_api_basarili_codex_cagrilmaz(self):
+        r, c, a = self.varsayilan(("a", None))
+        self.assertEqual(r, ("a", None))
+        c.assert_not_called()
+
+    def test_zincir_api_anahtari_yok_codexe_duser(self):
+        r, c, a = self.varsayilan((None, "ANTHROPIC_API_KEY is not set"))
+        self.assertEqual(r, ("c", None))
+        a.assert_called_once()
+
+    def test_zincir_api_hata_codexe_duser(self):
+        r, c, a = self.varsayilan((None, "HTTP 500"))
+        self.assertEqual(r, ("c", None))
+
+    def test_zincir_hepsi_basarisiz_hatalar_birlesir_maskeli(self):
+        with mock.patch.dict("os.environ", {"ANTHROPIC_API_KEY": SAHTE_ANAHTAR}), \
+                mock.patch.object(kosucu, "codex_kos", return_value=(None, "codex yok")), \
+                mock.patch.object(kosucu, "claude_api_kos", return_value=(None, f"x {SAHTE_ANAHTAR}")):
+            r = kosucu.yedek_kos({}, "p", "/tmp", "/tmp", None)
+        self.assertIsNone(r[0])
+        self.assertIn("codex yok", r[1])
+        self.assertNotIn(SAHTE_ANAHTAR, r[1])
+
+    def test_zincir_aracli_ajanda_api_atlanir_codexe_gecer(self):
+        import os
+        with mock.patch.dict("os.environ", {"ANTHROPIC_API_KEY": SAHTE_ANAHTAR}), \
+                mock.patch.object(kosucu, "codex_kos", return_value=("c", None)), \
+                mock.patch.object(kosucu.urllib.request, "urlopen") as u:
+            os.environ.pop("OFIS_YEDEK_SAGLAYICI", None)
+            r = kosucu.yedek_kos({"ssh": {"anahtar": "k"}}, "p", "/tmp", "/tmp", None)
+        self.assertEqual(r, ("c", None))
+        u.assert_not_called()
+
+    def test_codex_tek_saglayici(self):
+        r, c, a = self.cagir({"OFIS_YEDEK_SAGLAYICI": "codex"})
         self.assertEqual(r, ("c", None))
         a.assert_not_called()
 

@@ -141,6 +141,12 @@ en fazla 50 iş). Bozuk dosya `.bozuk-<zaman>` olarak yana alınır.
   `python3 zamanlayici.py --kur`. Bu, `durum/systemd/.degisti`'yi izleyen bir `.path` birimi kurar; değişince
   `zamanlayici.py --esle` birimleri doğrulanmış `tekrarlar.json`'dan yeniden üretip `~/.config/systemd/user/`'a
   eşler (yalnız `ajan-ofisi-tekrar-*` dosyalarına dokunur). Kurulum yapılmadıysa sayfa uyarır; işler kaydedilir ama koşmaz.
+- **Limit yedeği sırası:** Claude Code (ana koşu) → Claude API (`ANTHROPIC_API_KEY` varsa; SSH/araçlı ajanlarda atlanır)
+  → Codex. Bir basamak başarısızsa sıradakine geçilir; hepsi başarısızsa hatalar tek mesajda birleşir (anahtar maskeli).
+  `OFIS_YEDEK_SAGLAYICI` (`zincir` varsayılan, `claude-api`, `codex`, `yok`) tek sağlayıcıyı zorlayabilir.
+  İş servisleri anahtarı `EnvironmentFile=-%h/.config/ofis-kapi/anthropic.env` ile alır (dosya yoksa servis yine başlar;
+  içeriği repoya/loga girmez, dosya 0600 olmalı). Mevcut kurulu birimleri güncellemek için `python3 zamanlayici.py --esle`.
+  Not: ortam değişkeni alt süreçlere (`claude`, `codex`) miras kalabilir.
 - Ay günü ve hafta günü ikisi de kısıtlı cron (klasik cron'da VEYA) systemd'ye çevrilemez, reddedilir.
 - Ofis sunucusu kapalıyken de koşar. Bilgisayar kapalıyken kaçan çalışma açılışta **en çok 1 kez** telafi edilir.
 - Timer boşta model çağırmaz. Vakti gelince `zamanlayici.py --tetikle <id>` işi `gorev_baslat` ile (kaynak `tekrar`)
