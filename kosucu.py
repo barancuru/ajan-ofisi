@@ -99,6 +99,10 @@ def kilit_al():
             time.sleep(5)
 
 
+KUM_GIZLI = [os.path.expanduser(p) for p in ("~/.ssh", "~/.config/ofis-kapi", "~/.claude", "~/.gnupg", "~/.config/gh",
+                                               "~/.git-credentials", "~/.netrc", "~/.claude.json")]
+
+
 def codex_kos(ajan, tam_prompt, calisma_dizini, cikti_dizini, log):
     """Fallback for when Claude hits its limit. Tool-less agents run read-only; others may write only to their own folders."""
     if ajan.get("ssh"):  # Codex SSH geçidini kullanamaz; sessiz yetki farkı olmasın, açıkça hata ver
@@ -107,9 +111,27 @@ def codex_kos(ajan, tam_prompt, calisma_dizini, cikti_dizini, log):
     if not codex:
         return None, "Claude is at its limit and codex is not installed"
     son = os.path.join(cikti_dizini, ".codex-son.txt")
-    kum = "workspace-write" if ajan.get("izinli_araclar") else "read-only"
-    komut = [codex, "exec", "-C", calisma_dizini, "-s", kum, "--skip-git-repo-check", "--ephemeral",
-             "--add-dir", cikti_dizini, "-o", son, "-"]
+    bwrap = shutil.which("bwrap")
+    if not bwrap:
+        return None, "Claude is at its limit; bwrap is missing so the Codex fallback can't be sandboxed"
+    # Codex's own sandbox can read the whole disk (e.g. ~/.ssh) and can't nest inside bwrap. So Codex runs in our
+    # sandbox: disk read-only, only its folders writable, secrets hidden (same rules as beyin/sistem/gelistirme/kum.sh).
+    yazilabilir = [cikti_dizini, os.path.expanduser("~/.codex")]
+    if ajan.get("izinli_araclar"):
+        yazilabilir.insert(0, calisma_dizini)
+    komut = [bwrap, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp",
+             "--die-with-parent", "--new-session"]
+    for d in yazilabilir:
+        if os.path.exists(d):
+            komut += ["--bind", d, d]
+    for d in KUM_GIZLI:
+        if os.path.isdir(d):
+            komut += ["--tmpfs", d]
+        elif os.path.exists(d):
+            komut += ["--ro-bind", "/dev/null", d]
+    komut += ["--chdir", calisma_dizini, "--",
+              codex, "exec", "-C", calisma_dizini, "-s", "danger-full-access", "--skip-git-repo-check", "--ephemeral",
+              "-o", son, "-"]
     print("\n↪ Claude is at its limit, switching to Codex…", flush=True)
     try:
         p = subprocess.run(komut, input=tam_prompt, text=True, capture_output=True, timeout=ZAMAN_ASIMI_SN)
