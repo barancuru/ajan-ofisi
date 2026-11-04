@@ -16,6 +16,8 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ortak  # noqa: E402
@@ -148,6 +150,106 @@ def codex_kos(ajan, tam_prompt, calisma_dizini, cikti_dizini, log):
     return {"result": metin, "saglayici": "codex (yedek)"}, None
 
 
+API_ANAHTAR_ORTAM = "ANTHROPIC_API_KEY"  # yalnız ortam değişkeni adı; değer hiçbir yere yazılmaz
+API_URL = "https://api.anthropic.com/v1/messages"
+API_ZAMAN_ASIMI_SN = 120
+API_MAKS_DENEME = 2
+API_MAKS_TOKEN_UST = 8192  # OFIS_YEDEK_MAX_TOKEN ne olursa olsun aşılmayan sabit üst sınır
+API_TEKRARSIZ_KODLAR = (402, 429, 529)  # kota/kredi/aşırı yük: yeniden deneme yok
+API_ANAHTAR_DESENI = re.compile(r"sk-ant-[A-Za-z0-9_\-]+")
+
+
+def api_max_token():
+    try:
+        deger = int(os.environ.get("OFIS_YEDEK_MAX_TOKEN", "4096"))
+    except ValueError:
+        deger = 4096
+    return max(1, min(deger, API_MAKS_TOKEN_UST))
+
+
+def api_mesaj_gonder(anahtar, model, prompt, max_token):
+    """Tek istek (araçsız, akışsız). Dönüş: (yanıt_sözlüğü, None) ya da (None, hata). Anahtar hata metnine girmez."""
+    govde = json.dumps({"model": model, "max_tokens": max_token,
+                        "messages": [{"role": "user", "content": prompt}]}).encode("utf-8")
+    hata = "unknown error"
+    for deneme in range(1, API_MAKS_DENEME + 1):
+        istek = urllib.request.Request(API_URL, data=govde, method="POST", headers={
+            "x-api-key": anahtar, "anthropic-version": "2023-06-01", "content-type": "application/json"})
+        yeniden = False
+        try:
+            with urllib.request.urlopen(istek, timeout=API_ZAMAN_ASIMI_SN) as r:
+                return json.loads(r.read().decode("utf-8")), None
+        except urllib.error.HTTPError as e:
+            try:
+                tip = (json.loads(e.read().decode("utf-8", "replace")).get("error") or {}).get("type") or ""
+            except (OSError, ValueError, AttributeError):
+                tip = ""
+            hata = f"HTTP {e.code} {tip}".strip()
+            if e.code in API_TEKRARSIZ_KODLAR or e.code < 500:
+                return None, hata  # kota/kredi/istek hatası: tekrar denemek işe yaramaz
+            yeniden = True
+        except (urllib.error.URLError, OSError, TimeoutError) as e:  # bağlantı hatası ve zaman aşımı
+            hata = f"connection error ({type(e).__name__})"
+            yeniden = True
+        except ValueError:
+            return None, "unreadable API response"
+        if yeniden and deneme < API_MAKS_DENEME:
+            time.sleep(2 ** (deneme - 1))
+    return None, hata
+
+
+def claude_api_kos(ajan, tam_prompt, log):
+    """Claude limit yedeği: Messages API, tek istek, araçsız. Dönüş codex_kos ile aynı biçimde."""
+    if ajan.get("ssh") or ajan.get("izinli_araclar"):  # araçsız kapsam; sessiz yetki farkı olmasın
+        return None, "Claude is at its limit; this agent uses SSH/tools and the Claude API fallback (tool-less) is disabled for it"
+    anahtar = os.environ.get(API_ANAHTAR_ORTAM)
+    if not anahtar:
+        return None, f"Claude is at its limit and {API_ANAHTAR_ORTAM} is not set"
+    model = os.environ.get("OFIS_YEDEK_MODEL") or "claude-sonnet-5-5"
+    max_token = api_max_token()
+    print("\n↪ Claude is at its limit, switching to the Claude API…", flush=True)
+    yanit, hata = api_mesaj_gonder(anahtar, model, tam_prompt, max_token)
+    if hata:
+        return None, maskele(f"Claude API fallback also failed: {hata}")
+    metin = "".join(p.get("text", "") for p in (yanit.get("content") or []) if isinstance(p, dict)
+                    and p.get("type") == "text").strip()
+    if not metin:
+        return None, "Claude API fallback also failed: empty response"
+    if yanit.get("stop_reason") == "max_tokens":
+        metin += f"\n\n[yanıt max_tokens={max_token} sınırında kesildi]"
+    metin = maskele(metin)
+    if log is not None:
+        log.write(metin + "\n")
+    print(metin, flush=True)
+    sonuc = {"result": metin, "saglayici": "claude-api (yedek)"}
+    if isinstance(yanit.get("usage"), dict):
+        sonuc["usage"] = yanit["usage"]
+    return sonuc, None
+
+
+def yedek_kos(ajan, tam_prompt, calisma_dizini, cikti_dizini, log):
+    """OFIS_YEDEK_SAGLAYICI=claude-api|codex|yok (varsayılan codex: eski davranış)."""
+    saglayici = os.environ.get("OFIS_YEDEK_SAGLAYICI", "codex").strip().lower()
+    if saglayici == "codex":
+        return codex_kos(ajan, tam_prompt, calisma_dizini, cikti_dizini, log)
+    if saglayici == "claude-api":
+        return claude_api_kos(ajan, tam_prompt, log)
+    if saglayici == "yok":
+        return None, "Claude is at its limit and the fallback provider is disabled (OFIS_YEDEK_SAGLAYICI=yok)"
+    return None, "Claude is at its limit; OFIS_YEDEK_SAGLAYICI must be claude-api, codex or yok"
+
+
+def api_ping():
+    """Elle canlı deneme (--ping): tek kısa istek, max_tokens=16. Testler ve koşucu bunu çağırmaz."""
+    anahtar = os.environ.get(API_ANAHTAR_ORTAM)
+    if not anahtar:
+        sys.exit(f"{API_ANAHTAR_ORTAM} is not set")
+    yanit, hata = api_mesaj_gonder(anahtar, os.environ.get("OFIS_YEDEK_MODEL") or "claude-sonnet-5-5", "ping", 16)
+    if hata:
+        sys.exit(maskele(f"ping failed: {hata}"))
+    print(maskele(json.dumps({"stop_reason": yanit.get("stop_reason"), "usage": yanit.get("usage")})))
+
+
 def komut_kur(ajan, genel_yasak, cikti_dizini, butce):
     claude = shutil.which("claude") or "/opt/homebrew/bin/claude"
     komut = [claude, "-p", "--model", ajan["model"], "--output-format", "stream-json",
@@ -192,7 +294,13 @@ def komut_kur(ajan, genel_yasak, cikti_dizini, butce):
 
 
 def maskele(metin):
-    return ortak.maskele(metin, MASKE_YOLLARI)
+    metin = ortak.maskele(metin, MASKE_YOLLARI)
+    if isinstance(metin, str):
+        anahtar = os.environ.get(API_ANAHTAR_ORTAM)
+        if anahtar:
+            metin = metin.replace(anahtar, "[maskelendi]")
+        metin = API_ANAHTAR_DESENI.sub("[maskelendi]", metin)
+    return metin
 
 
 def arac_ozeti(girdi):
@@ -311,7 +419,7 @@ def kos(arg_dosyasi):
                 hata_metni += f" {sonuc.get('result') or ''} {sonuc.get('subtype') or ''}"
             if (hata or (sonuc and sonuc.get("is_error"))) and LIMIT_DESENI.search(hata_metni) \
                     and os.environ.get("OFIS_YEDEK", "1") == "1":
-                yedek, yedek_hata = codex_kos(ajan, tam_prompt, calisma_dizini, cikti_dizini, log)
+                yedek, yedek_hata = yedek_kos(ajan, tam_prompt, calisma_dizini, cikti_dizini, log)
                 if yedek:
                     sonuc, hata = yedek, None
                 else:
@@ -379,6 +487,9 @@ def bitir(ajan, baglam, sonuc, hata, baslangic, log_yolu, cikti_dizini, durum_id
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--ping"]:
+        api_ping()
+        sys.exit(0)
     if len(sys.argv) != 2:
         sys.exit("kullanım: kosucu.py <arguman-dosyasi.json>")
     kos(sys.argv[1])
