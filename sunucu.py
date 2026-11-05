@@ -1285,6 +1285,8 @@ def gorev_ozeti(yol, bitti=False):
             "son_bolum": son_bolum(govde), "aksiyonlar": aksiyonlari_cikar(govde)}
     if fm.get("proje") == "ajan-ofisi" and durum == "uat":
         ozet["onizleme"] = ":8444"
+    if fm.get("proje") == "homeos" and durum == "uat":
+        ozet["canli_otomatik"] = os.path.isfile(os.path.expanduser("~/.config/ofis-kapi/homeos-yukseltme"))
     if durum == "oneri":
         ozet["metin"] = govde.split("\n", 1)[1].strip()[:2500] if "\n" in govde else ""
     return ozet
@@ -1349,7 +1351,42 @@ def atomik_yaz(yol, metin):
     os.replace(gecici, yol)
 
 
-def gelistirme_degistir(veri):
+KAPI_IMZA_DOSYASI = os.path.expanduser("~/.config/ofis-kapi/kapi.env")
+PAKET_MUHUR_DIZINI = os.path.expanduser(os.path.join(os.environ.get("XDG_STATE_HOME", "~/.local/state"), "beyin/paket-muhur"))
+CANLI_ONAY_DIZINI = os.path.expanduser("~/.config/ofis-kapi/onaylar")
+
+
+def kapidan_geldi(deger):
+    """True only for a request the HTTPS gateway passed after web login (it adds a secret header; direct localhost calls cannot)."""
+    try:
+        with open(KAPI_IMZA_DOSYASI, encoding="utf-8") as f:
+            for satir in f:
+                if satir.startswith("OFIS_KAPI_IMZA="):
+                    imza = satir.split("=", 1)[1].strip()
+                    return bool(imza) and isinstance(deger, str) and secrets.compare_digest(imza.encode(), deger.encode())
+    except OSError:
+        pass
+    return False
+
+
+def canli_onayi_yaz(fm):
+    """Production permission, bound to the exact sealed package. Agents cannot write here; task files alone never authorize production."""
+    proje, surum = fm.get("proje", ""), fm.get("surum", "")
+    if not re.fullmatch(r"[a-z-]{1,40}", proje) or not re.fullmatch(r"[0-9.]{1,24}", surum):
+        return False
+    try:
+        with open(os.path.join(PAKET_MUHUR_DIZINI, f"{proje}-{surum}.zip.sha256"), encoding="utf-8") as f:
+            muhur = f.read().strip()
+    except OSError:
+        return False
+    if not re.fullmatch(r"[0-9a-f]{64}", muhur):
+        return False
+    os.makedirs(CANLI_ONAY_DIZINI, mode=0o700, exist_ok=True)
+    atomik_yaz(os.path.join(CANLI_ONAY_DIZINI, f"{proje}-{surum}.onay"), muhur + "\n")
+    return True
+
+
+def gelistirme_degistir(veri, kapi_imzasi=""):
     islem = veri.get("islem")
     if islem == "yeni":
         proje, baslik, istek = veri.get("proje"), veri.get("baslik"), veri.get("istek")
@@ -1393,6 +1430,8 @@ def gelistirme_degistir(veri):
                 raise IstekHatasi(409, f"görev UAT'de değil (durum: {fm.get('durum') or '-'})")
             if karar == "hayir":
                 metin = metin.rstrip("\n") + f"\n\n## Geri bildirim\n_{datetime.now():%Y-%m-%d %H:%M} · ofisten_\n\n{not_.strip()}\n"
+            if karar == "evet" and kapidan_geldi(kapi_imzasi):
+                canli_onayi_yaz(fm)
             atomik_yaz(yol, on_bilgi_yaz(metin, "onay", karar))
         kosucuyu_durt()
         return gelistirme_yaniti()
@@ -1727,7 +1766,7 @@ class Isleyici(SimpleHTTPRequestHandler):
             if yol == "/api/hafiza":
                 return self._json(200, hafiza_degistir(veri))
             if yol == "/api/gelistirme":
-                return self._json(200, gelistirme_degistir(veri))
+                return self._json(200, gelistirme_degistir(veri, self.headers.get("X-Ofis-Kapi", "")))
             if yol == "/api/ongorulebilirlik":
                 return self._json(200, ongorulebilirlik_degistir(veri))
             if yol == "/api/ceo":
