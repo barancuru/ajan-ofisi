@@ -340,9 +340,10 @@ td.sayi,th.sayi{text-align:right}
 .gelistirme-kart .sha code{font-size:11px;overflow-wrap:anywhere;flex:1;min-width:0;color:var(--murekkep)}
 .gelistirme-kart .mini{font-size:12px;padding:5px 8px;border-radius:7px;border:1px solid rgba(59,52,44,.14)}
 .gelistirme-kart details{margin-top:8px}
+.gelistirme-kart .rapor-dugme{display:block;margin-top:8px;min-height:36px;font-size:13px;font-weight:600;cursor:pointer}
 .gelistirme-kart summary{font-size:12.5px;font-weight:600;cursor:pointer;color:var(--soluk)}
 .gelistirme-kart pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11.5px;line-height:1.45;max-height:280px;overflow:auto;margin-top:6px;padding:8px;border-radius:8px;background:rgba(59,52,44,.05)}
-@media (max-width:768px){.gelistirme-form select,.gelistirme-form input,.gelistirme-form textarea,.gelistirme-kart textarea{font-size:16px}.gelistirme-izgara{grid-template-columns:1fr}.gelistirme-kart .dugmeler button{padding:10px 12px}}
+@media (max-width:768px){.gelistirme-kart .rapor-dugme{min-height:44px;width:100%}.gelistirme-form select,.gelistirme-form input,.gelistirme-form textarea,.gelistirme-kart textarea{font-size:16px}.gelistirme-izgara{grid-template-columns:1fr}.gelistirme-kart .dugmeler button{padding:10px 12px}}
 .dizin-yol{display:flex;flex-wrap:wrap;gap:2px 6px;align-items:center;font-size:13px;margin-bottom:12px}
 .dizin-yol button{font-size:13px;font-weight:600;color:var(--mercan-k);padding:4px 6px;min-height:32px}
 .dizin-liste{display:flex;flex-direction:column;gap:4px}
@@ -2786,10 +2787,9 @@ function gelistirmeKarti(g) {
       DEMO ? '' : '/api/gelistirme/rapor?dosya=' + encodeURIComponent(g.dosya), kararBekliyor ? (kap, kapat) => {
         const d2 = el('div', 'dugmeler'); kap.append(d2); gelistirmeKararKur(g, d2, kapat);
       } : null);
-    const d = el('details'); d.append(el('summary', null, 'Son rapor'), el('pre', null, g.son_bolum));
-    const pb = el('button', 'mini', 'Popup\'ta aç'); pb.type = 'button';
+    const pb = el('button', 'mini rapor-dugme', 'Son rapor'); pb.type = 'button';
     pb.onclick = raporPopAc;
-    d.append(pb); k.append(d);
+    k.append(pb);
     k.classList.add('tikla'); k.tabIndex = 0; k.setAttribute('role', 'button'); k.title = 'Tam raporu aç';
     k.addEventListener('click', e => { if (!e.target.closest('button, a, summary, details, textarea')) raporPopAc(); });
     k.addEventListener('keydown', e => { if (e.target === k && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); raporPopAc(); } });
