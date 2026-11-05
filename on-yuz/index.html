@@ -3028,12 +3028,13 @@ async function dizinSayfasi() {
   const boyutMetni = n => n >= 1048576 ? (n / 1048576).toFixed(n >= 10485760 ? 0 : 1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
   d.dosyalar.forEach(f => {
     if (f.indirilir) {
-      const a = el('a', 'dizin-indir', (f.ad.toLowerCase().endsWith('.zip') ? '📦 ' : '🔑 ') + f.ad); a.append(el('small', null, boyutMetni(f.boyut)));
-      a.href = '/api/dizin/indir?yol=' + encodeURIComponent((d.yol ? d.yol + '/' : '') + f.ad); a.setAttribute('download', f.ad); liste.append(a); return;
+      const uzanti = f.ad.toLowerCase().split('.').pop();
+      const a = el('a', 'dizin-indir', ({ zip: '📦 ', png: '🖼️ ', txt: '📄 ' }[uzanti] || '🔑 ') + f.ad); a.append(el('small', null, boyutMetni(f.boyut)));
+      a.href = '/api/dizin/indir?yol=' + encodeURIComponent((d.yol ? d.yol + '/' : '') + f.ad); if (uzanti === 'png') { a.target = '_blank'; a.rel = 'noopener'; } else a.setAttribute('download', f.ad); liste.append(a); return;
     }
     const b = el('button', null, '📄 ' + f.ad); b.append(el('small', null, boyutMetni(f.boyut))); b.onclick = () => git(d.yol, (d.yol ? d.yol + '/' : '') + f.ad); liste.append(b);
   });
-  if (!d.klasorler.length && !d.dosyalar.length) liste.append(el('p', 'alt', 'Burada klasör, .md, .zip ya da .sha256 dosyası yok.'));
+  if (!d.klasorler.length && !d.dosyalar.length) liste.append(el('p', 'alt', 'Burada klasör ya da gösterilebilen dosya yok.'));
   // arama: dosya/klasör adı + .md içeriği (bulunduğun klasörden başlayarak)
   const aramaKutu = el('div', 'dizin-ara'), girdi = el('input'), sonucKutu = el('div', 'dizin-liste');
   girdi.type = 'search'; girdi.placeholder = (d.yol ? d.yol : 'beyin') + ' içinde ara (ad ve içerik)'; girdi.setAttribute('aria-label', 'Dizinde ara');

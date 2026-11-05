@@ -1097,7 +1097,7 @@ MODELLER = ("sonnet", "haiku", "opus")
 # ---------- directory tab: read-only browsing of .md files under BEYIN ----------
 DIZIN_MAKS_OKU = 400_000
 DIZIN_ATLA = {"node_modules", "__pycache__", "venv", ".venv"}
-DIZIN_INDIRILEBILIR = (".zip", ".sha256")
+DIZIN_INDIRILEBILIR = (".zip", ".sha256", ".png", ".txt")
 
 
 def dizin_coz(goreli):
@@ -1201,7 +1201,7 @@ def dizin_oku_yaniti(goreli):
 
 
 def dizin_indir_coz(goreli):
-    """Download target: only .zip/.sha256 regular files inside BEYIN (dizin_coz rules apply)."""
+    """Download target: only .zip/.sha256/.png/.txt regular files inside BEYIN (dizin_coz rules apply)."""
     kok, tam = dizin_coz(goreli)
     if not tam.lower().endswith(DIZIN_INDIRILEBILIR) or not tam.startswith(kok + os.sep) or not os.path.isfile(tam):
         raise IstekHatasi(404, "dosya yok")
@@ -1761,8 +1761,9 @@ class Isleyici(SimpleHTTPRequestHandler):
             with f:
                 boyut = os.fstat(f.fileno()).st_size
                 self.send_response(200)
-                self.send_header("Content-Type", "application/octet-stream")
-                self.send_header("Content-Disposition", "attachment; filename*=UTF-8''" + quote(os.path.basename(tam), safe=""))
+                gorsel = tam.lower().endswith(".png")  # screenshots open in the browser; nosniff and PNG type keep them inert
+                self.send_header("Content-Type", "image/png" if gorsel else "application/octet-stream")
+                self.send_header("Content-Disposition", ("inline" if gorsel else "attachment") + "; filename*=UTF-8''" + quote(os.path.basename(tam), safe=""))
                 self.send_header("Content-Length", str(boyut))
                 self.send_header("X-Content-Type-Options", "nosniff")
                 self.send_header("Cache-Control", "no-store")
