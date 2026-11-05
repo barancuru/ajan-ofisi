@@ -489,9 +489,11 @@ def ceo_promptu(metin, tablo, ekler=None, kurul=None, gorusler=None):
         if a["id"] == "ceo":
             continue
         hazir = "; ".join(g["etiket"] for g in a.get("hazir_gorevler", []))
+        skiller = ", ".join(sorted({m.group(1) for g in a.get("hazir_gorevler", [])
+                                    for m in [re.match(r"(\w+) skill'ini", g.get("prompt", ""))] if m}))
         durum = "KURULU" if a["kurulu"] else "KURULMADI"
         satirlar.append(f"- {a['id']} ({a['ad']}, oda {a['oda']}, {durum}, ne zaman: {a['ne_zaman_metin']}): "
-                        f"{a['aciklama']} Hazır görevler: {hazir}")
+                        f"{a['aciklama']} Hazır görevler: {hazir}" + (f" Skill: {skiller}" if skiller else ""))
     tetikli = [f"'{a['id']}' ajanına yalnız istekte '{a['tetik_kelime']}' geçiyorsa iş verilir."
                for a in tablo.values() if a.get("tetik_kelime")]
     kurul_bolumu = ""
@@ -1280,7 +1282,7 @@ def gorev_ozeti(yol, bitti=False):
     durum = fm.get("durum", "")
     ozet = {"dosya": os.path.basename(yol), "bitti": bitti, "baslik": baslik, "proje": fm.get("proje", ""),
             "durum": durum, "onay": fm.get("onay", ""), "surum": fm.get("surum", ""), "sha256": fm.get("sha256", ""),
-            "model": fm.get("model", ""), "olusturma": fm.get("olusturma", ""),
+            "model": fm.get("model", ""), "olusturma": fm.get("olusturma", ""), "uyari": fm.get("uyari", ""),
             "guncelleme": datetime.fromtimestamp(os.path.getmtime(yol)).isoformat(timespec="seconds"),
             "son_bolum": son_bolum(govde), "aksiyonlar": aksiyonlari_cikar(govde)}
     if fm.get("proje") == "ajan-ofisi" and durum == "uat":

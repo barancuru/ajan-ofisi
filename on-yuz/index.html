@@ -2699,7 +2699,8 @@ function gelistirmeKararKur(g, dug, kapat) {
   const onay = el('button', 'onay', 'Onayla ve canlıya al'), red = el('button', 'sonra', 'Reddet');
   onay.type = 'button'; red.type = 'button';
   onay.onclick = async () => {
-    if (!confirm(g.proje === 'homeos' ? (g.canli_otomatik ? 'Onaylanınca dal main\'e alınır ve HomeOS üretimi otomatik yükseltilir (önce yedek alınır, migration çalışır). Devam?' : 'Onaylanınca dal main\'e alınır ve etiketlenir. Canlı kurulum için paketi panelden yüklemen gerekir. Devam?') : 'Onaylanınca değişiklik canlı ofise alınır ve servis yeniden başlar. Devam?')) return;
+    const uyariMetni = Number(g.uyari) > 0 ? '⚠️ Raporda ' + g.uyari + ' uyarı var. Önce raporu oku.\n\n' : '';
+    if (!confirm(uyariMetni + (g.proje === 'homeos' ? (g.canli_otomatik ? 'Onaylanınca dal main\'e alınır ve HomeOS üretimi otomatik yükseltilir (önce yedek alınır, migration çalışır). Devam?' : 'Onaylanınca dal main\'e alınır ve etiketlenir. Canlı kurulum için paketi panelden yüklemen gerekir. Devam?') : 'Onaylanınca değişiklik canlı ofise alınır ve servis yeniden başlar. Devam?'))) return;
     const { durum, veri } = await postJSON('/api/gelistirme', { islem:'onay', dosya:g.dosya, karar:'evet' });
     tost(durum === 200 ? 'Onaylandı; birkaç dakika içinde işlenir' : (veri.hata || 'hata ' + durum));
     if (kapat && durum === 200) kapat();

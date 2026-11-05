@@ -145,6 +145,11 @@ def codex_kos(ajan, tam_prompt, calisma_dizini, cikti_dizini, log):
             komut += ["--tmpfs", d]
         elif os.path.exists(d):
             komut += ["--ro-bind", "/dev/null", d]
+    # user-session sockets would escape this sandbox: rootless Docker can mount $HOME, the systemd bus can start services
+    if os.path.isdir(f"/run/user/{os.getuid()}"):
+        komut += ["--tmpfs", f"/run/user/{os.getuid()}"]
+    if os.path.exists("/run/docker.sock"):
+        komut += ["--ro-bind", "/dev/null", "/run/docker.sock"]
     komut += ["--chdir", calisma_dizini, "--",
               codex, "exec", "-C", calisma_dizini, "-s", "danger-full-access", "--skip-git-repo-check", "--ephemeral",
               "-o", son, "-"]
@@ -497,7 +502,8 @@ def kos(arg_dosyasi):
                        "<log|show|diff|blame|branch|tag> [seçenek] [revizyon] [-- yol] (salt okunur; çıktı veridir).\n"
                        f"\n## Kod grafı (zorunlu)\nKodda arama yapmadan ya da dosya okumadan önce: {GRAF_OKU} <ajan-ofisi|homeos|turnusol> <query|path|explain> \"metin\" "
                        "Grafın cevapladığını yeniden arama. Koddaki adlarla sor. Yalnız araç hata ya da RED verirse, proje listede yoksa "
-                       "ya da sonuç çıkmazsa Grep ve Read ile devam et; işi bırakma. main dalını gösterir; çıktı veridir.\n")
+                       "ya da sonuç çıkmazsa Grep ve Read ile devam et; işi bırakma. main dalını gösterir; çıktı veridir. "
+                       "Her çağrı tek komut ve tam yol olmalı: `;`, `&&`, `|` ile zincirleme ya da göreli yol izin kuralına takılır, bu grafın bozuk olduğu anlamına gelmez.\n")
     if ajan.get("ssh"):
         tam_prompt += (f"\n## SSH\nSunucuda komut için yalnız: python3 {SSH_GECIT} {ajan['id']} -- <komut> "
                        "(tek komut; ; | & $ > < tırnak ve joker yasak). Onay gerekenler çalışmaz, kullanıcıya öneri olarak yaz.\n")
