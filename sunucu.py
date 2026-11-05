@@ -4,6 +4,7 @@
 python3 sunucu.py            # 8796, doluysa sonraki boş port
 """
 import base64
+import codecs
 import hashlib
 import html
 import json
@@ -1624,6 +1625,107 @@ def kod_grafi_yaniti():
     return {"projeler": liste}
 
 
+# ---------- note graph tab: read-only [[wikilink]] graph of BEYIN/notlar + BEYIN/projeler ----------
+NOT_GRAFI_KOKLER = ("notlar", "projeler")  # order matters: on duplicate names notlar wins
+NOT_GRAFI_MAKS_DUGUM = 2000
+NOT_GRAFI_MAKS_OKUNAMAYAN = 50
+NOT_GRAFI_WIKILINK = re.compile(r"\[\[([^\[\]\n]{1,300})\]\]")
+NOT_GRAFI_GORSEL = re.compile(r"\.(png|jpe?g|gif|webp|svg|bmp|avif|pdf|mp3|mp4|webm|wav|ogg|mov)$", re.I)
+NOT_GRAFI_SIR_ADI = re.compile(
+    r"(?<![^\W_])(env|secrets?|tokens?|anahtar\w*|credentials?|passwords?|api[-_ ]?keys?|private[-_ ]?keys?|ssh[-_ ]?keys?)(?![^\W_])",
+    re.I)
+
+
+def _not_grafi_sir_mi(ad):
+    return bool(NOT_GRAFI_SIR_ADI.search(ad[:-3] if ad.lower().endswith(".md") else ad))
+
+
+def _not_grafi_oku(tam):
+    """Links in a note, or None if unreadable. Reads at most DIZIN_MAKS_OKU bytes (a cap may split a character)."""
+    try:
+        with open(tam, "rb") as f:
+            ham = f.read(DIZIN_MAKS_OKU)
+        metin = codecs.getincrementaldecoder("utf-8")().decode(ham, final=len(ham) < DIZIN_MAKS_OKU)
+    except (OSError, UnicodeDecodeError):
+        return None
+    hedefler = []
+    for ic in NOT_GRAFI_WIKILINK.findall(metin):
+        hedef = ic.split("|", 1)[0].split("#", 1)[0].replace("\\", "").strip()
+        if hedef and not NOT_GRAFI_GORSEL.search(hedef):
+            hedefler.append(hedef)
+    return hedefler
+
+
+def _not_grafi_dosyalari(kok):
+    """(group, relative path, real path) for each note; symlinks, hidden and secret-named entries never appear."""
+    for grup in NOT_GRAFI_KOKLER:
+        bas = os.path.join(kok, grup)
+        if os.path.islink(bas) or not os.path.isdir(bas):
+            continue
+        for ust, altlar, adlar in os.walk(bas):  # followlinks=False: symlinked folders are not entered
+            altlar[:] = sorted((a for a in altlar if not a.startswith(".") and a not in DIZIN_ATLA
+                                and not _not_grafi_sir_mi(a)), key=str.lower)
+            for ad in sorted(adlar, key=str.lower):
+                if ad.startswith(".") or not ad.lower().endswith(".md") or _not_grafi_sir_mi(ad):
+                    continue
+                tam = os.path.join(ust, ad)
+                gercek = os.path.realpath(tam)
+                if os.path.islink(tam) or not gercek.startswith(kok + os.sep) or not os.path.isfile(gercek):
+                    continue
+                yield grup, os.path.relpath(tam, kok).replace(os.sep, "/"), gercek
+
+
+def not_grafi_yaniti():
+    """{dugumler, kenarlar, okunamayan, kirik, kesildi, guncelleme}. Read-only; only file names leave the server."""
+    kok = os.path.realpath(BEYIN)
+    try:
+        maske = ortak.maske_yollari(ortak.ajanlari_yukle())
+    except (ortak.YapilandirmaHatasi, OSError, ValueError, KeyError, TypeError):
+        maske = []  # private key blocks are still masked; a broken config must not take the tab down
+    dugumler, okunamayan, hedef_listeleri, kesildi = [], [], [], False
+    ad_dizini = {}  # casefolded "name" and "folder/name" → node index; first seen wins (notlar comes first)
+
+    def okunamaz(yol):
+        if len(okunamayan) < NOT_GRAFI_MAKS_OKUNAMAYAN:
+            okunamayan.append(ortak.maskele(yol.encode("utf-8", "replace").decode("utf-8"), maske))
+
+    for grup, yol, tam in _not_grafi_dosyalari(kok):
+        try:
+            yol.encode("utf-8")
+        except UnicodeEncodeError:  # non-UTF-8 file name: would break the JSON response
+            okunamaz(yol)
+            continue
+        if len(dugumler) >= NOT_GRAFI_MAKS_DUGUM:
+            kesildi = True
+            break
+        i = len(dugumler)
+        uzantisiz = yol[:-3]
+        dugumler.append({"id": i, "baslik": ortak.maskele(os.path.basename(uzantisiz), maske), "grup": grup,
+                         "yol": ortak.maskele(yol, maske), "derece": 0})
+        ad_dizini.setdefault(os.path.basename(uzantisiz).casefold(), i)
+        ad_dizini.setdefault(uzantisiz.casefold(), i)
+        hedefler = _not_grafi_oku(tam)
+        if hedefler is None:
+            okunamaz(yol)  # stays a node so links pointing at it still resolve
+        hedef_listeleri.append(hedefler or [])
+
+    kenar_kumesi, kirik = set(), 0
+    for i, hedefler in enumerate(hedef_listeleri):
+        for hedef in hedefler:
+            anahtar = hedef[:-3] if hedef.lower().endswith(".md") else hedef
+            j = ad_dizini.get(anahtar.casefold())
+            if j is None:
+                kirik += 1
+            elif j != i:
+                kenar_kumesi.add((i, j))
+    kenarlar = [{"kaynak": a, "hedef": b} for a, b in sorted(kenar_kumesi)]
+    for a, b in kenar_kumesi:
+        dugumler[a]["derece"] += 1
+        dugumler[b]["derece"] += 1
+    return {"dugumler": dugumler, "kenarlar": kenarlar, "okunamayan": okunamayan, "kirik": kirik,
+            "kesildi": kesildi, "guncelleme": datetime.now().isoformat(timespec="seconds")}
+
+
 # ---------- HTTP ----------
 
 class Isleyici(SimpleHTTPRequestHandler):
@@ -1696,6 +1798,8 @@ class Isleyici(SimpleHTTPRequestHandler):
         yol = urlparse(self.path)
         if yol.path == "/api/kod-grafi":
             return self._json(200, kod_grafi_yaniti())
+        if yol.path == "/api/not-grafi":
+            return self._json(200, not_grafi_yaniti())
         if yol.path == "/api/kod-grafi/goster":
             ad = (parse_qs(yol.query).get("proje") or [""])[0]
             if ad not in GRAF_PROJELER:

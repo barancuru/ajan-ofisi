@@ -220,6 +220,7 @@ toplamda en büyük sayı odur. Maliyet sekmesi yalnız `claude -p`'nin bildirdi
 | `GET /api/dizin/oku?yol=` | tek `.md` dosyasının metni (en fazla 400 KB) |
 | `GET /api/dizin/indir?yol=` | yalnız `.zip` ve `.sha256` dosyasını `attachment` olarak indirir (64 KB parça parça akıtır); `..`, noktayla başlayan ad, kök dışına çıkan symlink ve diğer uzantılar reddedilir. `/api/dizin` listesi bu dosyaları `indirilir: true` ile verir |
 | `POST /api/dizin/yaz` | `{yol, metin}`: var olan bir `.md` dosyasının üzerine yazar (yeni dosya açmaz, en fazla 400 KB) |
+| `GET /api/not-grafi` | Not Grafı sekmesi: `~/beyin/notlar` ve `projeler` altındaki `.md` dosyalarının `[[wikilink]]` grafı (`{dugumler, kenarlar, okunamayan, kirik, kesildi, guncelleme}`, en çok 2000 düğüm); salt okuma, yalnız dosya adları döner. Gizli, symlink ve sır adlı (`env`, `secret`, `token`, `anahtar`…) dosyalar açılmaz |
 | `GET /api/ongorulebilirlik` | `{otomatik, isler (sonraki çalışmayla), ajanlar, simdi}`; prompt yalnız ilk 40 karakteriyle döner |
 | `POST /api/ongorulebilirlik` | `{"islem": "ekle", ajan, etiket\|prompt, cron}`, `{"islem": "ac\|kapat\|sil", id}`, `{"islem": "onizle", cron}` (sonraki 3 çalışma); hatada 400 + Türkçe mesaj |
 

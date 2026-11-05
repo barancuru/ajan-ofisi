@@ -390,6 +390,26 @@ td.sayi,th.sayi{text-align:right}
 .kod-grafi-ac{font-size:13px;font-weight:600;color:var(--mercan-k);margin-left:auto}
 .kod-grafi-cerceve{width:100%;height:calc(100vh - 290px);min-height:360px;border:1px solid rgba(59,52,44,.14);border-radius:12px;background:#fff;display:block}
 @media (max-width:768px){.kod-grafi-ust select{font-size:16px}.kod-grafi-cerceve{height:calc(100vh - 330px)}}
+.not-grafi-ust{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 8px}
+.not-grafi-ust input{flex:1 1 220px;min-width:0;max-width:420px;box-sizing:border-box;padding:9px 12px;min-height:40px;font:inherit;font-size:14px;border-radius:10px;border:1px solid rgba(59,52,44,.18);background:#fffdf9;color:var(--murekkep)}
+.not-grafi-ust button{min-width:40px;min-height:40px;touch-action:manipulation}
+.not-grafi-sayi{font-size:12.5px;color:var(--soluk);font-variant-numeric:tabular-nums;min-height:1.2em}
+.not-grafi-bilgi{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12.5px;color:var(--soluk);margin:0 0 8px;font-variant-numeric:tabular-nums}
+.not-grafi-bilgi .uyari{color:#9c2f26}
+.not-grafi-gosterge{display:inline-flex;align-items:center;gap:4px}
+.not-grafi-gosterge i{width:10px;height:10px;border-radius:50%;display:inline-block}
+.not-grafi-alan{display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:12px}
+.not-grafi-tuval{width:100%;height:calc(100vh - 340px);min-height:360px;border:1px solid rgba(59,52,44,.14);border-radius:12px;background:#fffdf9;display:block;touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none}
+.not-grafi-tuval.tutuyor{cursor:grabbing}.not-grafi-tuval.uzerinde{cursor:pointer}
+.not-grafi-panel{height:calc(100vh - 340px);min-height:360px;box-sizing:border-box;overflow:auto;padding:12px;border:1px solid rgba(59,52,44,.14);border-radius:12px;background:#fffdf9;font-size:13px;overflow-wrap:anywhere}
+.not-grafi-panel h3{font-family:"Space Grotesk",sans-serif;font-size:16px;font-weight:600;line-height:1.3;margin-bottom:4px}
+.not-grafi-panel h4{font-family:"Space Grotesk",sans-serif;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--soluk);margin:12px 0 4px}
+.not-grafi-panel p{line-height:1.45;font-variant-numeric:tabular-nums}
+.not-grafi-panel small{display:block;font-size:12px;color:var(--soluk);margin-bottom:8px}
+.not-grafi-panel ul{list-style:none}
+.not-grafi-panel li button{display:block;width:100%;min-height:32px;padding:6px 8px;text-align:left;font-size:13px;border-radius:8px;overflow-wrap:anywhere;transition:background .15s}
+.not-grafi-panel li button:hover{background:rgba(59,52,44,.06)}
+@media (max-width:768px){.not-grafi-alan{grid-template-columns:minmax(0,1fr)}.not-grafi-ust input{flex-basis:100%;max-width:none;min-height:44px;font-size:16px}.not-grafi-ust button{min-width:44px;min-height:44px}.not-grafi-tuval{height:calc(100vh - 420px)}.not-grafi-panel{height:auto;min-height:0;overflow:visible}.not-grafi-panel li button{min-height:44px}}
 /* ---------- phone layout (≤768px): panel ↔ office scene toggle ---------- */
 .mobil-gecis{display:none}
 .dugme.cikis{text-decoration:none;color:inherit}
@@ -438,6 +458,7 @@ td.sayi,th.sayi{text-align:right}
     <button data-sekme="maliyet">Maliyet</button>
     <button data-sekme="dizin">Dizin</button>
     <button data-sekme="kodgrafi">Kod Grafı</button>
+    <button data-sekme="notgrafi">Not Grafı</button>
     <button data-sekme="ongorulebilirlik">Öngörülebilirlik</button>
     <button data-sekme="operator">Operatör Panosu</button>
   </nav>
@@ -2622,12 +2643,14 @@ function panelYenile() {
 /* ---------- sekmeler ---------- */
 let aktifSekme = 'ofis';
 const sayfa = $('sayfa');
+let notGrafiDurdur = null;
 async function sekmeAc(ad) {
   aktifSekme = ad;
+  if (notGrafiDurdur) { notGrafiDurdur(); notGrafiDurdur = null; }
   document.querySelectorAll('#sekmeler button').forEach(b => b.classList.toggle('secili', b.dataset.sekme === ad));
   if (ad === 'ofis') { sayfa.classList.remove('acik'); return; }
   panelKapat();
-  const icerik = ad === 'kodgrafi' ? await kodGrafiSayfasi() : ad === 'odalar' ? odalarSayfasi() : ad === 'hafiza' ? await hafizaSayfasi() : ad === 'gelistirme' ? await gelistirmeSayfasi() : ad === 'dizin' ? await dizinSayfasi() : ad === 'ongorulebilirlik' ? await ongorulebilirlikSayfasi() : ad === 'operator' ? await operatorSayfasi() : maliyetSayfasi();
+  const icerik = ad === 'kodgrafi' ? await kodGrafiSayfasi() : ad === 'notgrafi' ? await notGrafiSayfasi() : ad === 'odalar' ? odalarSayfasi() : ad === 'hafiza' ? await hafizaSayfasi() : ad === 'gelistirme' ? await gelistirmeSayfasi() : ad === 'dizin' ? await dizinSayfasi() : ad === 'ongorulebilirlik' ? await ongorulebilirlikSayfasi() : ad === 'operator' ? await operatorSayfasi() : maliyetSayfasi();
   if (aktifSekme !== ad) return;
   sayfa.replaceChildren(...icerik); sayfa.classList.add('acik');
 }
@@ -2954,6 +2977,328 @@ async function kodGrafiSayfasi() {
   sec.onchange = goster; goster();
   const ust = el('div', 'kod-grafi-ust'); ust.append(sec, bilgi, ac);
   return [...bas, ust, cerceve];
+}
+const NOT_GRAFI_DEMO = {
+  dugumler: ['Haftalık plan', 'Okuma listesi', 'Toplantı notları', 'Fikirler', 'Ajan Ofisi', 'HomeOS', 'Turnusol', 'Yol haritası', 'Sunucu envanteri'].map((baslik, id) => {
+    const grup = id >= 4 && id <= 6 ? 'projeler' : 'notlar';
+    return { id, baslik, grup, yol: grup + '/' + baslik + '.md', derece: 0 };
+  }),
+  kenarlar: [[0,2],[0,3],[2,4],[3,4],[3,1],[4,7],[5,7],[6,7],[8,5],[8,4],[0,7]].map(([kaynak, hedef]) => ({ kaynak, hedef })),
+  okunamayan: [], kirik: 2, kesildi: false
+};
+NOT_GRAFI_DEMO.kenarlar.forEach(k => { NOT_GRAFI_DEMO.dugumler[k.kaynak].derece++; NOT_GRAFI_DEMO.dugumler[k.hedef].derece++; });
+const notGrafiKucult = s => String(s).toLocaleLowerCase('tr-TR');
+async function notGrafiSayfasi() {
+  const bas = [el('h2', null, 'Not Grafı'), el('p', 'alt', 'Notlar ve projeler arasındaki [[bağlantılar]]. Düğüme tıkla, sürükle, yakınlaştır, ara. Salt okunurdur.')];
+  let veri;
+  try {
+    veri = DEMO ? NOT_GRAFI_DEMO : await getJSON('/api/not-grafi');
+    if (!Array.isArray(veri.dugumler) || !Array.isArray(veri.kenarlar)) throw new Error('biçim');
+  } catch {
+    const yeniden = el('button', 'koyu-dugme', 'Yeniden dene');
+    yeniden.onclick = () => { SES.tik(); sekmeAc('notgrafi'); };
+    return [...bas, el('p', 'alt', 'Not grafı yüklenemedi.'), yeniden];
+  }
+  const bilgi = el('div', 'not-grafi-bilgi');
+  const okunamayan = (veri.okunamayan || []).length;
+  if (okunamayan) {
+    const u = el('span', 'uyari', (okunamayan >= 50 ? '50+' : okunamayan) + ' not okunamadı');
+    u.title = veri.okunamayan.join('\n');
+    bilgi.append(u);
+  }
+  if (veri.kirik > 0) bilgi.append(el('span', null, veri.kirik + ' kırık bağlantı'));
+  if (veri.kesildi) bilgi.append(el('span', 'uyari', 'İlk ' + veri.dugumler.length + ' not gösteriliyor'));
+  if (!veri.dugumler.length) return [...bas, el('p', 'bos', 'Henüz bağlantılı not yok.'), ...(bilgi.children.length ? [bilgi] : [])];
+  const stil = getComputedStyle(document.documentElement);
+  const RENKLER = { notlar: stil.getPropertyValue('--mercan').trim(), projeler: stil.getPropertyValue('--murekkep').trim() };
+  const renk = g => RENKLER[g] || RENKLER.projeler;
+  bilgi.prepend(el('span', null, veri.dugumler.length + ' not · ' + veri.kenarlar.length + ' bağlantı'));
+  for (const [g, ad] of [['notlar', 'Notlar'], ['projeler', 'Projeler']]) {
+    const k = el('span', 'not-grafi-gosterge'), i = el('i'); i.style.background = renk(g); k.append(i, ad); bilgi.append(k);
+  }
+  if (!veri.kenarlar.length) bilgi.append(el('span', null, 'Notlar arasında henüz bağlantı yok'));
+
+  const ara = el('input'); ara.type = 'search'; ara.placeholder = 'Not ara…'; ara.setAttribute('aria-label', 'Not ara'); ara.autocomplete = 'off'; ara.spellcheck = false;
+  const uzak = el('button', 'dugme', '−'); uzak.setAttribute('aria-label', 'Uzaklaştır');
+  const yakin = el('button', 'dugme', '+'); yakin.setAttribute('aria-label', 'Yakınlaştır');
+  const sigdir = el('button', 'dugme', 'Sığdır');
+  const sayiSatir = el('span', 'not-grafi-sayi'); sayiSatir.setAttribute('aria-live', 'polite');
+  const ust = el('div', 'not-grafi-ust'); ust.append(ara, uzak, yakin, sigdir, sayiSatir);
+  const tuval = el('canvas', 'not-grafi-tuval');
+  tuval.setAttribute('role', 'img');
+  tuval.setAttribute('aria-label', 'Not grafı: ' + veri.dugumler.length + ' not, ' + veri.kenarlar.length + ' bağlantı. Notları arama kutusu ve yandaki listeyle gezebilirsin.');
+  const panel = el('aside', 'not-grafi-panel');
+  const alan = el('div', 'not-grafi-alan'); alan.append(tuval, panel);
+  const ctx = tuval.getContext('2d');
+
+  // simülasyon verisi: phyllotaxis başlangıcı rastgele değil, aynı veri aynı yerleşimi verir
+  const dugumler = veri.dugumler.map((d, i) => {
+    const r = 18 * Math.sqrt(i + .5), a = i * 2.39996;
+    return { ...d, x: r * Math.cos(a), y: r * Math.sin(a), vx: 0, vy: 0, r: Math.min(18, 4 + Math.sqrt(d.derece || 0) * 2), gelen: [], giden: [], kucuk: notGrafiKucult(d.baslik), sabit: false };
+  });
+  const idDizin = new Map(dugumler.map(d => [d.id, d]));
+  const kenarlar = [];
+  for (const k of veri.kenarlar) {
+    const a = idDizin.get(k.kaynak), b = idDizin.get(k.hedef);
+    if (!a || !b) continue;
+    kenarlar.push([a, b]); a.giden.push(b); b.gelen.push(a);
+  }
+  const hareketsiz = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const ITME = 900, ERIM = 220, YAY = 0.08, BOY = 56, MERKEZ = 0.012, SURTUNME = 0.82, SOGUMA = 0.98, ESIK = 0.004;
+  let isi = 1;
+  const adim = () => {
+    // yalnız yakın komşular iter (ızgara): 2000 düğümde kare başına milyonlarca çift hesaplanmaz
+    const izgara = new Map();
+    for (const d of dugumler) {
+      const a = Math.floor(d.x / ERIM) + ',' + Math.floor(d.y / ERIM);
+      const h = izgara.get(a); if (h) h.push(d); else izgara.set(a, [d]);
+    }
+    for (const d of dugumler) {
+      const cx = Math.floor(d.x / ERIM), cy = Math.floor(d.y / ERIM);
+      for (let gx = cx - 1; gx <= cx + 1; gx++) for (let gy = cy - 1; gy <= cy + 1; gy++) {
+        const h = izgara.get(gx + ',' + gy); if (!h) continue;
+        for (const o of h) {
+          if (o === d) continue;
+          let dx = d.x - o.x, dy = d.y - o.y, m2 = dx * dx + dy * dy;
+          if (m2 === 0) { dx = (d.id - o.id) || 1; dy = 1; m2 = dx * dx + dy * dy; }
+          if (m2 > ERIM * ERIM) continue;
+          const g = ITME / m2 * isi;
+          d.vx += dx * g; d.vy += dy * g;
+        }
+      }
+    }
+    for (const [a, b] of kenarlar) {
+      const dx = b.x - a.x, dy = b.y - a.y, m = Math.hypot(dx, dy) || 1;
+      // çok bağlantılı düğüm az hareket eder: yoksa merkez düğümler titreşir
+      const g = (m - BOY) / m * YAY * isi, da = a.gelen.length + a.giden.length, db = b.gelen.length + b.giden.length, pa = db / (da + db), pb = da / (da + db);
+      a.vx += dx * g * pa; a.vy += dy * g * pa; b.vx -= dx * g * pb; b.vy -= dy * g * pb;
+    }
+    for (const d of dugumler) {
+      if (d.sabit) { d.vx = d.vy = 0; continue; }
+      d.vx = (d.vx - d.x * MERKEZ * isi) * SURTUNME; d.vy = (d.vy - d.y * MERKEZ * isi) * SURTUNME;
+      d.x += d.vx; d.y += d.vy;
+    }
+    isi *= SOGUMA;
+  };
+
+  // kamera ve çizim
+  let k = 1, tx = 0, ty = 0, gen = 0, yuk = 0, oran = 1, kameraSerbest = false;
+  let uzerinde = null, secili = null, tutulan = null, aranan = '', eslesen = null, kare = 0, durdu = false;
+  const sigdirKamera = () => {
+    if (!gen || !yuk) return;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const d of dugumler) { x0 = Math.min(x0, d.x - d.r); y0 = Math.min(y0, d.y - d.r); x1 = Math.max(x1, d.x + d.r); y1 = Math.max(y1, d.y + d.r); }
+    k = Math.max(.05, Math.min(1.6, Math.min((gen - 48) / Math.max(1, x1 - x0), (yuk - 48) / Math.max(1, y1 - y0))));
+    tx = gen / 2 - k * (x0 + x1) / 2; ty = yuk / 2 - k * (y0 + y1) / 2;
+  };
+  const yakinlas = (cx, cy, oranK) => {
+    const yeni = Math.max(.05, Math.min(6, k * oranK));
+    tx = cx - (cx - tx) * yeni / k; ty = cy - (cy - ty) * yeni / k; k = yeni;
+    kameraSerbest = true; iste();
+  };
+  const seciliKomsu = new Set();
+  const etiket = (d, vurgu) => {
+    const x = d.x * k + tx, y = d.y * k + ty;
+    if (x < -200 || y < -20 || x > gen + 200 || y > yuk + 20) return;
+    const metin = d.baslik.length > 42 ? d.baslik.slice(0, 41) + '…' : d.baslik;
+    ctx.font = (vurgu ? '600 ' : '') + '12px Inter,system-ui,sans-serif';
+    const yari = ctx.measureText(metin).width / 2, sx = Math.max(yari + 4, Math.min(gen - yari - 4, x)), sy = Math.max(14, y - d.r * k - 6);
+    ctx.lineWidth = 3; ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(255,253,249,.92)'; ctx.fillStyle = RENKLER.projeler;
+    ctx.textAlign = 'center'; ctx.strokeText(metin, sx, sy); ctx.fillText(metin, sx, sy);
+  };
+  const ciz = () => {
+    ctx.setTransform(oran, 0, 0, oran, 0, 0);
+    ctx.clearRect(0, 0, gen, yuk);
+    ctx.translate(tx, ty); ctx.scale(k, k);
+    const odak = uzerinde || secili;
+    const soluk = d => eslesen && !eslesen.has(d);
+    ctx.lineWidth = 1 / k; ctx.strokeStyle = 'rgba(59,52,44,' + (eslesen || odak ? .08 : .22) + ')';
+    ctx.beginPath();
+    for (const [a, b] of kenarlar) { ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); }
+    ctx.stroke();
+    if (odak) {
+      ctx.lineWidth = 1.6 / k; ctx.strokeStyle = renk('notlar');
+      ctx.beginPath();
+      for (const [a, b] of kenarlar) if (a === odak || b === odak) { ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); }
+      ctx.stroke();
+    }
+    for (const d of dugumler) {
+      ctx.globalAlpha = soluk(d) ? .15 : 1;
+      ctx.fillStyle = renk(d.grup);
+      ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, 6.2832); ctx.fill();
+      if (d === secili || (eslesen && eslesen.has(d))) {
+        ctx.lineWidth = 2.5 / k; ctx.strokeStyle = d === secili ? renk('projeler') : renk('notlar');
+        ctx.beginPath(); ctx.arc(d.x, d.y, d.r + 3 / k, 0, 6.2832); ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+    ctx.setTransform(oran, 0, 0, oran, 0, 0);
+    if (eslesen && eslesen.size <= 40) eslesen.forEach(d => etiket(d));
+    else if (k >= 1.2 && dugumler.length <= 300) dugumler.forEach(d => { if (!soluk(d)) etiket(d); });
+    if (secili) { seciliKomsu.forEach(d => etiket(d)); etiket(secili, true); }
+    if (uzerinde) etiket(uzerinde, true);
+  };
+  const dongu = () => {
+    kare = 0;
+    if (durdu) return;
+    if (!tuval.isConnected || !sayfa.classList.contains('acik')) { durdur(); return; }
+    if (isi > ESIK || tutulan) {
+      if (tutulan) isi = Math.max(isi, .25);
+      adim();
+      if (!kameraSerbest) sigdirKamera();
+      kare = requestAnimationFrame(dongu);
+    }
+    ciz();
+  };
+  function iste() { if (!kare && !durdu) kare = requestAnimationFrame(dongu); }
+  const uyandir = () => { isi = Math.max(isi, .3); iste(); };
+  const gozlem = new ResizeObserver(() => {
+    const r = tuval.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    oran = Math.min(2, devicePixelRatio || 1); gen = r.width; yuk = r.height;
+    tuval.width = Math.round(gen * oran); tuval.height = Math.round(yuk * oran);
+    if (hareketsiz && isi > ESIK) { while (isi > ESIK) adim(); }  // hareketi azalt: yerleşim tek seferde biter
+    if (!kameraSerbest) sigdirKamera();
+    iste();
+  });
+  gozlem.observe(tuval);
+  function durdur() {
+    durdu = true;
+    if (kare) cancelAnimationFrame(kare);
+    kare = 0; gozlem.disconnect();
+  }
+  if (notGrafiDurdur) notGrafiDurdur();
+  notGrafiDurdur = durdur;
+
+  // bilgi paneli
+  const panelBos = () => {
+    panel.replaceChildren(el('p', 'bos', 'Bir nota tıkla: başlığı ve bağlantıları burada görünür.'));
+    if (!eslesen) return;
+    const liste = [...eslesen].sort((a, b) => b.derece - a.derece);
+    panel.append(el('h4', null, 'Eşleşen notlar'), notListesi(liste));
+  };
+  const notListesi = liste => {
+    const ul = el('ul');
+    liste.slice(0, 50).forEach(d => {
+      const b = el('button', null, d.baslik); b.type = 'button'; b.onclick = () => { SES.tik(); odaklan(d); };
+      const li = el('li'); li.append(b); ul.append(li);
+    });
+    if (liste.length > 50) ul.append(el('li', 'bos', '+' + (liste.length - 50) + ' not daha'));
+    return ul;
+  };
+  const sec = (d, kaydir) => {
+    secili = d; seciliKomsu.clear();
+    if (!d) { panelBos(); iste(); return; }
+    d.gelen.forEach(o => seciliKomsu.add(o)); d.giden.forEach(o => seciliKomsu.add(o));
+    const grupAd = d.grup === 'projeler' ? 'Proje' : 'Not';
+    const komsu = [...seciliKomsu].sort((a, b) => a.baslik.localeCompare(b.baslik, 'tr-TR'));
+    panel.replaceChildren(el('h3', null, d.baslik), el('small', null, grupAd + ' · ' + d.yol),
+      el('p', null, 'Bağlantı: ' + (d.gelen.length + d.giden.length) + ' (gelen ' + d.gelen.length + ', giden ' + d.giden.length + ')'));
+    if (komsu.length) panel.append(el('h4', null, 'Komşular'), notListesi(komsu));
+    else panel.append(el('p', 'bos', 'Bu notun bağlantısı yok.'));
+    if (kaydir && matchMedia('(max-width:768px)').matches) panel.scrollIntoView({ block:'nearest' });
+    iste();
+  };
+  const odaklan = d => {
+    sec(d);
+    kameraSerbest = true;
+    if (k < 1) k = 1;
+    tx = gen / 2 - d.x * k; ty = yuk / 2 - d.y * k;
+    iste();
+  };
+
+  // arama
+  const aramaUygula = () => {
+    aranan = notGrafiKucult(ara.value.trim());
+    eslesen = aranan ? new Set(dugumler.filter(d => d.kucuk.includes(aranan))) : null;
+    sayiSatir.textContent = eslesen ? (eslesen.size ? eslesen.size + ' not eşleşti' : 'Eşleşen not yok') : '';
+    if (!secili) panelBos();
+    iste();
+  };
+  ara.oninput = aramaUygula;
+  ara.onkeydown = e => {
+    if (e.key === 'Escape') { e.stopPropagation(); ara.value = ''; aramaUygula(); }
+    else if (e.key === 'Enter' && eslesen && eslesen.size) { e.preventDefault(); odaklan([...eslesen].sort((a, b) => b.derece - a.derece)[0]); }
+  };
+  uzak.onclick = () => yakinlas(gen / 2, yuk / 2, 1 / 1.3);
+  yakin.onclick = () => yakinlas(gen / 2, yuk / 2, 1.3);
+  sigdir.onclick = () => { kameraSerbest = false; sigdirKamera(); iste(); };
+
+  // işaretçi: fare + dokunma tek yoldan
+  const parmaklar = new Map();
+  let basYer = null, kaydi = false, pinchMesafe = 0, pinchOrta = null;
+  const yer = e => { const r = tuval.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  const bul = (p, dokunma) => {
+    const wx = (p.x - tx) / k, wy = (p.y - ty) / k;
+    let en = null, enM = Infinity;
+    for (const d of dugumler) {
+      const m = Math.hypot(d.x - wx, d.y - wy), sinir = Math.max(d.r, (dokunma ? 20 : 8) / k);
+      if (m <= sinir && m < enM) { en = d; enM = m; }
+    }
+    return en;
+  };
+  tuval.addEventListener('pointerdown', e => {
+    if (e.button) return;
+    try { tuval.setPointerCapture(e.pointerId); } catch {}
+    const p = yer(e); parmaklar.set(e.pointerId, p);
+    if (parmaklar.size === 2) {
+      if (tutulan) { tutulan.sabit = false; tutulan = null; }
+      const [a, b] = [...parmaklar.values()];
+      pinchMesafe = Math.hypot(a.x - b.x, a.y - b.y); pinchOrta = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      kaydi = true; return;
+    }
+    if (parmaklar.size > 2) return;
+    basYer = p; kaydi = false;
+    tutulan = bul(p, e.pointerType === 'touch');
+    if (tutulan) tutulan.sabit = true;
+    tuval.classList.add('tutuyor');
+  });
+  tuval.addEventListener('pointermove', e => {
+    const p = yer(e);
+    if (!parmaklar.has(e.pointerId)) {
+      if (e.pointerType !== 'mouse') return;
+      const d = bul(p, false);
+      if (d !== uzerinde) { uzerinde = d; tuval.classList.toggle('uzerinde', !!d); iste(); }
+      return;
+    }
+    const once = parmaklar.get(e.pointerId); parmaklar.set(e.pointerId, p);
+    if (parmaklar.size >= 2) {
+      const [a, b] = [...parmaklar.values()];
+      const m = Math.hypot(a.x - b.x, a.y - b.y), o = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      tx += o.x - pinchOrta.x; ty += o.y - pinchOrta.y;
+      if (pinchMesafe > 0 && m > 0) yakinlas(o.x, o.y, m / pinchMesafe);
+      pinchMesafe = m; pinchOrta = o; return;
+    }
+    if (!basYer) return;
+    if (!kaydi && Math.hypot(p.x - basYer.x, p.y - basYer.y) < (e.pointerType === 'touch' ? 10 : 4)) return;
+    kaydi = true;
+    if (tutulan) { tutulan.x = (p.x - tx) / k; tutulan.y = (p.y - ty) / k; kameraSerbest = true; uyandir(); }
+    else { tx += p.x - once.x; ty += p.y - once.y; kameraSerbest = true; iste(); }
+  });
+  const birak = e => {
+    if (!parmaklar.delete(e.pointerId)) return;
+    if (parmaklar.size) { basYer = null; return; }
+    tuval.classList.remove('tutuyor');
+    if (e.type === 'pointerup' && basYer && !kaydi) {
+      const d = bul(yer(e), e.pointerType === 'touch');
+      if (d) { SES.tik(); sec(d, true); }
+      else if (secili) sec(null);
+      if (e.pointerType !== 'mouse') { uzerinde = null; }
+    }
+    if (tutulan) { tutulan.sabit = false; tutulan = null; if (kaydi) uyandir(); }
+    basYer = null; iste();
+  };
+  tuval.addEventListener('pointerup', birak);
+  tuval.addEventListener('pointercancel', birak);
+  tuval.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse' && uzerinde && !parmaklar.size) { uzerinde = null; tuval.classList.remove('uzerinde'); iste(); } });
+  tuval.addEventListener('wheel', e => {
+    e.preventDefault();
+    const p = yer(e);
+    yakinlas(p.x, p.y, Math.exp(-e.deltaY * (e.ctrlKey ? .01 : .0015)));
+  }, { passive:false });
+
+  panelBos();
+  return [...bas, ust, bilgi, alan];
 }
 async function dizinSayfasi() {
   if (DEMO) return [el('h2', null, 'Dizin'), el('p', 'alt', 'Demo modunda dizin gezilemez.')];
