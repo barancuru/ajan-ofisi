@@ -168,7 +168,8 @@ class PolitikaTesti(Temel):
 class GorevciDarListeTesti(Temel):
     """Görevci'nin salt-okunur donanım allowlist'i (ajanlar.example.json'daki blokla aynı)."""
     LISTE = ["lscpu", "nproc", "free", "lsblk", "df", "uname", "uptime", "cat /etc/os-release", "lspci",
-             "ip -brief addr"]
+             "ip -brief addr", "df -i", "docker ps", "journalctl -k -p err -n 100", "vmstat 1 3",
+             "ps aux --sort=-%mem"]
     ONAY = ["rm", "reboot", "shutdown", "systemctl stop|restart|disable", "deploy", "git push",
             "ip -brief addr add|del|delete|flush|change|replace"]
 
@@ -217,7 +218,8 @@ class GorevciDarListeTesti(Temel):
 class BirebirTesti(Temel):
     """birebir_komutlar modu: token listesi tam eşit değilse kesin red; onay yolu yok."""
     LISTE = ["lscpu", "nproc", "free -h", "lsblk", "df -h", "uname -a", "uptime", "cat /etc/os-release",
-             "lspci", "ip -brief addr"]
+             "lspci", "ip -brief addr", "df -i", "docker ps", "journalctl -k -p err -n 100", "vmstat 1 3",
+             "ps aux --sort=-%mem"]
     RED = ["df -h /", "free -h -x", "ls", "cat /etc/passwd", "cat /etc/os-release /etc/shadow", "uname",
            "lscpu -e", "df", "uptime; id", "uptime && id", "uptime | cat", "uptime $(id)", "uptime `id`",
            "uptime > /tmp/x", "uptime >> x", "df -h\nid", "cat /etc/os-release/../shadow", "",
@@ -254,6 +256,24 @@ class BirebirTesti(Temel):
             self.assertEqual(cagrilar, [], k)
             olay.assert_not_called()
             self.assertEqual(ssh_gecit.komut_karar(self.ssh, args)[0], "red", k)
+
+    def test_tanilama_komutlari_izin_ve_ek_argumanla_red(self):
+        izinler = {
+            "df -i": ["df -i /", "df"],
+            "docker ps": ["docker ps -a", "docker"],
+            "journalctl -k -p err -n 100": ["journalctl -k -p err -n 100 -f", "journalctl -k -p err -n 1000"],
+            "vmstat 1 3": ["vmstat 1 3 x", "vmstat 1"],
+            "ps aux --sort=-%mem": ["ps aux", "ps aux --sort=-%cpu"],
+        }
+        for izin, varyantlar in izinler.items():
+            self.assertIn(izin, self.LISTE)
+            self.assertEqual(ssh_gecit.komut_karar(self.ssh, izin.split(" "))[0], "izin", izin)
+            for v in varyantlar:
+                kod, cagrilar, _, olay = self.calistir(v.split(" "))
+                self.assertEqual(kod, ssh_gecit.CIKIS_RED, v)
+                self.assertEqual(cagrilar, [], v)
+                olay.assert_not_called()
+                self.assertEqual(ssh_gecit.komut_karar(self.ssh, v.split(" "))[0], "red", v)
 
     def test_ssh_blogu_yoksa_red(self):
         kod, cagrilar, _, _ = self.calistir(["uptime"], ajan="b")
