@@ -13,6 +13,12 @@ class BaglamTesti(unittest.TestCase):
         self.assertEqual(sunucu.baglam_komutu({"tur": "kod", "proje": "homeos", "sorgu": "inspectRelease"}),
                          [kosucu.GRAF_OKU, "homeos", "query", "inspectRelease", "--budget=1200"])
 
+    def test_web_istegi_tarayiciya_gider(self):
+        self.assertEqual(sunucu.baglam_komutu({"tur": "web", "sorgu": "http://192.168.1.10/a"}),
+                         [kosucu.TARAYICI, "oku", "http://192.168.1.10/a"])
+        for kotu in ("ftp://x/y", "--tam", "http://a b", "file:///etc/passwd"):
+            self.assertIsNone(sunucu.baglam_komutu({"tur": "web", "sorgu": kotu}))
+
     def test_bozuk_istekler_reddedilir(self):
         for kotu in ({"tur": "kod", "proje": "beyin", "sorgu": "xx"}, {"tur": "kod", "sorgu": "xx"},
                      {"tur": "kabuk", "sorgu": "ls"}, {"tur": "not", "sorgu": "--derinlik=2"},

@@ -123,7 +123,7 @@ class ApiYardimcilariTest(unittest.TestCase):
         self.assertFalse(kosucu.limit_hatasi_mi({"is_error": False, "result": "rate limit hakkında rapor"}, None))
 
     def test_api_komutu_yalniz_model_ve_proc_yasagi_degisir(self):
-        ajan = {"id": "a", "model": "opus", "cwd": "/tmp", "izinli_araclar": ["Read"]}
+        ajan = {"id": "a", "model": "opus", "cwd": "/tmp", "izinli_araclar": ["Read"], "tarayici": False}
         komut = kosucu.komut_kur(ajan, ["Bash", "WebFetch"], "/tmp/cikti", 0.5)
         yeni = kosucu.api_komutu(komut, "claude-sonnet-5-5")
         self.assertEqual(yeni[yeni.index("--model") + 1], "claude-sonnet-5-5")
@@ -225,7 +225,7 @@ class KosuYedekTest(unittest.TestCase):
         return popen, cx
 
     def test_limitte_ikinci_kosu_anahtarla_ayni_komutla_baslar(self):
-        popen, _ = self.kos({"izinli_araclar": ["Read", "Edit"]}, [limit_sureci(), basarili_surec()],
+        popen, _ = self.kos({"izinli_araclar": ["Read", "Edit"], "tarayici": False}, [limit_sureci(), basarili_surec()],
                             anahtar=(DOSYA_ANAHTARI, None))
         self.assertEqual(popen.call_count, 2)
         ilk, ikinci = popen.call_args_list

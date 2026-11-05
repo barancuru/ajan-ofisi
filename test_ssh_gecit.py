@@ -365,14 +365,25 @@ class MaskelemeTesti(Temel):
 class KosucuTesti(Temel):
     GENEL = ["Bash(rm:*)"]
 
+    def test_tarayici_varsayilan_acik_ham_bash_yok(self):
+        komut = kosucu.komut_kur({"model": "sonnet", "cwd": "/tmp", "izinli_araclar": ["Read"]}, ["Bash"], "/tmp/c", 0.5)
+        izinli = komut[komut.index("--allowedTools") + 1:]
+        self.assertIn(f"Bash({kosucu.TARAYICI}:*)", izinli)
+        self.assertNotIn("Bash", izinli)
+        # a tool-less agent (the CEO) gets nothing, and one agent can be switched off
+        for ajan in ({"model": "sonnet", "cwd": "/tmp"}, {"model": "sonnet", "cwd": "/tmp", "izinli_araclar": ["Read"], "tarayici": False}):
+            k = kosucu.komut_kur(ajan, ["Bash"], "/tmp/c", 0.5)
+            self.assertNotIn(f"Bash({kosucu.TARAYICI}:*)", k)
+            self.assertIn("Bash", k)
+
     def test_ssh_siz_ajan_komutu_degismez(self):
-        ajan = {"model": "sonnet", "cwd": "/tmp", "izinli_araclar": ["Read", "Grep"], "yasak_araclar": ["Write"]}
+        ajan = {"model": "sonnet", "cwd": "/tmp", "izinli_araclar": ["Read", "Grep"], "yasak_araclar": ["Write"], "tarayici": False}
         komut = kosucu.komut_kur(ajan, self.GENEL, "/tmp/c", 0.5)
         self.assertEqual(komut[komut.index("--allowedTools") + 1:komut.index("--disallowedTools")], ["Read", "Grep"])
         self.assertEqual(komut[komut.index("--disallowedTools") + 1:], ["Bash(rm:*)", "Write"])
 
     def test_ssh_li_ajan_yalniz_gecit_alir(self):
-        ajan = {"model": "sonnet", "cwd": "/tmp", "izinli_araclar": ["Read"], "ssh": self.ssh}
+        ajan = {"model": "sonnet", "cwd": "/tmp", "izinli_araclar": ["Read"], "ssh": self.ssh, "tarayici": False}
         komut = kosucu.komut_kur(ajan, self.GENEL, "/tmp/c", 0.5)
         izinli = komut[komut.index("--allowedTools") + 1:komut.index("--disallowedTools")]
         self.assertEqual(izinli, ["Read"])  # id yok: hiç Bash izni verilmez
@@ -382,7 +393,7 @@ class KosucuTesti(Temel):
             self.assertIn(beklenen, yasak)
 
     def test_ssh_li_ajanda_dar_kural_ve_genel_bash_yasagi_kalkar(self):
-        ajan = {"id": "gorevci", "model": "sonnet", "cwd": "/tmp", "izinli_araclar": ["Read"], "ssh": self.ssh}
+        ajan = {"id": "gorevci", "model": "sonnet", "cwd": "/tmp", "izinli_araclar": ["Read"], "ssh": self.ssh, "tarayici": False}
         komut = kosucu.komut_kur(ajan, ["Bash", "Bash(rm:*)"], "/tmp/c", 0.5)
         izinli = komut[komut.index("--allowedTools") + 1:komut.index("--disallowedTools")]
         yasak = komut[komut.index("--disallowedTools") + 1:]
@@ -407,7 +418,7 @@ class KosucuTesti(Temel):
     def test_birebir_yoksa_ya_da_bossa_bash_izni_uretilmez(self):
         for ssh in ({k: v for k, v in self.ssh.items() if k != "birebir_komutlar"},
                     {**self.ssh, "birebir_komutlar": []}):
-            ajan = {"id": "gorevci", "model": "sonnet", "cwd": "/tmp", "izinli_araclar": ["Read"], "ssh": ssh}
+            ajan = {"id": "gorevci", "model": "sonnet", "cwd": "/tmp", "izinli_araclar": ["Read"], "ssh": ssh, "tarayici": False}
             komut = kosucu.komut_kur(ajan, ["Bash"], "/tmp/c", 0.5)
             izinli = komut[komut.index("--allowedTools") + 1:komut.index("--disallowedTools")]
             yasak = komut[komut.index("--disallowedTools") + 1:]
