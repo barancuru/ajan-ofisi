@@ -1,4 +1,5 @@
 """SSH geçidi, doğrulama ve maskeleme (gerçek sunucuya bağlanmaz): python3 -m unittest test_ssh_gecit"""
+import json
 import builtins
 import os
 import subprocess
@@ -364,6 +365,17 @@ class MaskelemeTesti(Temel):
 
 class KosucuTesti(Temel):
     GENEL = ["Bash(rm:*)"]
+
+    def test_bash_kapisi_yalniz_gecit(self):
+        import subprocess
+        def kod(komut):
+            return subprocess.run([kosucu.BASH_KAPISI], input=json.dumps({"tool_input": {"command": komut}}), text=True, capture_output=True).returncode
+        self.assertEqual(kod(f"{kosucu.TARAYICI} oku https://example.com"), 0)
+        self.assertEqual(kod(f'{kosucu.NOT_OKU} bul "iki kelime"'), 0)
+        self.assertEqual(kod(f"python3 {kosucu.SSH_GECIT} gorevci -- uptime"), 0)
+        for kotu in ("cat x", "git log", "ls", f"{kosucu.TARAYICI} oku a; cat b", f"{kosucu.TARAYICI} oku a | head", f"TARAYICI_YEREL=1 {kosucu.TARAYICI} oku a",
+                     f"{kosucu.TARAYICI} oku $(cat x)", "python3 /tmp/x.py gorevci -- uptime", ""):
+            self.assertEqual(kod(kotu), 2, kotu)
 
     def test_tarayici_varsayilan_acik_ham_bash_yok(self):
         komut = kosucu.komut_kur({"model": "sonnet", "cwd": "/tmp", "izinli_araclar": ["Read"]}, ["Bash"], "/tmp/c", 0.5)

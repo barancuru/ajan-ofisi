@@ -82,7 +82,7 @@
       ]
     },
     {
-      "id": "arastirmaci",
+      "id": "arastirmaci", "butce_usd": 1.50,
       "ad": "Araştırmacı",
       "oda": "arastirma",
       "cwd": "/path/to/your/notes",

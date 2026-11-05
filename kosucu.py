@@ -40,6 +40,7 @@ GRAF_OKU = os.path.expanduser("~/beyin/bin/graf-oku")
 NOT_OKU = os.path.expanduser("~/beyin/bin/not-oku")
 TARAYICI = os.path.expanduser("~/beyin/bin/tarayici")
 HOMEOS_EKRAN = os.path.expanduser("~/beyin/bin/homeos-ekran")
+BASH_KAPISI = os.path.expanduser("~/beyin/bin/bash-kapisi")
 TASARIM = os.path.expanduser("~/.local/share/tasarim/TASARIM.md")
 MASKE_YOLLARI = []  # kos() doldurur: ssh.anahtar yolları (log/olay/çıktıdan maskelenir)
 
@@ -408,6 +409,9 @@ def komut_kur(ajan, genel_yasak, cikti_dizini, butce):
         yasak = [y for y in yasak if y != "Bash"]
         izinli.append(f"Bash({TARAYICI}:*)")
         izinli.append(f"Bash({HOMEOS_EKRAN}:*)")  # throwaway HomeOS with demo data; never production
+    if any(i.startswith("Bash(") for i in izinli):
+        # Allow rules alone leave read-only commands open; the hook makes Bash gateway-only.
+        komut += ["--settings", json.dumps({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": BASH_KAPISI}]}]}})]
     if izinli:
         komut += ["--allowedTools", *izinli]
     if yasak:
