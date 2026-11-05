@@ -3061,7 +3061,7 @@ async function notGrafiSayfasi() {
     kenarlar.push([a, b]); a.giden.push(b); b.gelen.push(a);
   }
   const hareketsiz = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const ITME = 900, ERIM = 220, YAY = 0.08, BOY = 56, MERKEZ = 0.012, SURTUNME = 0.82, SOGUMA = 0.98, ESIK = 0.004;
+  const ITME = 2600, ERIM = 260, YAY = 0.06, BOY = 110, MERKEZ = 0.012, SURTUNME = 0.82, SOGUMA = 0.98, ESIK = 0.004;
   let isi = 1;
   const adim = () => {
     // yalnız yakın komşular iter (ızgara): 2000 düğümde kare başına milyonlarca çift hesaplanmaz
@@ -3154,7 +3154,14 @@ async function notGrafiSayfasi() {
     ctx.setTransform(oran, 0, 0, oran, 0, 0);
     if (eslesen && eslesen.size <= 40) eslesen.forEach(d => etiket(d));
     else if (k >= 1.2 && dugumler.length <= 300) dugumler.forEach(d => { if (!soluk(d)) etiket(d); });
-    else if (!eslesen) dugumler.filter(d => d.derece >= 6).sort((a, b) => b.derece - a.derece).slice(0, 12).forEach(d => etiket(d));  // landmarks
+    else if (!eslesen) {  // landmarks: the busiest notes, skipping any label that would land on another
+      const dolu = [];
+      for (const d of dugumler.filter(n => n.derece >= 4).sort((a, b) => b.derece - a.derece).slice(0, 14)) {
+        const x = d.x * k + tx, y = d.y * k + ty, yari = Math.min(d.baslik.length, 42) * 3.4;
+        if (dolu.some(o => Math.abs(o.x - x) < o.yari + yari + 6 && Math.abs(o.y - y) < 18)) continue;
+        dolu.push({ x, y, yari }); etiket(d);
+      }
+    }
     if (secili) { seciliKomsu.forEach(d => etiket(d)); etiket(secili, true); }
     if (uzerinde) etiket(uzerinde, true);
   };
