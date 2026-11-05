@@ -23,6 +23,8 @@ def _yaz(kok, yol, metin=""):
     return tam
 
 
+GERCEK_YUKLEYICI = ortak.ajanlari_yukle
+
 class NotGrafiTesti(unittest.TestCase):
     def setUp(self):
         gecici = tempfile.TemporaryDirectory()
@@ -31,7 +33,7 @@ class NotGrafiTesti(unittest.TestCase):
         os.makedirs(self.d)
         self.dis = gecici.name  # BEYIN dışı
         for p in (mock.patch.object(sunucu, "BEYIN", self.d),
-                  mock.patch.object(ortak, "ajanlari_yukle", return_value={"ajanlar": []})):
+                  mock.patch.object(ortak, "ajanlari_yukle", return_value=({"ajanlar": []}, {}))):
             p.start()
             self.addCleanup(p.stop)
 
@@ -82,17 +84,35 @@ class NotGrafiTesti(unittest.TestCase):
         self.assertEqual(self._kenarlar(g), {("projeler/Bag.md", "notlar/alt/Ortak.md"),
                                              ("projeler/Bag.md", "projeler/x/Ortak.md")})
 
-    def test_yalniz_notlar_ve_projeler_taranir(self):
-        _yaz(self.d, "notlar/A.md", "[[Gorev]]")
+    def test_kasa_taranir_sistem_haric(self):
+        _yaz(self.d, "notlar/A.md", "[[Gorev]] [[Kayit]]")
         _yaz(self.d, "projeler/p/P.md")
         _yaz(self.d, "gelen/G.md")
         _yaz(self.d, "gorevler/Gorev.md")
         _yaz(self.d, "kok.md")
+        _yaz(self.d, "sistem/Kayit.md")
         _yaz(self.d, "notlar/metin.txt", "[[A]]")
         g = self._graf()
-        self.assertEqual(self._yollar(g), {"notlar/A.md", "projeler/p/P.md"})
-        self.assertEqual(g["kirik"], 1)
-        self.assertEqual({n["grup"] for n in g["dugumler"]}, {"notlar", "projeler"})
+        self.assertEqual(self._yollar(g), {"notlar/A.md", "projeler/p/P.md", "gelen/G.md", "gorevler/Gorev.md", "kok.md"})
+        self.assertEqual(self._kenarlar(g), {("notlar/A.md", "gorevler/Gorev.md")})
+        self.assertEqual(g["kirik"], 0)  # sistem/Kayit exists, it is just not drawn
+        self.assertEqual({n["grup"] for n in g["dugumler"]}, {"notlar", "projeler", "gelen", "gorevler", "genel"})
+
+    def test_kod_icindeki_baglanti_sayilmaz(self):
+        _yaz(self.d, "notlar/A.md", "`[[Yok1]]` metin\n```\n[[Yok2]]\n```\n[[B]]")
+        _yaz(self.d, "notlar/B.md")
+        g = self._graf()
+        self.assertEqual(self._kenarlar(g), {("notlar/A.md", "notlar/B.md")})
+        self.assertEqual(g["kirik"], 0)
+
+    def test_gercek_ajan_yukleyicisiyle_calisir(self):
+        # regression: ajanlari_yukle returns (veri, tablo); a mock with another shape hid this in 1.0.60
+        with tempfile.TemporaryDirectory() as t:
+            yol = os.path.join(t, "ajanlar.json")
+            with open(yol, "w", encoding="utf-8") as f:
+                json.dump({"ajanlar": []}, f)
+            with mock.patch.object(ortak, "ajanlari_yukle", GERCEK_YUKLEYICI), mock.patch.object(ortak, "AJANLAR_DOSYASI", yol):
+                self.assertEqual(sunucu.not_grafi_yaniti()["dugumler"], [])
 
     def test_gizli_sir_ve_atlanan_adlar(self):
         _yaz(self.d, "notlar/A.md")
@@ -191,7 +211,7 @@ class NotGrafiTesti(unittest.TestCase):
         ajanlar = {"ajanlar": [{"ssh": {"anahtar": "/k/gizli_kimlik"}}]}
         _yaz(self.d, "notlar/gizli_kimlik notu.md", "[[gizli_kimlik notu]]")
         _yaz(self.d, "notlar/Bozuk gizli_kimlik.md", b"\xff")
-        with mock.patch.object(ortak, "ajanlari_yukle", return_value=ajanlar):
+        with mock.patch.object(ortak, "ajanlari_yukle", return_value=(ajanlar, {})):
             g = self._graf()
         metin = json.dumps(g, ensure_ascii=False)
         self.assertNotIn("gizli_kimlik", metin)

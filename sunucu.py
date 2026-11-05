@@ -1626,9 +1626,11 @@ def kod_grafi_yaniti():
 
 
 # ---------- note graph tab: read-only [[wikilink]] graph of BEYIN/notlar + BEYIN/projeler ----------
-NOT_GRAFI_KOKLER = ("notlar", "projeler")  # order matters: on duplicate names notlar wins
+NOT_GRAFI_KOKLER = ("notlar", "projeler", "arastirma", "gunluk", "gorevler", "gelen")  # the vault as Obsidian shows it, minus sistem/; order matters: on duplicate names the earlier folder wins
 NOT_GRAFI_MAKS_DUGUM = 2000
 NOT_GRAFI_MAKS_OKUNAMAYAN = 50
+NOT_GRAFI_KOD_BLOK = re.compile(r"```.*?(?:```|\Z)", re.S)
+NOT_GRAFI_SATIR_KOD = re.compile(r"`[^`\n]*`")
 NOT_GRAFI_WIKILINK = re.compile(r"\[\[([^\[\]\n]{1,300})\]\]")
 NOT_GRAFI_GORSEL = re.compile(r"\.(png|jpe?g|gif|webp|svg|bmp|avif|pdf|mp3|mp4|webm|wav|ogg|mov)$", re.I)
 NOT_GRAFI_SIR_ADI = re.compile(
@@ -1649,6 +1651,7 @@ def _not_grafi_oku(tam):
     except (OSError, UnicodeDecodeError):
         return None
     hedefler = []
+    metin = NOT_GRAFI_SATIR_KOD.sub("", NOT_GRAFI_KOD_BLOK.sub("", metin))  # Obsidian does not treat code as links
     for ic in NOT_GRAFI_WIKILINK.findall(metin):
         hedef = ic.split("|", 1)[0].split("#", 1)[0].replace("\\", "").strip()
         if hedef and not NOT_GRAFI_GORSEL.search(hedef):
@@ -1673,13 +1676,22 @@ def _not_grafi_dosyalari(kok):
                 if os.path.islink(tam) or not gercek.startswith(kok + os.sep) or not os.path.isfile(gercek):
                     continue
                 yield grup, os.path.relpath(tam, kok).replace(os.sep, "/"), gercek
+    try:
+        ust_duzey = os.listdir(kok)
+    except OSError:
+        ust_duzey = []
+    for ad in sorted(ust_duzey, key=str.lower):  # top-level documents
+        tam = os.path.join(kok, ad)
+        if (ad.lower().endswith(".md") and not ad.startswith(".") and not _not_grafi_sir_mi(ad)
+                and not os.path.islink(tam) and os.path.isfile(tam)):
+            yield "genel", ad, os.path.realpath(tam)
 
 
 def not_grafi_yaniti():
     """{dugumler, kenarlar, okunamayan, kirik, kesildi, guncelleme}. Read-only; only file names leave the server."""
     kok = os.path.realpath(BEYIN)
     try:
-        maske = ortak.maske_yollari(ortak.ajanlari_yukle())
+        maske = ortak.maske_yollari(ortak.ajanlari_yukle()[0])
     except (ortak.YapilandirmaHatasi, OSError, ValueError, KeyError, TypeError):
         maske = []  # private key blocks are still masked; a broken config must not take the tab down
     dugumler, okunamayan, hedef_listeleri, kesildi = [], [], [], False
@@ -1709,13 +1721,17 @@ def not_grafi_yaniti():
             okunamaz(yol)  # stays a node so links pointing at it still resolve
         hedef_listeleri.append(hedefler or [])
 
-    kenar_kumesi, kirik = set(), 0
+    kenar_kumesi, kirik, diger_notlar = set(), 0, None
     for i, hedefler in enumerate(hedef_listeleri):
         for hedef in hedefler:
             anahtar = hedef[:-3] if hedef.lower().endswith(".md") else hedef
             j = ad_dizini.get(anahtar.casefold())
             if j is None:
-                kirik += 1
+                if diger_notlar is None:  # a note in a folder the graph leaves out is not a broken link
+                    diger_notlar = {a[:-3].casefold() for ust, _, adlar in os.walk(kok) for a in adlar
+                                    if a.lower().endswith(".md") and not os.path.islink(os.path.join(ust, a))}
+                if os.path.basename(anahtar).casefold() not in diger_notlar:
+                    kirik += 1
             elif j != i:
                 kenar_kumesi.add((i, j))
     kenarlar = [{"kaynak": a, "hedef": b} for a, b in sorted(kenar_kumesi)]
