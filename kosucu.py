@@ -70,6 +70,9 @@ Bu koşuda kullanıcının tercihine dair KALICI yeni bir şey öğrendiysen (re
 """
 
 
+MAKS_HAFIZA_MADDE = 3  # max memory items accepted per run
+
+
 def hafiza_oku(ajan_id):
     yol = os.path.join(ortak.HAFIZA_DIZINI, f"{ajan_id}.md")
     try:
@@ -80,14 +83,18 @@ def hafiza_oku(ajan_id):
 
 
 def hafizaya_ekle(ajan_id, metin):
-    maddeler = [m.strip() for m in HAFIZA_DESENI.findall(metin) if m.strip()]
+    """Returns (written items, skipped count). Items are collapsed to one line and capped per run."""
+    tumu = [" ".join(m.split())[:ortak.MAKS_HAFIZA_EKI] for m in HAFIZA_DESENI.findall(metin)]
+    tumu = [m for m in tumu if m]
+    maddeler = tumu[:MAKS_HAFIZA_MADDE]
+    atlanan = len(tumu) - len(maddeler)
     if not maddeler:
-        return []
+        return [], atlanan
     yol = os.path.join(ortak.HAFIZA_DIZINI, f"{ajan_id}.md")
     with ortak.hafiza_kilidi(ajan_id), open(yol, "a", encoding="utf-8") as f:
         for m in maddeler:
-            f.write(f"\n- [{ortak.bugun()}] {m[:ortak.MAKS_HAFIZA_EKI]}")
-    return maddeler
+            f.write(f"\n- [{ortak.bugun()}] {m}")
+    return maddeler, atlanan
 
 
 def kilit_al():
@@ -607,7 +614,7 @@ def bitir(ajan, baglam, sonuc, hata, baslangic, log_yolu, cikti_dizini, durum_id
     metin = maskele((sonuc or {}).get("result") or "")
     hata = maskele(hata)
     basarili = bool(sonuc) and not sonuc.get("is_error") and not hata
-    eklenen = hafizaya_ekle(ajan["id"], metin) if basarili else []
+    eklenen, atlanan = hafizaya_ekle(ajan["id"], metin) if basarili else ([], 0)
     temiz = HAFIZA_DESENI.sub("", metin).strip()
     cikti_yolu = os.path.join(cikti_dizini, f"{baglam['kosu_id']}.md")
     with open(cikti_yolu, "w", encoding="utf-8") as f:
@@ -621,6 +628,7 @@ def bitir(ajan, baglam, sonuc, hata, baslangic, log_yolu, cikti_dizini, durum_id
         "claude_sure_ms": (sonuc or {}).get("duration_ms"),
         **({"saglayici": sonuc["saglayici"]} if (sonuc or {}).get("saglayici") else {}),
         "hafiza_eklendi": eklenen,
+        "hafiza_atlandi": atlanan,
         "log": os.path.relpath(log_yolu, ortak.KOK),
         "cikti": os.path.relpath(cikti_yolu, ortak.KOK),
     }
