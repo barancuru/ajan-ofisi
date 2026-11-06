@@ -1746,6 +1746,7 @@ def not_grafi_yaniti():
 
 class Isleyici(SimpleHTTPRequestHandler):
     server_version = "AjanOfisi/2"
+    timeout = 30  # yarım gövdeli istek iş parçacığını kilitlemesin (canlı akış _sse'de kaldırır)
 
     def __init__(self, *a, **k):
         super().__init__(*a, directory=ON_YUZ, **k)
@@ -1792,7 +1793,12 @@ class Isleyici(SimpleHTTPRequestHandler):
         if "application/json" not in (self.headers.get("Content-Type") or ""):
             raise IstekHatasi(415, "Content-Type application/json olmalı")
         try:
-            veri = json.loads(self.rfile.read(uzunluk) or b"{}")
+            ham = self.rfile.read(uzunluk)
+        except OSError as e:  # TimeoutError dahil
+            self.close_connection = True
+            raise IstekHatasi(408, "istek zaman aşımına uğradı") from e
+        try:
+            veri = json.loads(ham or b"{}")
         except json.JSONDecodeError as e:
             raise IstekHatasi(400, "geçersiz JSON") from e
         if not isinstance(veri, dict):
@@ -1975,6 +1981,7 @@ class Isleyici(SimpleHTTPRequestHandler):
             return self._json(500, {"hata": "sunucu hatası"})
 
     def _sse(self, sorgu):
+        self.connection.settimeout(None)  # uzun canlı izleme soket zaman aşımıyla kopmasın
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-store")

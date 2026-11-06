@@ -131,12 +131,21 @@ button{font:inherit;font-weight:600;font-size:15px;padding:12px;border:0;border-
 class Isleyici(BaseHTTPRequestHandler):
     server_version = "ofis-giris"
     sys_version = ""
+    timeout = 10
 
     def log_message(self, fmt, *args):
         pass  # don't write passwords or cookies to the log
 
     def _ip(self):
-        return (self.headers.get("X-Forwarded-For") or self.client_address[0]).split(",")[0].strip()
+        # İstemci başlığa kendi değerini ekleyebilir; güvenilir vekillerin eklediği son öğelere bakılır.
+        try:
+            vekil = int(os.environ.get("OFIS_GUVENILIR_VEKIL", "1"))
+        except ValueError:
+            vekil = 1
+        parcalar = [p.strip() for p in (self.headers.get("X-Forwarded-For") or "").split(",") if p.strip()]
+        if vekil < 1 or len(parcalar) < vekil:
+            return self.client_address[0]
+        return parcalar[-vekil]
 
     def _yaz(self, kod, govde=b"", tur="text/plain; charset=utf-8", basliklar=()):
         self.send_response(kod)
@@ -178,8 +187,21 @@ class Isleyici(BaseHTTPRequestHandler):
         ip = self._ip()
         if cok_deneme(ip):
             return self._sayfa(429, "Çok fazla hatalı deneme. 15 dakika sonra tekrar dene.")
-        uzunluk = min(int(self.headers.get("Content-Length") or 0), 4096)
-        alanlar = parse_qs(self.rfile.read(uzunluk).decode("utf-8", "replace"))
+        try:
+            uzunluk = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return self._sayfa(400, "Geçersiz istek.")
+        if uzunluk < 0:
+            return self._sayfa(400, "Geçersiz istek.")
+        if uzunluk > 4096:
+            self.close_connection = True
+            return self._sayfa(413, "İstek çok büyük.")
+        try:
+            ham = self.rfile.read(uzunluk)
+        except OSError:  # TimeoutError dahil: yarım gövde
+            self.close_connection = True
+            return self._sayfa(408, "İstek zaman aşımına uğradı.")
+        alanlar = parse_qs(ham.decode("utf-8", "replace"))
         parola = alanlar.get("parola", [""])[0]
         sonra = guvenli_hedef(alanlar.get("sonra", ["/"])[0])
         if not hmac.compare_digest(parola.encode(), oku("parola").encode()):
