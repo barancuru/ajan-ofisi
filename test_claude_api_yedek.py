@@ -11,6 +11,9 @@ import urllib.error
 from unittest import mock
 
 import kosucu
+
+# hermetic: the user's real Codex switch (~/.config/beyin/codex-yedek-kapali) must not change these tests
+kosucu.CODEX_KAPALI = "/nonexistent/codex-yedek-kapali"
 import sunucu
 
 SAHTE_ANAHTAR = "sk-ant-TEST-0123456789"
@@ -323,6 +326,13 @@ class SaglayiciSecimiTest(unittest.TestCase):
         r, c, a = self.cagir({"OFIS_YEDEK_SAGLAYICI": "codex"})
         self.assertEqual(r, ("c", None))
         a.assert_not_called()
+
+    def test_codex_kapali_dosyasi_codexi_atlar(self):
+        with tempfile.NamedTemporaryFile() as f, mock.patch.object(kosucu, "CODEX_KAPALI", f.name):
+            for s in ("zincir", "codex"):
+                r, c, a = self.cagir({"OFIS_YEDEK_SAGLAYICI": s})
+                self.assertEqual(r, ("a", None))
+                c.assert_not_called()
 
     def test_claude_api_ikinci_claude_code(self):
         r, c, a = self.cagir({"OFIS_YEDEK_SAGLAYICI": "claude-api"})

@@ -321,6 +321,9 @@ def claude_code_api_kos(ajan, komut, tam_prompt, calisma_dizini, log, baglam, sa
     return sonuc, None
 
 
+CODEX_KAPALI = os.path.expanduser("~/.config/beyin/codex-yedek-kapali")  # exists = no Codex fallback (delete to re-enable)
+
+
 def yedek_kos(ajan, tam_prompt, calisma_dizini, cikti_dizini, log, komut=None, baglam=None, sayac=None):
     """OFIS_YEDEK_SAGLAYICI=zincir|claude-api|codex|yok (varsayılan zincir: Claude Code (Pro) → Claude Code (API
     anahtarı) → Codex). İlk basamak çağıran koşucudur; burada 2. ikinci Claude Code, 3. Codex (yalnız SSH'siz) denenir."""
@@ -330,6 +333,9 @@ def yedek_kos(ajan, tam_prompt, calisma_dizini, cikti_dizini, log, komut=None, b
     def api():
         return claude_code_api_kos(ajan, komut, tam_prompt, calisma_dizini, log, baglam, sayac)
 
+    if os.path.exists(CODEX_KAPALI):  # user turned Codex off as a fallback; only the API key step remains
+        if saglayici in ("zincir", "codex"):
+            saglayici = "claude-api"
     if saglayici == "zincir":
         hatalar = []
         for kos in (api, lambda: codex_kos(ajan, tam_prompt, calisma_dizini, cikti_dizini, log)):
