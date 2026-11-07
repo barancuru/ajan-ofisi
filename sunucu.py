@@ -1332,6 +1332,10 @@ def aksiyonlari_cikar(govde, en_cok=8, en_uzun=200):
     return sonuc
 
 
+# Projects whose production is upgraded from the office (token file present = automatic upgrade on approval)
+CANLI_YUKSELTME_ANAHTARLARI = {"homeos": "~/.config/ofis-kapi/homeos-yukseltme", "turnusol": "~/.config/ofis-kapi/turnusol-yukseltme"}
+
+
 def gorev_ozeti(yol, bitti=False):
     with open(yol, encoding="utf-8", errors="replace") as f:  # one bad byte must not hide the task or break the approval
         metin = f.read()
@@ -1347,8 +1351,8 @@ def gorev_ozeti(yol, bitti=False):
             "son_bolum": son_bolum(govde), "aksiyonlar": aksiyonlari_cikar(govde)}
     if fm.get("proje") == "ajan-ofisi" and durum == "uat":
         ozet["onizleme"] = ":8444"
-    if fm.get("proje") == "homeos" and durum == "uat":
-        ozet["canli_otomatik"] = os.path.isfile(os.path.expanduser("~/.config/ofis-kapi/homeos-yukseltme"))
+    if fm.get("proje") in CANLI_YUKSELTME_ANAHTARLARI and durum == "uat":
+        ozet["canli_otomatik"] = os.path.isfile(os.path.expanduser(CANLI_YUKSELTME_ANAHTARLARI[fm["proje"]]))
     if durum == "oneri":
         ozet["metin"] = govde.split("\n", 1)[1].strip()[:2500] if "\n" in govde else ""
     return ozet

@@ -2733,7 +2733,7 @@ async function gelistirmeSayfasi() {
     if (!yaziyor && !sayfa.querySelector('details[open]')) sekmeAc('gelistirme');
   }, 20000);
   const form = el('form', 'kart gelistirme-form'); form.autocomplete = 'off';
-  const proje = el('select'); veri.projeler.forEach(p => { const o = el('option', null, p === 'ajan-ofisi' ? 'Ajan Ofisi (bu arayüz)' : p === 'homeos' ? 'HomeOS' : p); o.value = p; proje.append(o); });
+  const proje = el('select'); veri.projeler.forEach(p => { const o = el('option', null, p === 'ajan-ofisi' ? 'Ajan Ofisi (bu arayüz)' : PROJE_AD[p] || p); o.value = p; proje.append(o); });
   const model = el('select'); [['sonnet','Sonnet (varsayılan)'],['haiku','Haiku (basit iş, ucuz)'],['opus','Opus (zor iş, limiti hızlı yer)']].forEach(([v,t]) => { const o = el('option', null, t); o.value = v; model.append(o); });
   const baslik = el('input'); baslik.placeholder = 'Başlık: ör. “Maliyet sayfasına haftalık grafik ekle”'; baslik.maxLength = 80; baslik.required = true;
   const istek = el('textarea'); istek.placeholder = 'Ne istiyorsun? Ne olunca bitmiş sayılır? Telefonda nasıl görünmeli?'; istek.maxLength = 4000; istek.rows = 4; istek.required = true;
@@ -2769,13 +2769,14 @@ async function gelistirmeSayfasi() {
   }
   return parcalar;
 }
+const PROJE_AD = { homeos:'HomeOS', turnusol:'Turnusol' };
 /* Onayla / Reddet düğmelerini `dug` içine kurar (kart ve popup ortak). Reddet metin kutusunu `dug`un önüne koyar. */
 function gelistirmeKararKur(g, dug, kapat) {
   const onay = el('button', 'onay', 'Onayla ve canlıya al'), red = el('button', 'sonra', 'Reddet');
   onay.type = 'button'; red.type = 'button';
   onay.onclick = async () => {
     const uyariMetni = Number(g.uyari) > 0 ? '⚠️ Raporda ' + g.uyari + ' uyarı var. Önce raporu oku.\n\n' : '';
-    if (!confirm(uyariMetni + (g.proje === 'homeos' ? (g.canli_otomatik ? 'Onaylanınca dal main\'e alınır ve HomeOS üretimi otomatik yükseltilir (önce yedek alınır, migration çalışır). Devam?' : 'Onaylanınca dal main\'e alınır ve etiketlenir. Canlı kurulum için paketi panelden yüklemen gerekir. Devam?') : 'Onaylanınca değişiklik canlı ofise alınır ve servis yeniden başlar. Devam?'))) return;
+    if (!confirm(uyariMetni + (g.proje !== 'ajan-ofisi' ? (g.canli_otomatik ? 'Onaylanınca dal main\'e alınır ve ' + (PROJE_AD[g.proje] || g.proje) + ' üretimi otomatik yükseltilir (önce yedek alınır, migration çalışır). Devam?' : 'Onaylanınca dal main\'e alınır ve etiketlenir. Canlı kurulum için paketi panelden yüklemen gerekir. Devam?') : 'Onaylanınca değişiklik canlı ofise alınır ve servis yeniden başlar. Devam?'))) return;
     const { durum, veri } = await postJSON('/api/gelistirme', { islem:'onay', dosya:g.dosya, karar:'evet' });
     tost(durum === 200 ? 'Onaylandı; birkaç dakika içinde işlenir' : (veri.hata || 'hata ' + durum));
     if (kapat && durum === 200) kapat();
@@ -2797,7 +2798,7 @@ function gelistirmeKararKur(g, dug, kapat) {
 }
 function oneriTaramaSatiri(veri) {
   const k = el('div', 'kart oneri-tara');
-  const proje = el('select'); veri.projeler.forEach(p => { const o = el('option', null, p === 'ajan-ofisi' ? 'Ajan Ofisi' : p === 'homeos' ? 'HomeOS' : p); o.value = p; proje.append(o); });
+  const proje = el('select'); veri.projeler.forEach(p => { const o = el('option', null, p === 'ajan-ofisi' ? 'Ajan Ofisi' : PROJE_AD[p] || p); o.value = p; proje.append(o); });
   const dug = el('button', 'koyu-dugme', veri.oneri_taraniyor ? 'Taranıyor…' : 'Öneri iste'); dug.type = 'button'; dug.disabled = !!veri.oneri_taraniyor;
   const acik = (veri.gorevler || []).filter(g => !g.bitti && g.durum === 'oneri').length;
   const bilgi = el('small', 'alt', veri.oneri_taraniyor
