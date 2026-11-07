@@ -372,7 +372,11 @@ class KosucuTesti(Temel):
             return subprocess.run([kosucu.BASH_KAPISI], input=json.dumps({"tool_input": {"command": komut}}), text=True, capture_output=True).returncode
         self.assertEqual(kod(f"{kosucu.TARAYICI} oku https://example.com"), 0)
         self.assertEqual(kod(f'{kosucu.NOT_OKU} bul "iki kelime"'), 0)
-        self.assertEqual(kod(f"python3 {kosucu.SSH_GECIT} gorevci -- uptime"), 0)
+        # the gate allows only the real gateway (~/ajan-ofisi/ssh_gecit.py), not a copy in a worktree
+        gercek = os.path.expanduser("~/ajan-ofisi/ssh_gecit.py")
+        self.assertEqual(kod(f"python3 {gercek} gorevci -- uptime"), 0)
+        if os.path.realpath(kosucu.SSH_GECIT) != os.path.realpath(gercek):
+            self.assertEqual(kod(f"python3 {kosucu.SSH_GECIT} gorevci -- uptime"), 2)
         for kotu in ("cat x", "git log", "ls", f"{kosucu.TARAYICI} oku a; cat b", f"{kosucu.TARAYICI} oku a | head", f"TARAYICI_YEREL=1 {kosucu.TARAYICI} oku a",
                      f"{kosucu.TARAYICI} oku $(cat x)", "python3 /tmp/x.py gorevci -- uptime", ""):
             self.assertEqual(kod(kotu), 2, kotu)
