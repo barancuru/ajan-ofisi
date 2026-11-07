@@ -1244,10 +1244,20 @@ def dizin_yaz(veri):
     return {"ok": True, "boyut": len(metin.encode("utf-8")), "surum": dosya_surumu(tam)}
 
 
-def gelistirme_projeleri():
+def proje_uyarlayicisi_mi(yol):
+    """A project adapter declares its source repo; helper scripts in the same folder (kum.sh, homeos.sh's helpers) do not."""
     try:
-        return sorted(f[:-3] for f in os.listdir(os.path.join(BEYIN, "sistem", "gelistirme"))
-                      if f.endswith(".sh") and ortak.AJAN_ID_DESENI.match(f[:-3]))
+        with open(yol, encoding="utf-8", errors="replace") as f:
+            return any(s.startswith("PROJE_KAYNAK=") for s in f)
+    except OSError:
+        return False
+
+
+def gelistirme_projeleri():
+    dizin = os.path.join(BEYIN, "sistem", "gelistirme")
+    try:
+        return sorted(f[:-3] for f in os.listdir(dizin)
+                      if f.endswith(".sh") and ortak.AJAN_ID_DESENI.match(f[:-3]) and proje_uyarlayicisi_mi(os.path.join(dizin, f)))
     except FileNotFoundError:
         return []
 
