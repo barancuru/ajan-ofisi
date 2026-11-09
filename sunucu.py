@@ -16,7 +16,7 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, quote
 
@@ -1386,7 +1386,7 @@ def gelistirme_yaniti():
                     o = None
                 if o:
                     gorevler.append(o)
-    return {"projeler": gelistirme_projeleri(), "gorevler": gorevler, "oneri_taraniyor": oneri_taraniyor()}
+    return {"projeler": gelistirme_projeleri(), "gorevler": gorevler, "oneri_taraniyor": oneri_taraniyor(), "oto_onay": oto_onay_durumu()}
 
 
 ONERI_BIRIMI = "beyin-oneri-elle"
@@ -1430,6 +1430,9 @@ def atomik_yaz(yol, metin):
 KAPI_IMZA_DOSYASI = os.path.expanduser("~/.config/ofis-kapi/kapi.env")
 PAKET_MUHUR_DIZINI = os.path.expanduser(os.path.join(os.environ.get("XDG_STATE_HOME", "~/.local/state"), "beyin/paket-muhur"))
 CANLI_ONAY_DIZINI = os.path.expanduser("~/.config/ofis-kapi/onaylar")
+OTO_ONAY_DIZINI = os.path.expanduser("~/.config/ofis-kapi/oto-onay")
+OTO_ONAY_PROJELERI = ("turnusol",)
+OTO_ONAY_GUN = 30
 
 
 def kapidan_geldi(deger):
@@ -1462,8 +1465,44 @@ def canli_onayi_yaz(fm):
     return True
 
 
+def oto_onay_durumu():
+    """Per-project auto-approval state; the runner treats a switch older than OTO_ONAY_GUN days as off (bin/calistir)."""
+    durum = {}
+    for proje in OTO_ONAY_PROJELERI:
+        try:
+            t = os.path.getmtime(os.path.join(OTO_ONAY_DIZINI, proje))
+        except OSError:
+            durum[proje] = {"acik": False}
+            continue
+        bitis = datetime.fromtimestamp(t) + timedelta(days=OTO_ONAY_GUN)
+        durum[proje] = {"acik": bitis > datetime.now(), "bitis": bitis.isoformat(timespec="minutes")}
+    return durum
+
+
+def oto_onay_degistir(proje, acik, kapi_imzasi):
+    """The switch itself is a human decision: only a request that passed the web login may change it."""
+    if proje not in OTO_ONAY_PROJELERI:
+        raise IstekHatasi(400, "bu proje için oto-onay yok")
+    if not isinstance(acik, bool):
+        raise IstekHatasi(400, "acik: true | false")
+    if not kapidan_geldi(kapi_imzasi):
+        raise IstekHatasi(403, "oto-onay yalnız ofis girişinden değiştirilebilir")
+    yol = os.path.join(OTO_ONAY_DIZINI, proje)
+    if acik:
+        os.makedirs(OTO_ONAY_DIZINI, mode=0o700, exist_ok=True)
+        atomik_yaz(yol, datetime.now().isoformat(timespec="seconds") + "\n")
+    else:
+        try:
+            os.remove(yol)
+        except FileNotFoundError:
+            pass
+
+
 def gelistirme_degistir(veri, kapi_imzasi=""):
     islem = veri.get("islem")
+    if islem == "oto-onay":
+        oto_onay_degistir(veri.get("proje"), veri.get("acik"), kapi_imzasi)
+        return gelistirme_yaniti()
     if islem == "yeni":
         proje, baslik, istek = veri.get("proje"), veri.get("baslik"), veri.get("istek")
         model = veri.get("model") or "sonnet"
@@ -1549,7 +1588,7 @@ def gelistirme_degistir(veri, kapi_imzasi=""):
     if islem == "oneri-tara":
         oneri_taramasi_baslat(veri.get("proje"))
         return gelistirme_yaniti()
-    raise IstekHatasi(400, "islem: yeni | onay | oneri | oneri-tara")
+    raise IstekHatasi(400, "islem: yeni | onay | oneri | oneri-tara | oto-onay")
 
 
 # ---------- Öngörülebilirlik (tekrar eden işler) ----------

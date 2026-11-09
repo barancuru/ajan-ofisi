@@ -2757,7 +2757,7 @@ async function gelistirmeSayfasi() {
   if (!aktif.length) iz.append(el('p', 'bos', 'Açık geliştirme görevi yok.'));
   const parcalar = [el('h2', null, 'Geliştirme'),
     el('p', 'alt', 'Talimat ver → ajan ayrı bir dalda geliştirir → kontroller → önizleme/paket → sen onaylarsın → canlıya geçer. Boştayken 0 token; görevler 5 dakikada bir kontrol edilir.'),
-    form, oneriTaramaSatiri(veri)];
+    form, oneriTaramaSatiri(veri), ...otoOnaySatirlari(veri)];
   if (oneriler.length) {
     const izO = el('div', 'izgara gelistirme-izgara'); oneriler.forEach(g => izO.append(oneriKarti(g)));
     parcalar.push(el('h3', 'ara-baslik', 'Ofisin önerileri · ' + oneriler.length), izO);
@@ -2795,6 +2795,24 @@ function gelistirmeKararKur(g, dug, kapat) {
     dug.replaceChildren(gon, vaz); dug.parentNode.insertBefore(t, dug); t.focus();
   };
   dug.append(onay, red);
+}
+function otoOnaySatirlari(veri) {
+  return Object.entries(veri.oto_onay || {}).map(([proje, d]) => {
+    const ad = PROJE_AD[proje] || proje, k = el('div', 'kart oneri-tara');
+    const dug = el('button', d.acik ? '' : 'koyu-dugme', d.acik ? 'Kapat' : 'Oto-onayı aç'); dug.type = 'button';
+    const bilgi = el('small', 'alt', d.acik
+      ? ad + ' oto-onay açık (' + d.bitis.slice(0, 10) + ' tarihine kadar). Bütün kontrollerden geçen ve uyarısı olmayan paket senin onayın olmadan canlıya geçer.'
+      : ad + ' paketleri senin onayını bekliyor. Açarsan bütün kontrollerden geçen, uyarısı olmayan paketler 30 gün boyunca kendiliğinden canlıya geçer.');
+    dug.onclick = async () => {
+      if (!d.acik && !confirm(ad + ' için oto-onay açılsın mı? Kontrollerden geçen paketler 30 gün boyunca senin onayın olmadan üretime geçer.')) return;
+      dug.disabled = true;
+      const { durum, veri: v } = await postJSON('/api/gelistirme', { islem:'oto-onay', proje, acik: !d.acik });
+      tost(durum === 200 ? (d.acik ? 'Oto-onay kapatıldı' : 'Oto-onay açıldı') : (v.hata || 'hata ' + durum));
+      sekmeAc('gelistirme');
+    };
+    k.append(dug, bilgi);
+    return k;
+  });
 }
 function oneriTaramaSatiri(veri) {
   const k = el('div', 'kart oneri-tara');
