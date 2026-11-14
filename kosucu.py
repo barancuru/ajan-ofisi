@@ -617,8 +617,14 @@ def bitir(ajan, baglam, sonuc, hata, baslangic, log_yolu, cikti_dizini, durum_id
     eklenen, atlanan = hafizaya_ekle(ajan["id"], metin) if basarili else ([], 0)
     temiz = HAFIZA_DESENI.sub("", metin).strip()
     cikti_yolu = os.path.join(cikti_dizini, f"{baglam['kosu_id']}.md")
-    with open(cikti_yolu, "w", encoding="utf-8") as f:
-        f.write(temiz or f"(çıktı yok) {hata or ''}")
+    try:
+        ortak.atomik_metin_yaz(cikti_yolu, temiz or f"(çıktı yok) {hata or ''}")
+        cikti_goreli = os.path.relpath(cikti_yolu, ortak.KOK)
+    except OSError as e:  # disk dolu / klasör yok: koşu yine de kapanmalı
+        cikti_goreli = None
+        basarili = False
+        yazma_hatasi = maskele(f"çıktı yazılamadı: {type(e).__name__}: {e}")
+        hata = f"{hata}; {yazma_hatasi}" if hata else yazma_hatasi
     olay = {
         **baglam, "tur": "kosu_bitti", "durum": "basarili" if basarili else "hata",
         "sure_sn": sure, "ozet": temiz[:400], "hata": hata,
@@ -630,7 +636,7 @@ def bitir(ajan, baglam, sonuc, hata, baslangic, log_yolu, cikti_dizini, durum_id
         "hafiza_eklendi": eklenen,
         "hafiza_atlandi": atlanan,
         "log": os.path.relpath(log_yolu, ortak.KOK),
-        "cikti": os.path.relpath(cikti_yolu, ortak.KOK),
+        "cikti": cikti_goreli,
     }
     ortak.olay_yaz(olay)
     ortak.durum_yaz(durum_id or ajan["id"], {"durum": "bitti" if basarili else "hata", "kosu_id": baglam["kosu_id"],

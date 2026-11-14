@@ -251,6 +251,21 @@ def durum_oku(ajan_id):
         return None
 
 
+def atomik_metin_yaz(yol, metin):
+    """Geçici dosya + os.replace: yarım kalan dosya bırakmaz."""
+    gecici = yol + ".tmp"
+    try:
+        with open(gecici, "w", encoding="utf-8") as f:
+            f.write(metin)
+        os.replace(gecici, yol)
+    except OSError:
+        try:
+            os.unlink(gecici)
+        except OSError:
+            pass
+        raise
+
+
 def durum_yaz(ajan_id, durum):
     gecici = durum_yolu(ajan_id) + ".tmp"
     with open(gecici, "w", encoding="utf-8") as f:

@@ -660,10 +660,8 @@ def ceo_kaydi_yaz(k):
             satirlar += ["", "## Reddedilen"] + [f"- {a.get('ajan')}: {a.get('neden')}" for a in k["reddedilen"]]
     try:
         os.makedirs(klasor, exist_ok=True)
-        with open(os.path.join(klasor, f"{k['ceo_id']}.json"), "w", encoding="utf-8") as f:
-            json.dump(k, f, ensure_ascii=False, indent=1)
-        with open(os.path.join(ortak.KOK, goreli), "w", encoding="utf-8") as f:
-            f.write("\n".join(satirlar))
+        atomik_yaz(os.path.join(klasor, f"{k['ceo_id']}.json"), json.dumps(k, ensure_ascii=False, indent=1))
+        atomik_yaz(os.path.join(ortak.KOK, goreli), "\n".join(satirlar))
         # "bitti"/"hata" yazılmaz: canli_durum CEO'yu 10 dk "bitti" gösterirdi
         ortak.durum_yaz("ceo", {"durum": "basarisiz" if k["durum"] == "hata" else k["durum"], "kosu_id": k["ceo_id"], "pid": None, "bitis": ortak.simdi_iso(),
                                 "bitis_ts": time.time(), "sure_sn": k["sure_sn"], "ozet": (k["cevap"] or k["hata"] or "")[:400],
