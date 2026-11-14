@@ -431,6 +431,13 @@ td.sayi,th.sayi{text-align:right}
 /* ---------- phone layout (≤768px): panel ↔ office scene toggle ---------- */
 .mobil-gecis{display:none}
 .dugme.cikis{text-decoration:none;color:inherit}
+.dugme.gorunum{display:inline-flex;align-items:center;gap:8px}
+.dugme.gorunum .yazi b{font-weight:500;opacity:.55}
+.dugme.gorunum[aria-pressed="false"] .yazi{font-weight:600}
+.dugme.gorunum[aria-pressed="false"] .yazi b{font-weight:500}
+.dugme.gorunum[aria-pressed="true"]{background:#3b342c;color:#fff;border-color:#3b342c}
+.dugme.gorunum[aria-pressed="true"] .yazi{font-weight:500;color:rgba(255,255,255,.6)}
+.dugme.gorunum[aria-pressed="true"] .yazi b{font-weight:600;opacity:1;color:#fff}
 @media (max-width:768px){
   :root{--sag:auto}
   .yaz input{font-size:16px}.yaz .ata{min-height:44px;min-width:44px}.ekler button{min-height:36px}
@@ -449,6 +456,8 @@ td.sayi,th.sayi{text-align:right}
   .ustbar .bosluk{display:none}
   .hap{padding:6px 10px}
   .mobil-gecis{display:inline-block;flex:0 0 auto}
+  .dugme.gorunum{flex:0 0 auto;width:44px;height:44px;padding:0;justify-content:center}
+  .dugme.gorunum .yazi{display:none}
   .selam{display:none}
   .sag,.panel,.sayfa{top:60px;left:8px;right:8px;bottom:calc(76px + env(safe-area-inset-bottom));width:auto}
   .sag{gap:8px}
@@ -486,6 +495,7 @@ td.sayi,th.sayi{text-align:right}
   <div class="bosluk"></div>
   <div class="hap"><span class="nokta" id="aktifNokta"></span><b id="aktif">0</b><span class="yazi"> ajan çalışıyor</span></div>
   <span class="saat" id="saat"></span>
+  <button class="dugme gorunum" id="gorunumDugme" type="button" aria-pressed="false" aria-label="Duygu karakterleri görünümü"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0"/><path d="M9 9.5v.5M15 9.5v.5"/></svg><span class="yazi">Kediler / <b>Duygular</b></span></button>
   <button class="dugme" id="genel" type="button">Genel bakış</button>
   <a class="dugme cikis" href="/cikis" title="Oturumu kapat">Çıkış</a>
   <button class="dugme mobil-gecis" id="mobilGecis" type="button">Ofisi göster</button>
@@ -554,12 +564,22 @@ import { createCat, ajanDeseni, ajanAksesuari } from './kedi.js';
 import { memeKur, memeBul } from './meme.js';
 import { portreleriUret } from './portre.js';
 import { dekorKur, masaLambasi } from './dekor.js';
+import { createDuygu, ajanDuygusu, duyguSirayla, kontrolOdasiKur, parlamaAyarla } from './duygu.js';
 
 const PARAM = new URLSearchParams(location.search);
 const HAREKETSIZ = matchMedia('(prefers-reduced-motion: reduce)');
 const TELEFON = matchMedia('(max-width:768px)');
 const DEMO = PARAM.get('demo') === '1';
 const OTO = PARAM.get('oto') !== '0';
+/* ofis görünümü: 'kedi' (varsayılan) ya da 'duygu'; seçim cihazda saklanır */
+const GORUNUM_K = 'ofis-gorunum';
+let GORUNUM = (() => { try { return localStorage.getItem(GORUNUM_K) === 'duygu' ? 'duygu' : 'kedi'; } catch { return 'kedi'; } })();
+const ANILAR = [];   // biten koşular (anı küreleri): {ajan, hata}
+let kontrolOdasi = null;   // duygu görünümünün dekoru (kedi görünümünde yok)
+function aniKaydet(ajan, hata) {
+  ANILAR.push({ ajan, hata }); if (ANILAR.length > 400) ANILAR.shift();
+  kontrolOdasi?.aniEkle(ajan, hata);
+}
 const TOKEN = new Map();   // ajanId -> {toplam, girdi, cikti, onbellek_yazma, onbellek_okuma, ofis_toplam, terminal_toplam}
 const TOKEN_ALAN = ['input_tokens', 'output_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens'];
 const SAYFA_ACILIS = Date.now();
@@ -1251,8 +1271,7 @@ function ajanKur(a) {
   a.lamba = new THREE.Mesh(new THREE.CircleGeometry(.05, 16), new THREE.MeshBasicMaterial({ color:'#b9ad9e' }));
   a.lamba.position.set(0, 1.1, 1.055); a.lamba.rotation.x = .22; g.add(a.lamba);
   // ajan figürü = kedi (oda başına desen, aynı odadakiler hafif ton farkı)
-  const ton = AJANLAR.filter(x => x.oda === a.oda).indexOf(a) * .5 - .25;
-  a.kedi = createCat({ desen:ajanDeseni(a.id, a.oda), ton, aksesuar:ajanAksesuari(a.id, a.oda) });
+  a.kedi = ajanKarakteri(a);
   a.kedi.group.position.set(0, .56, 0); g.add(a.kedi.group);
   masaLambasi(g, .82, .52);
   a.yuzMat = new THREE.MeshBasicMaterial(); // durum geçişleri hâlâ yüz dokusu atar; kedide görünmez
@@ -1274,12 +1293,21 @@ function bekciEkle(g) {
   fener.position.set(x, 1.02, z); g.add(fener);
   kutu(g, .24, .04, .24, '#4a443d', x, 1.15, z, .02);
 }
+// ajan figürü: kedi görünümünde oda deseni (aynı odadakiler hafif ton farkı), duygu görünümünde sabit duygu türü
+function ajanKarakteri(a) {
+  const ton = AJANLAR.filter(x => x.oda === a.oda).indexOf(a) * .5 - .25;
+  if (GORUNUM === 'duygu') return createDuygu({ tur:ajanDuyguTuru(a), ton });
+  return createCat({ desen:ajanDeseni(a.id, a.oda), ton, aksesuar:ajanAksesuari(a.id, a.oda) });
+}
+function ajanDuyguTuru(a) { return ajanDuygusu(a.id, AJANLAR.map(x => x.id)); }
 AJANLAR.forEach(ajanKur);
-// panel avatarları: her ajanın kendi kedisi, meme pozunda (açılışta bir kez)
-const PORTRE = portreleriUret(AJANLAR, {
+// panel avatarları: her ajanın kendi karakteri (kedi: meme pozunda); açılışta ve görünüm değişince üretilir
+const portreUret = () => portreleriUret(AJANLAR, {
   desen:a => ajanDeseni(a.id, a.oda), aksesuar:a => ajanAksesuari(a.id, a.oda),
   renk:a => odaBul(a.oda)?.duvar || '#f3dcc8',
+  karakter:GORUNUM === 'duygu' ? a => createDuygu({ tur:ajanDuyguTuru(a) }) : null,
 });
+let PORTRE = portreUret();
 // veri odası alt masaları: robotsuz, aynı ajanın olaylarını gösterir
 const altMasalar = [];
 if (ajanBul('veri')?.oda === 'veri' && AJANLAR.filter(a => a.oda === 'veri').length === 1) {
@@ -1353,7 +1381,7 @@ if (kurulOda) {
     kutu(sg, .74, .12, .66, '#8d8276', 0, .5, 0, .05);
     kutu(sg, .74, .7, .1, '#8d8276', 0, .92, -.33, .05);
     kutu(sg, .1, .42, .1, '#6f665c', 0, .26, 0, .03);
-    const kedi = createCat({ desen:u.id === 'pazarlama' ? 'pembe' : DESEN[i % DESEN.length], ton:0 });
+    const kedi = mentorKarakteri(u, i);
     kedi.group.position.set(0, .56, 0); sg.add(kedi.group);
     const halka = new THREE.Mesh(new THREE.RingGeometry(.55, .72, 32), new THREE.MeshBasicMaterial({ color:'#ff7a59', transparent:true, opacity:0, depthWrite:false }));
     halka.rotation.x = -Math.PI / 2; halka.position.y = .03; sg.add(halka);
@@ -1366,9 +1394,14 @@ if (kurulOda) {
       const z = new THREE.Sprite(new THREE.SpriteMaterial({ map:zDoku, transparent:true, depthWrite:false }));
       z.scale.setScalar(.3); z.visible = false; sg.add(z); return z;
     });
-    const m = { id:u.id, ad:u.ad, uzmanlik:String(u.uzmanlik || ''), tecrube:String(u.tecrube || ''), kedi, halka, etiket, zler, durum:'bos', ozet:'', parla:0, faz:i * 1.3 };
+    const m = { id:u.id, ad:u.ad, uzmanlik:String(u.uzmanlik || ''), tecrube:String(u.tecrube || ''), kedi, sira:i, kaynak:u, halka, etiket, zler, durum:'bos', ozet:'', parla:0, faz:i * 1.3 };
     KURUL.push(m); kurulEtiketCiz(m);
   });
+}
+function mentorKarakteri(u, i) {
+  if (GORUNUM === 'duygu') return createDuygu({ tur:duyguSirayla(i) });
+  const DESEN = ['smokin', 'sarman', 'siyam', 'gri-beyaz', 'tekir-gri', 'siyah', 'tekir'];
+  return createCat({ desen:u.id === 'pazarlama' ? 'pembe' : DESEN[i % DESEN.length], ton:0 });
 }
 function kurulDurum(uyeId, durum, ozet = '') {
   const m = KURUL.find(x => x.id === uyeId); if (!m) return;
@@ -1403,6 +1436,9 @@ function kurulAnimasyon(t, dt) {
 }
 
 /* ---------- çaycı kedi: kurumsal takımlı, tepsili tekerlekli arabasıyla rastgele odalara girer, espri + ajan yapılandırma ipucu verir ---------- */
+function cayciKarakteri() {
+  return GORUNUM === 'duygu' ? createDuygu({ tur:'neseli', ton:.5 }) : createCat({ desen:'sarman', ton:0, aksesuar:{ takim:true } });
+}
 const cayci = (() => {
   if (!ODALAR.length) return null;
   const dOrta = Math.max(...ODALAR.filter(o => Math.abs(o.cz) < .01).map(o => o.d), 0);
@@ -1415,7 +1451,7 @@ const cayci = (() => {
     const t = new THREE.Mesh(new THREE.CylinderGeometry(.11, .11, .1, 16), mat('#2b2828'));
     t.rotation.z = Math.PI / 2; t.position.set(x, .11, z); t.castShadow = true; g.add(t);
   });
-  const kedi = createCat({ desen:'sarman', ton:0, aksesuar:{ takim:true } });
+  const kedi = cayciKarakteri();
   kedi.group.position.set(0, .28, -.05); kedi.setDurum('dusunuyor'); g.add(kedi.group);
   const tepsi = new THREE.Mesh(new THREE.CylinderGeometry(.22, .22, .03, 24), mat('#d6ad52')); tepsi.position.set(0, .78, .5); tepsi.castShadow = true; g.add(tepsi);
   const bardak = new THREE.Mesh(new THREE.CylinderGeometry(.07, .05, .13, 14), new THREE.MeshStandardMaterial({ color:'#b8501e', transparent:true, opacity:.85, roughness:.2 }));
@@ -1699,7 +1735,7 @@ selamla(); setInterval(selamla, 30000);
 function avatar(ajanId, sinif = '') {
   const a = ajanBul(ajanId), foto = PORTRE.get(ajanId);
   const d = el('span', 'avatar' + (foto ? ' foto' : '') + (sinif ? ' ' + sinif : ''), foto ? null : (a?.ad || ajanId || '?').slice(0, 1).toLocaleUpperCase('tr-TR'));
-  if (foto) d.style.backgroundImage = 'url(' + foto + ')'; else d.style.background = ajanRenk(ajanId);
+  if (foto) { d.style.backgroundImage = 'url(' + foto + ')'; d.dataset.portre = ajanId; } else d.style.background = ajanRenk(ajanId);
   return d;
 }
 /* Küçük, güvenli markdown çizici: yalnız DOM düğümleri üretir (innerHTML yok) */
@@ -2089,6 +2125,7 @@ function olayIsle(o) {
       hafiza.forEach(m => akisEkle(o.ajan, 'Hafızaya eklendi: ' + kisa(m, 90), '', 'hafiza', zaman, 'Hafızaya eklendi: ' + m));
       if (o.durum !== 'hata') kartEkle(o);
       if (a) altAjanTemizle(a.id);
+      if (a) { a.sonHata = o.durum === 'hata'; aniKaydet(a.id, a.sonHata); }   // duygu görünümü: hata ifadesi + anı küresi
       if (a && !tekrar) {
         ajanBitir(a, o); SES.bitti(); isikAkit(a.oda, true, hafiza.length ? '#e0a53a' : '#ff7a59');
         if (hafiza.length) setTimeout(() => { cekirdekParla(1.4); SES.hafiza(); }, 1300);
@@ -2176,7 +2213,7 @@ function altAjanEkle(a, detay) {
   g.position.copy(a.grup.position).add(new THREE.Vector3(-1.1 + i * 1.1, 0, 2.05));
   g.scale.setScalar(ALT_OLCEK);
   // yavru kedi: ananın deseni, yarı saydam
-  const kedi = createCat({ desen:a.kedi?.desen || 'tekir', yavru:true });
+  const kedi = a.kedi?.duygu ? createDuygu({ tur:a.kedi.tur, yavru:true }) : createCat({ desen:a.kedi?.desen || 'tekir', yavru:true });
   kedi.setDurum('calisiyor'); g.add(kedi.group);
   // yavruya basınca ananın paneli açılır (alt-ajanlar orada listelenir)
   const hit = new THREE.Mesh(new THREE.BoxGeometry(1.9, 2.4, 2.4), new THREE.MeshBasicMaterial());
@@ -2190,7 +2227,7 @@ function altAjanEkle(a, detay) {
 function altAjanTemizle(anaId, yalnizTerminal = false) {
   for (let i = altAjanlar.length - 1; i >= 0; i--) {
     const x = altAjanlar[i]; if (x.ana !== anaId || (yalnizTerminal && !x.terminal)) continue;
-    scene.remove(x.grup); altAjanlar.splice(i, 1);
+    scene.remove(x.grup); x.kedi?.dispose?.(); altAjanlar.splice(i, 1);
     const h = secilebilir.indexOf(x.hit); if (h >= 0) secilebilir.splice(h, 1);
     const e = etiketler.get(x.id); if (e) { e.d.remove(); etiketler.delete(x.id); }
   }
@@ -3844,7 +3881,8 @@ const saat = new THREE.Clock();
 let ledZaman = 0, panelZaman = 0, hatZaman = 0;
 function ajanAnimasyon(a, t, dt) {
   const uyku = a.durum === 'uyku' || a.durum === 'bekliyor';
-  a.kedi.setDurum(uyku ? 'uyuyor' : a.durum === 'bitti' || a.durum === 'dusunuyor' ? a.durum : 'calisiyor');
+  if (a.kedi.duygu) a.kedi.setDurum(a.durum === 'uyku' ? 'uyuyor' : a.durum === 'bekliyor' ? 'bosta' : a.durum === 'bitti' && a.sonHata ? 'hata' : a.durum === 'bitti' || a.durum === 'dusunuyor' ? a.durum : 'calisiyor');
+  else a.kedi.setDurum(uyku ? 'uyuyor' : a.durum === 'bitti' || a.durum === 'dusunuyor' ? a.durum : 'calisiyor');
   a.kedi.update(dt);
   a.lamba.material.color.set(uyku ? '#b9ad9e' : '#ff7a59');
   a.zler.forEach((s, i) => {
@@ -3891,6 +3929,7 @@ function dongu() {
     if (KURUL.some(m => m.durum === 'dinliyor')) isikAkit('kurul', false, '#d6ad52');
   }
   animGuvenli('kurul', kurulAnimasyon, t, dt); animGuvenli('çaycı', cayciAnimasyon, t, dt);
+  animGuvenli('görünüm', gorunumGuncelle, t, dt);
   altMasalar.forEach(m => { if (t - m.zaman > .5) { m.zaman = t; altMasaCiz(m); m.ekran.t.needsUpdate = true; } });
   if (t - panelZaman > .5) { panelZaman = t; if (panelAjan && ajanBul(panelAjan)?.durum !== 'uyku') panelYenile(); }
   controls.update();
@@ -3900,6 +3939,56 @@ function dongu() {
   requestAnimationFrame(dongu);
 }
 addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); gorusKaydir(); });
+
+/* ---------- görünüm seçici: Kediler / Duygular (sayfa yenilemeden figürler ve dekor yeniden kurulur) ---------- */
+function karakterDegistir(eski, yeni) {
+  const ust = eski.group.parent, p = eski.group.position.clone(), r = eski.group.rotation.clone();
+  ust?.remove(eski.group); eski.dispose?.();
+  yeni.group.position.copy(p); yeni.group.rotation.copy(r); ust?.add(yeni.group);
+  return yeni;
+}
+function kontrolOdasiAc() {
+  kontrolOdasi?.dispose();
+  kontrolOdasi = kontrolOdasiKur({ odalar:ODALAR, ajanlar:AJANLAR, anilar:ANILAR, tur:ajanDuyguTuru });
+  scene.add(kontrolOdasi.grup);
+}
+function gorunumUygula(yeni) {
+  if (yeni !== 'duygu') yeni = 'kedi';
+  if (yeni === GORUNUM) return;
+  GORUNUM = yeni;
+  try { localStorage.setItem(GORUNUM_K, yeni); } catch { /* seçim yalnız bu oturumda kalır */ }
+  meme.kapat();
+  AJANLAR.forEach(a => { if (a.kedi) a.kedi = karakterDegistir(a.kedi, ajanKarakteri(a)); });
+  KURUL.forEach(m => { m.kedi = karakterDegistir(m.kedi, mentorKarakteri(m.kaynak, m.sira)); });
+  if (cayci) { cayci.kedi = karakterDegistir(cayci.kedi, cayciKarakteri()); cayci.kedi.setDurum('dusunuyor'); }
+  if (yeni === 'duygu') kontrolOdasiAc(); else { kontrolOdasi?.dispose(); kontrolOdasi = null; }
+  PORTRE = portreUret();
+  document.querySelectorAll('.avatar[data-portre]').forEach(d => { const f = PORTRE.get(d.dataset.portre); if (f) d.style.backgroundImage = 'url(' + f + ')'; });
+  gorunumDugmeCiz();
+  panelYenile();
+}
+const gorunumDugme = $('gorunumDugme');
+function gorunumDugmeCiz() {
+  const duygu = GORUNUM === 'duygu';
+  gorunumDugme.setAttribute('aria-pressed', String(duygu));
+  gorunumDugme.title = duygu ? 'Görünüm: Duygular · kedilere dön' : 'Görünüm: Kediler · duygu karakterlerine geç';
+}
+gorunumDugme.addEventListener('click', () => { SES.tik(); gorunumUygula(GORUNUM === 'duygu' ? 'kedi' : 'duygu'); });
+gorunumDugmeCiz();
+if (GORUNUM === 'duygu') kontrolOdasiAc();
+// düşük FPS'te duygu ışıması kapanır (3 sn ortalama), toparlanınca geri gelir
+let fpsKare = 0, fpsBas = performance.now(), parilti = true;
+function gorunumGuncelle(t) {
+  if (GORUNUM !== 'duygu') return;
+  kontrolOdasi?.update(t);
+  fpsKare++;
+  const simdi = performance.now(), gecen = simdi - fpsBas;
+  if (gecen < 3000) return;
+  const fps = fpsKare * 1000 / gecen; fpsKare = 0; fpsBas = simdi;
+  if (gecen > 6000) return;   // sekme arka plandaydı ya da görünüm yeni açıldı: ölçüm sayılmaz
+  if (parilti && fps < 28) parilti = false; else if (!parilti && fps > 45) parilti = true; else return;
+  parlamaAyarla(parilti);
+}
 
 /* ---------- başlangıç ---------- */
 kartlariCiz();

@@ -6,7 +6,8 @@ import { memeBul } from './meme.js';
 
 const BOYUT = 256;
 
-export function portreleriUret(ajanlar, { desen, aksesuar, renk }) {
+// karakter(a) verilirse (duygu görünümü) kedi yerine o karakter çizilir; meme pozu yalnız kedide uygulanır
+export function portreleriUret(ajanlar, { desen, aksesuar, renk, karakter }) {
   const sonuc = new Map();
   let r;
   try {
@@ -21,16 +22,16 @@ export function portreleriUret(ajanlar, { desen, aksesuar, renk }) {
   const bas = new THREE.Vector3(), ileri = new THREE.Vector3(), q = new THREE.Quaternion();
 
   ajanlar.forEach(a => {
-    const kedi = createCat({ desen:desen(a), aksesuar:aksesuar(a) });
+    const kedi = karakter ? karakter(a) : createCat({ desen:desen(a), aksesuar:aksesuar(a) });
     sahne.add(kedi.group);
-    const m = memeBul(a.id, a.oda);
+    const m = karakter ? null : memeBul(a.id, a.oda);
     if (m) {
       // takılan aksesuarlar (kapüşon, ahize) kediye bağlanır; dekor grubu sahneye eklenmez
       m.sahne?.(new THREE.Group(), {}, kedi);
       kedi.setMeme(m.kedi, { aninda:true });
       if (m.kedi.kontur) kedi.setKontur(m.kedi.kontur);
-    } else kedi.setDurum('calisiyor');
-    kedi.update(1 / 60);
+    } else kedi.setDurum(karakter ? 'bosta' : 'calisiyor');
+    kedi.update(karakter ? 1 : 1 / 60);   // duygu: yüz ifadesi hedefine otursun
     kedi.group.updateMatrixWorld(true);
     kedi.dugum.bas.getWorldPosition(bas);
     kedi.dugum.bas.getWorldQuaternion(q);
@@ -42,6 +43,7 @@ export function portreleriUret(ajanlar, { desen, aksesuar, renk }) {
     r.render(sahne, kamera);
     sonuc.set(a.id, r.domElement.toDataURL('image/jpeg', .9));
     sahne.remove(kedi.group);
+    kedi.dispose?.();
   });
   r.dispose(); r.forceContextLoss();
   return sonuc;
