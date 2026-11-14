@@ -175,6 +175,18 @@ açtığın oturum da eşlenir) > `varsayilan`. `varsayilan` yazılmazsa eşleş
 eşleşmeyenler gizlenir. `gizle` listesindeki parçayı taşıyan oturum hiçbir eşlemeyle gösterilmez. Ofisin kendi
 `claude -p` koşuları ve diğer etkileşimsiz koşular varsayılana düşmez.
 
+**Ana ajan ve Geliştirme hattı (sanal gözlem masaları):** `ajanlar.json`'a yazılmazlar, kodda sabittir
+(`ortak.SANAL_AJANLAR`); CEO odasında iki yan masada otururlar. İş atanamaz, zamanlanamaz, kuyruğa alınamaz; panelde
+yalnız durum ve token görünür, ajan sayısına girmezler. `kopru.json` anahtarları (yazılmazsa varsayılanlar çalışır):
+- `ana_ajan_cwd` (varsayılan `["~"]`): yalnız bu klasörün **tam kendisinde** açılan etkileşimli oturum (terminal ya da
+  masaüstü) "Ana ajan" masasına düşer; alt klasörler eski kurallarla eşlenir. Aynı klasöre açık `cwd`/`pencere`
+  eşlemesi varsa o kazanır.
+- `hat_cwd` (varsayılan `["~/beyin-is/wt"]`): bu klasörün altındaki her oturum, `bin/calistir`'ın etkileşimsiz
+  `claude -p` koşuları dahil, "Geliştirme hattı" masasına düşer. Koşu adı worktree adıdır (`<proje>-<dal>`); son
+  mesajından 5 dakika sonra kapanır. Maliyet sekmesinde koşu başına bir satır olur (Kaynak: `hat`).
+- `[]` yazmak eşlemeyi kapatır; `gizle` ve `atla_cwd` ikisinin de üstündedir. Gizlilik kuralı aynıdır: yalnız araç adı
+  ve kısa hedef. Ev klasörü eşlemesi kendi özel oturumlarını ofiste görünür yapar; istemiyorsan `"ana_ajan_cwd": []`.
+
 **Kediye (ya da yanındaki yavruya) basınca** panelde "Şu an" bölümü açılır: o ajana bağlı her oturum, ne yaptığı ve
 o oturumun alt-ajanları (görev başlığı, tür, model, son araç; son 30 dakika). Alt-ajan bilgisi
 `<oturum>/subagents/agent-*.meta.json` ve transkript kuyruğundan okunur, mesaj metni okunmaz.
@@ -202,7 +214,10 @@ sayılır, `message.id` ile tekilleştirilir (aynı mesaj iki kez sayılmaz), ka
 Dört alan gösterilir: girdi, çıktı, önbelleğe yazılan, **önbellekten okunan**. Önbellekten okunan token, her turda
 yeniden okunan bağlamdır (CLAUDE.md, önceki mesajlar); yeni işlenen iş değildir ve çok daha ucuz faturalanır, ama
 toplamda en büyük sayı odur. Maliyet sekmesi yalnız `claude -p`'nin bildirdiği `total_cost_usd` toplamını gösterir
-(API liste fiyatı karşılığı; abonelikte faturaya yansıyan tutar değildir).
+(API liste fiyatı karşılığı; abonelikte faturaya yansıyan tutar değildir). Tabloda "Kaynak" sütunu satırın nereden
+geldiğini söyler: `ofis` (ofis koşusu), `terminal` (köprünün eşlediği oturum), `hat` (geliştirme hattı koşusu).
+Terminal ve hat satırlarında token gerçek usage'dandır, USD ölçülemediği için `—` kalır; Ana ajan ve Geliştirme hattı
+özet kutularında ayrı toplam olarak da görünür.
 
 ### API
 | Uç | Ne |

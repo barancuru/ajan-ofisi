@@ -6,6 +6,9 @@ transkripti verir; transkript ofsetle tail edilir. Olay akışına YALNIZ araç 
 mesaj metni, prompt içeriği, dosya içeriği hiçbir zaman yazılmaz.
 Eşleme: kopru.json (kopru.example.json'dan kopyala). `gizle` listesindeki parçayı cwd'sinde ya da tmux
 oturum adında taşıyan oturum hiçbir eşlemeyle gösterilmez.
+Sanal gözlem ajanları (ortak.SANAL_AJANLAR, iş atanamaz): `hat_cwd` (varsayılan ["~/beyin-is/wt"], alt klasörler
+ve etkileşimsiz `claude -p` koşuları dahil) → gelistirme-hatti, koşu başına bir satır; `ana_ajan_cwd` (varsayılan
+["~"], yalnız tam klasör, etkileşimli oturum) → ana-ajan. İkisi de `gizle`/`atla_cwd`'nin altında kalır; `[]` kapatır.
 """
 import json
 import os
@@ -40,6 +43,37 @@ KAYITLI_GIRIS = "cli"           # ~/.claude/sessions'a kayıt bırakan tek giri�
 ALT_KUYRUK = 256_000            # alt-ajanın son aracı için okunan kuyruk
 ALT_MAKS = 8                    # oturum başına gösterilen en fazla alt-ajan
 MESAJ_TURU = re.compile(r'"type"\s*:\s*"(user|assistant)"')
+ANA_AJAN = "ana-ajan"
+HAT_AJAN = "gelistirme-hatti"
+ANA_AJAN_CWD = ["~"]            # kopru.json `ana_ajan_cwd` yoksa
+HAT_CWD = ["~/beyin-is/wt"]     # kopru.json `hat_cwd` yoksa
+HAT_ACIK_SN = 5 * 60            # son mesajı bu kadar eski hat koşusu bitti sayılır (uzun araç çağrısı kapatmasın)
+
+
+def yol_listesi(deger, varsayilan):
+    """kopru.json'daki yol listesi (tek metin de olur) → normalize mutlak yollar. Anahtar yoksa varsayılan; [] kapatır."""
+    if deger is None:
+        deger = varsayilan
+    elif isinstance(deger, str):
+        deger = [deger]
+    elif not isinstance(deger, list):
+        deger = varsayilan
+    return [os.path.normpath(os.path.expanduser(x)) for x in deger if isinstance(x, str) and x.strip()]
+
+
+def kok_bul(cwd, kokler):
+    """cwd'yi içeren (kendisi ya da üst klasörü olan) ilk kök; yoksa None."""
+    yol = os.path.normpath(cwd or "/")
+    for kok in kokler:
+        if yol == kok or yol.startswith(kok.rstrip(os.sep) + os.sep):
+            return kok
+    return None
+
+
+def hat_etiketi(cwd, kok):
+    """Hat koşusunun etiketi: kökün altındaki ilk klasör, yani worktree adı (<proje>-<dal>)."""
+    ilk = os.path.relpath(os.path.normpath(cwd), kok).split(os.sep)[0]
+    return _temiz(os.path.basename(kok) if ilk in (".", "") else ilk, 60)
 
 
 def gizli_mi(cwd, tmux_oturum, gizle):
@@ -307,16 +341,23 @@ class Kopru:
     def ajan_bul(self, cwd, tmux_oturum, pencere_adi, etkilesimli=True):
         """(ajan, gizli): eşleme sırası tmux pencere adı > cwd (en yakın üst klasör dahil) > `varsayilan`
         (yazılmamışsa ilk ajan; "" yazılırsa eşleşmeyen oturum gizlenir). `claude -p` gibi etkileşimsiz
-        koşular (ofisin kendi koşuları dahil) varsayılana düşmez, yalnız açık eşlemeyle görünür."""
+        koşular (ofisin kendi koşuları dahil) varsayılana düşmez, yalnız açık eşlemeyle görünür.
+        `gizle`/`atla_cwd` her şeyin üstünde; sonra `hat_cwd` (etkileşimsiz dahil) → gelistirme-hatti;
+        `ana_ajan_cwd` (tam klasör, etkileşimli) → ana-ajan, yalnız aynı klasöre açık pencere/cwd eşlemesi yoksa."""
         e = self.esleme
         if gizli_mi(cwd, tmux_oturum, e.get("gizle")):
             return None, True
         if cwd in {os.path.expanduser(x) for x in (e.get("atla_cwd") or [])}:
             return None, True
+        if HAT_AJAN in self.ajanlar and kok_bul(cwd, yol_listesi(e.get("hat_cwd"), HAT_CWD)):
+            return HAT_AJAN, False
         cwd_esleme = {os.path.normpath(os.path.expanduser(k)): v for k, v in (e.get("cwd") or {}).items()}
         pencere_esleme = {os.path.normpath(os.path.expanduser(k)): v for k, v in (e.get("pencere") or {}).items()}
         pencereler = en_yakin(pencere_esleme, cwd)
+        yol = os.path.normpath(cwd or "/")
+        ana = ANA_AJAN if etkilesimli and yol in yol_listesi(e.get("ana_ajan_cwd"), ANA_AJAN_CWD) else None
         adaylar = ((pencereler or {}).get(pencere_adi or "") if isinstance(pencereler, dict) else None,
+                   cwd_esleme.get(yol), ana,
                    en_yakin(cwd_esleme, cwd), e.get("varsayilan", self.ilk_ajan()) if etkilesimli else None)
         for ajan in adaylar:
             if isinstance(ajan, str) and ajan != "ceo" and ajan in self.ajanlar:
@@ -325,7 +366,7 @@ class Kopru:
 
     def ilk_ajan(self):
         """`varsayilan` yazılmamışsa eşleşmeyen oturum ilk ajanda görünür: hiçbir oturum sessizce kaybolmaz."""
-        return next((a for a in self.ajanlar if a != "ceo"), None)
+        return next((a for a, v in self.ajanlar.items() if a != "ceo" and not v.get("sanal")), None)
 
     def eslenmedi_uyar(self, sid, cwd, pencere_adi):
         """Eşlenemeyen oturum için sunucu günlüğüne oturum başına bir kez ipucu (yalnız klasör ve pencere adı)."""
@@ -357,7 +398,8 @@ class Kopru:
                 continue
             if isinstance(d, dict) and d.get("sessionId") and d.get("cwd"):
                 sonuc[pid] = d
-        sonuc.update(self.masaustu_oturumlari())
+        kayitli = {str(d["sessionId"]) for d in sonuc.values()}
+        sonuc.update({k: v for k, v in self.masaustu_oturumlari().items() if v["sessionId"] not in kayitli})
         return sonuc
 
     def masaustu_oturumlari(self):
@@ -368,6 +410,8 @@ class Kopru:
             return self.masaustu
         self.masaustu_zaman = time.time()
         sinir, yeni, gorulen = time.time() - MASAUSTU_ACIK_SN, {}, {}
+        hat_sinir = time.time() - HAT_ACIK_SN
+        hat_kokleri = yol_listesi(self.esleme.get("hat_cwd"), HAT_CWD) if HAT_AJAN in self.ajanlar else []
         try:
             klasorler = list(os.scandir(PROJE_DIZINI))
         except OSError:
@@ -388,12 +432,14 @@ class Kopru:
                 giris, cwd = self.bas_onbellek.get(dosya.path) or transkript_basi(dosya.path)
                 if giris and cwd:            # eksik baş (yeni açılmış dosya) önbelleğe girmez, sonraki turda yeniden okunur
                     gorulen[dosya.path] = (giris, cwd)
-                if not giris or giris == KAYITLI_GIRIS or giris.startswith("sdk") or not cwd \
+                # geliştirme hattının `claude -p` koşusu (sdk) da kayıt bırakmaz; yalnız hat kökü altındaysa alınır
+                hat = bool(giris and cwd and giris.startswith("sdk") and hat_kokleri and kok_bul(cwd, hat_kokleri))
+                if not giris or giris == KAYITLI_GIRIS or (giris.startswith("sdk") and not hat) or not cwd \
                         or proje_klasoru(cwd) != klasor.name:
                     continue
-                if self.mesaj_zamani(dosya) < sinir:      # yalnız meta satırı eklenmiş eski sohbet
+                if self.mesaj_zamani(dosya) < (hat_sinir if hat else sinir):   # yalnız meta satırı eklenmiş eski sohbet
                     continue
-                kaynak = "masaüstü" if giris == MASAUSTU_GIRIS else giris.replace("claude-", "")
+                kaynak = "hat" if hat else "masaüstü" if giris == MASAUSTU_GIRIS else giris.replace("claude-", "")
                 yeni[f"masaustu:{sid}"] = {"sessionId": sid, "cwd": cwd, "entrypoint": giris,
                                            "name": f"{kaynak} · {os.path.basename(cwd) or cwd}"}
         self.bas_onbellek = gorulen
@@ -414,8 +460,12 @@ class Kopru:
         cwd, sid = d["cwd"], str(d["sessionId"])
         yol = os.path.join(PROJE_DIZINI, proje_klasoru(cwd), f"{sid}.jsonl") \
             if re.fullmatch(r"[A-Za-z0-9-]+", sid) else None
+        ad = _temiz(d.get("name") or f"pid-{pid}", 60)
+        if ajan == HAT_AJAN:                      # koşu etiketi: worktree adı (<proje>-<dal>)
+            kok = kok_bul(cwd, yol_listesi(self.esleme.get("hat_cwd"), HAT_CWD))
+            ad = hat_etiketi(cwd, kok) if kok else ad
         k = {"pid": pid, "sid": sid, "yol": yol, "ofset": 0, "son_satir_ts": 0.0,
-             "ajan": ajan, "oda": self.ajanlar[ajan]["oda"], "oturum_adi": _temiz(d.get("name") or f"pid-{pid}", 60),
+             "ajan": ajan, "oda": self.ajanlar[ajan]["oda"], "oturum_adi": ad,
              "pencere_adi": _temiz(pencere_adi or "", 60), "tmux_oturum": tmux_oturum,
              "son_arac": None, "son_hedef": None, "model": None, "durum": None, "yayinlanan": None,
              "tekil": {}, "token_bekleyen": set()}
@@ -473,7 +523,8 @@ class Kopru:
 
     def tur(self):
         self.esleme_yukle()
-        _, self.ajanlar = ortak.ajanlari_yukle()
+        _, tablo = ortak.ajanlari_yukle()
+        self.ajanlar = {**tablo, **ortak.sanal_ajanlar(tablo)}
         self.tmux_tazele()
         canli = self.canli_oturumlar()
         olaylar = []
@@ -531,7 +582,8 @@ class Kopru:
             ilk = not k["token_ilk_yazildi"]
             ajan_gun = None
             for tarih in sorted(k["token_bekleyen"]):
-                g = token_sayac.kayit_koy(tarih, "_oturumlar", k["sid"], k["ajan"], k["tekil"][tarih].toplam)
+                g = token_sayac.kayit_koy(tarih, "_oturumlar", k["sid"], k["ajan"], k["tekil"][tarih].toplam,
+                                          etiket=k["oturum_adi"], model=k.get("model"))
                 if tarih == ortak.bugun():
                     ajan_gun = g
             k["token_bekleyen"] = set()

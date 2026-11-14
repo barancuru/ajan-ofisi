@@ -1,5 +1,6 @@
 {
   "_not": "Bu dosyayı ajanlar.json olarak kopyala ve kendi ajanlarını yaz. ajanlar.json .gitignore'dadır; yolların ve prompt'ların repoya girmez.",
+  "_not_sanal": "'ana-ajan' (Ana ajan) ve 'gelistirme-hatti' (Geliştirme hattı) id'leri kodda sabit sanal gözlem masalarıdır (ortak.SANAL_AJANLAR); buraya yazma. İş atanamaz, zamanlanamaz; terminal köprüsü onlara kopru.json 'ana_ajan_cwd' ve 'hat_cwd' ile oturum eşler. Aynı id'yle gerçek ajan yazarsan sanal masa kurulmaz.",
   "_ssh_ornek": {
     "_not": "Yalnız örnek (yok sayılır). SSH isteyen ajanın nesnesine 'ssh' olarak kopyala ve gerçek değerleri KENDİN doldur. Anahtar parolasız ve chmod 600 olmalı; host önce known_hosts'a elle eklenmeli.",
     "ssh": {

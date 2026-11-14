@@ -3,7 +3,7 @@
 Kalıcı dosya: durum/token-<YYYY-MM-DD>.json
   {"<ajan>": {"ofis": {4 alan}, "terminal": {4 alan}},          ← toplam görünüm (türetilir)
    "_kosular": {"<kosu_id>": {"ajan": .., "usage": {4 alan}}},   ← ofis koşusu başına (değiştirilerek yazılır)
-   "_oturumlar": {"<session_id>": {"ajan": .., "usage": {..}}}}   ← terminal oturumu başına (değiştirilerek yazılır)
+   "_oturumlar": {"<session_id>": {"ajan": .., "usage": {..}, "ilk", "etiket", "model"}}}   ← terminal oturumu / hat koşusu başına
 Kayıtlar "ekle" değil "yerine koy" ile yazılır: aynı koşu/oturum yeniden sayılırsa çift sayılmaz.
 Süreçler arası (sunucu + kosucu) fcntl kilidiyle korunur.
 """
@@ -104,12 +104,22 @@ def _yaz(tarih, veri):
     return tam
 
 
-def kayit_koy(tarih, tur, anahtar, ajan, usage):
-    """tur: '_kosular' | '_oturumlar'. Kaydı yerine koyar; ajanın o günkü {ofis, terminal} değerini döndürür."""
+def kayit_koy(tarih, tur, anahtar, ajan, usage, etiket=None, model=None):
+    """tur: '_kosular' | '_oturumlar'. Kaydı yerine koyar; ajanın o günkü {ofis, terminal} değerini döndürür.
+    etiket/model (terminal oturumu adı, model kimliği) yalnız Maliyet tablosu için; metin içeriği değildir."""
     with _kilitli():
         veri = _oku(tarih)
         bolum = dict(veri.get(tur) or {})
-        bolum[anahtar] = {"ajan": ajan, "usage": usage_al(usage)}
+        onceki = bolum.get(anahtar) if isinstance(bolum.get(anahtar), dict) else {}
+        kayit = {"ajan": ajan, "usage": usage_al(usage)}
+        if tur == "_oturumlar":
+            kayit["ilk"] = onceki.get("ilk") or ortak.simdi_iso()
+            for ad, deger in (("etiket", etiket), ("model", model)):
+                if isinstance(deger, str) and deger:
+                    kayit[ad] = deger[:60]
+                elif onceki.get(ad):
+                    kayit[ad] = onceki[ad]
+        bolum[anahtar] = kayit
         tam = _yaz(tarih, {**veri, tur: bolum})
     return tam.get(ajan, {"ofis": bos(), "terminal": bos()})
 
@@ -141,6 +151,22 @@ def disari(ajan_kaydi):
     return {"toplam": sum(h.values()), "girdi": h["input_tokens"], "cikti": h["output_tokens"],
             "onbellek_yazma": h["cache_creation_input_tokens"], "onbellek_okuma": h["cache_read_input_tokens"],
             "ofis_toplam": sum(o.values()), "terminal_toplam": sum(t.values())}
+
+
+HAT_AJAN = "gelistirme-hatti"
+
+
+def oturum_satirlari(tarih):
+    """Maliyet tablosu için terminal oturumu başına satır (hat koşusu = bir oturum). Kaynak: hat | terminal."""
+    satirlar = []
+    for sid, k in (_oku(tarih).get("_oturumlar") or {}).items():
+        if not isinstance(k, dict) or not k.get("ajan"):
+            continue
+        u = usage_al(k.get("usage"))
+        satirlar.append({"oturum": str(sid)[:8], "ajan": k["ajan"], "kaynak": "hat" if k["ajan"] == HAT_AJAN else "terminal",
+                         "etiket": k.get("etiket") or "", "model": k.get("model") or "", "ilk": k.get("ilk") or "",
+                         "kullanim": u, "toplam": sum(u.values())})
+    return sorted(satirlar, key=lambda s: s["ilk"])
 
 
 def api_yaniti():

@@ -358,5 +358,19 @@
    "son_maddeler": [],
    "guncelleme": "2026-01-01T08:00:00"
   }
- ]
+ ],
+ "sanal": [
+  {"id": "ana-ajan", "ad": "Ana ajan", "oda": "ceo", "sanal": true, "aciklama": "Ev klasöründe kendi açtığın Claude Code oturumu. Yalnız gözlenir; iş atanmaz."},
+  {"id": "gelistirme-hatti", "ad": "Geliştirme hattı", "oda": "ceo", "sanal": true, "aciklama": "bin/calistir'ın worktree'lerdeki geliştirme koşuları. Yalnız gözlenir; iş atanmaz."}
+ ],
+ "sanal_ornek": {
+  "oturumlar": [
+   {"ajan": "ana-ajan", "kaynak": "terminal", "etiket": "terminal · ~", "model": "claude-opus-5-5", "dk": 95,
+    "kullanim": {"input_tokens": 210, "output_tokens": 18400, "cache_creation_input_tokens": 84200, "cache_read_input_tokens": 2150000}},
+   {"ajan": "gelistirme-hatti", "kaynak": "hat", "etiket": "homeos-1114-isik-sahnesi", "model": "claude-sonnet-5-5", "dk": 70,
+    "kullanim": {"input_tokens": 96, "output_tokens": 9100, "cache_creation_input_tokens": 51800, "cache_read_input_tokens": 980000}},
+   {"ajan": "gelistirme-hatti", "kaynak": "hat", "etiket": "ajan-ofisi-1114-ofiste-ana-ajan", "model": "claude-opus-5-5", "dk": 12,
+    "kullanim": {"input_tokens": 140, "output_tokens": 12600, "cache_creation_input_tokens": 66300, "cache_read_input_tokens": 1420000}}
+  ]
+ }
 }

@@ -134,6 +134,21 @@ def ajanlari_yukle():
     return veri, tablo
 
 
+# Sanal gözlem ajanları: ajanlar.json'a yazılmaz, iş atanamaz/zamanlanamaz/kuyruğa alınamaz.
+# Yalnız terminal köprüsü onlara oturum eşler (kopru.json `ana_ajan_cwd`, `hat_cwd`); durum ve token gösterilir.
+SANAL_AJANLAR = {
+    "ana-ajan": {"id": "ana-ajan", "ad": "Ana ajan", "oda": "ceo", "sanal": True,
+                 "aciklama": "Ev klasöründe kendi açtığın Claude Code oturumu. Yalnız gözlenir; iş atanmaz."},
+    "gelistirme-hatti": {"id": "gelistirme-hatti", "ad": "Geliştirme hattı", "oda": "ceo", "sanal": True,
+                         "aciklama": "bin/calistir'ın worktree'lerdeki geliştirme koşuları. Yalnız gözlenir; iş atanmaz."},
+}
+
+
+def sanal_ajanlar(tablo=None):
+    """ajanlar.json'da aynı id'li gerçek ajan yoksa sanal ajanlar (kopya)."""
+    return {k: dict(v) for k, v in SANAL_AJANLAR.items() if k not in (tablo or {})}
+
+
 def ayarlar(veri):
     """Arayüz ayarları: kullanıcı adı (selamlama) ve marka. İkisi de isteğe bağlı."""
     a = veri.get("ayarlar") if isinstance(veri.get("ayarlar"), dict) else {}

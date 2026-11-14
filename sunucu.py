@@ -966,8 +966,10 @@ def ajanlar_yaniti():
     odalar = [o for o in (veri.get("odalar") or []) if isinstance(o, dict) and isinstance(o.get("id"), str)
               and ortak.ODA_ID_DESENI.fullmatch(o["id"])]
     kurul = [{k: u[k] for k in ("id", "ad", "uzmanlik", "tecrube")} for u in kurul_yukle()]
+    # sanal gözlem ajanları ayrı listede: iş verilemez, durumları yalnız terminal köprüsünden gelir
+    sanal = [{k: v[k] for k in ("id", "ad", "oda", "aciklama", "sanal")} for v in ortak.sanal_ajanlar(tablo).values()]
     return {"ajanlar": liste, "odalar": odalar, "ayarlar": ortak.ayarlar(veri), "tmux_oturum": TMUX_OTURUM,
-            "kurul": kurul}
+            "kurul": kurul, "sanal": sanal}
 
 
 def sayac_yaniti():
@@ -984,8 +986,12 @@ def sayac_yaniti():
             maliyet += o["maliyet_usd"]
             maliyet_olculen += 1
     _, tablo = ortak.ajanlari_yukle()
+    oturumlar = token_sayac.oturum_satirlari(bugun)
+    sanal_toplam = {a: sum(s["toplam"] for s in oturumlar if s["ajan"] == a) for a in ortak.sanal_ajanlar(tablo)}
     return {
         "tarih": bugun,
+        "oturumlar": oturumlar,
+        "sanal_toplam": sanal_toplam,
         "bugun_kosu": sum(1 for o in biten if o["tur"] == "kosu_bitti"),
         "bugun_ceo": sum(1 for o in biten if o["tur"] == "ceo_bitti"),
         "aktif_ajan": sum(1 for i in tablo if ortak.ajan_mesgul(i)),

@@ -9,6 +9,9 @@
     }
   },
   "varsayilan": "kod-inceleyici",
+  "_not_sanal": "Sanal gözlem masaları (ajanlar.json'a yazılmaz, iş atanamaz). 'ana_ajan_cwd': bu klasörlerin TAM KENDİSİNDE açılan etkileşimli oturum 'Ana ajan' masasında görünür (alt klasörler mevcut kurallarla); yazılmazsa [\"~\"]. 'hat_cwd': bu klasörlerin altında çalışan her oturum, etkileşimsiz 'claude -p' koşuları dahil, 'Geliştirme hattı' masasında koşu başına satırla görünür; yazılmazsa [\"~/beyin-is/wt\"]. [] ikisini de kapatır; 'gizle' ve 'atla_cwd' bunların üstündedir.",
+  "ana_ajan_cwd": ["~"],
+  "hat_cwd": ["~/beyin-is/wt"],
   "atla_cwd": [],
   "gizle": []
 }

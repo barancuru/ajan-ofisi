@@ -444,10 +444,13 @@ const ODA_DESEN = {
   'ceo':'smokin', 'tasarim':'sarman', 'yazi':'tekir', 'kod':'siyam', 'atolye':'siyah',
   'posta':'gri-beyaz', 'sosyal':'tekir-gri', 'veri':'siyah', 'arastirma':'siyam', 'gun-sonu':'gri-beyaz',
 };
-const AJAN_DESEN = { 'bekci':'smokin', 'temizlikci':'sarman' };
+// ana-ajan (yönetici masası: gri-beyaz, takım elbise) ve gelistirme-hatti (atölye bandı: tekir-gri, altın tasma) sanal gözlem masaları
+const AJAN_DESEN = { 'bekci':'smokin', 'temizlikci':'sarman', 'ana-ajan':'gri-beyaz', 'gelistirme-hatti':'tekir-gri' };
 export function ajanDeseni(ajanId, odaId) { return AJAN_DESEN[ajanId] || ODA_DESEN[odaId] || 'tekir'; }
 export function ajanAksesuari(ajanId, odaId) {
   if (ajanId === 'ceo') return { papyon:true };
+  if (ajanId === 'ana-ajan') return { takim:true };
+  if (ajanId === 'gelistirme-hatti') return { tasma:true };
   if (ajanId === 'bekci') return { kalkan:true };
   if (odaId === 'atolye') return { tasma:true };
   return {};
