@@ -1,4 +1,4 @@
-"""Ajan başına günlük token sayacı. Yalnız gerçek usage alanları; maliyet hesabı yok.
+"""Ajan başına günlük token sayacı. Yalnız gerçek usage alanları; USD yalnız FIYATLAR'dan liste fiyatı tahmini.
 
 Kalıcı dosya: durum/token-<YYYY-MM-DD>.json
   {"<ajan>": {"ofis": {4 alan}, "terminal": {4 alan}},          ← toplam görünüm (türetilir)
@@ -18,6 +18,17 @@ import ortak
 ALANLAR = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
 KILIT = os.path.join(ortak.DURUM_DIZINI, "token.lock")
 
+# API liste fiyatı, $ / milyon token: (giriş, çıkış, önbellek okuma). Önbelleğe yazma = giriş × ONBELLEK_YAZMA_KAT.
+# Hat ve terminal koşularının USD tahmini YALNIZ bu tablodan gelir; fiyat değişince burayı güncelle (README: Maliyet).
+FIYATLAR = {
+    "claude-fable-5-2": (8.0, 40.0, 0.20),
+    "claude-opus-5-5": (4.0, 20.0, 0.20),
+    "claude-sonnet-5-5": (2.0, 10.0, 0.10),
+    "claude-haiku-5-5": (0.10, 0.50, 0.01),
+}
+KISA_MODEL = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "haiku": "claude-haiku-5-5"}
+ONBELLEK_YAZMA_KAT = 1.25
+
 
 def bos():
     return {k: 0 for k in ALANLAR}
@@ -35,6 +46,28 @@ def topla(*usagelar):
         for k in ALANLAR:
             t[k] += int((u or {}).get(k) or 0)
     return t
+
+
+def fiyat_bul(model):
+    """Model kimliği (ör. claude-opus-5-5, claude-opus-5-5-20261001, opus) → FIYATLAR satırı; bilinmiyorsa None."""
+    m = str(model or "").strip().lower()
+    m = KISA_MODEL.get(m, m)
+    for ad, fiyat in FIYATLAR.items():
+        if m == ad or m.startswith(ad + "-") or m.startswith(ad + "["):
+            return fiyat
+    return None
+
+
+def usd_tahmini(usage, model):
+    """usage (4 alan) + model → API liste fiyatı eşdeğeri USD; model bilinmiyorsa None. Gerçek fatura değildir."""
+    fiyat = fiyat_bul(model)
+    if not fiyat:
+        return None
+    giris, cikis, okuma = fiyat
+    u = usage_al(usage)
+    usd = (u["input_tokens"] * giris + u["output_tokens"] * cikis + u["cache_read_input_tokens"] * okuma
+           + u["cache_creation_input_tokens"] * giris * ONBELLEK_YAZMA_KAT) / 1_000_000
+    return round(usd, 6)
 
 
 class MesajTekil:
@@ -90,7 +123,7 @@ def _ozet_kur(veri):
             if not ajan:
                 continue
             a = ajanlar.setdefault(ajan, {"ofis": bos(), "terminal": bos()})
-            a[kaynak] = topla(a[kaynak], kayit.get("usage"))
+            a[kaynak] = topla(a[kaynak], kayit.get("usage"), kayit.get("alt_usage"))   # alt-ajanlar ebeveyne eklenir
     return ajanlar
 
 
@@ -104,9 +137,10 @@ def _yaz(tarih, veri):
     return tam
 
 
-def kayit_koy(tarih, tur, anahtar, ajan, usage, etiket=None, model=None):
+def kayit_koy(tarih, tur, anahtar, ajan, usage, etiket=None, model=None, alt_usage=None):
     """tur: '_kosular' | '_oturumlar'. Kaydı yerine koyar; ajanın o günkü {ofis, terminal} değerini döndürür.
-    etiket/model (terminal oturumu adı, model kimliği) yalnız Maliyet tablosu için; metin içeriği değildir."""
+    etiket/model (terminal oturumu adı, model kimliği) yalnız Maliyet tablosu için; metin içeriği değildir.
+    alt_usage: oturumun alt-ajanlarının o günkü toplamı (verilmezse önceki korunur); ebeveynin toplamına eklenir."""
     with _kilitli():
         veri = _oku(tarih)
         bolum = dict(veri.get(tur) or {})
@@ -119,6 +153,9 @@ def kayit_koy(tarih, tur, anahtar, ajan, usage, etiket=None, model=None):
                     kayit[ad] = deger[:60]
                 elif onceki.get(ad):
                     kayit[ad] = onceki[ad]
+            alt = usage_al(alt_usage) if alt_usage is not None else onceki.get("alt_usage")
+            if alt and any(alt.values()):
+                kayit["alt_usage"] = usage_al(alt)
         bolum[anahtar] = kayit
         tam = _yaz(tarih, {**veri, tur: bolum})
     return tam.get(ajan, {"ofis": bos(), "terminal": bos()})
@@ -157,16 +194,31 @@ HAT_AJAN = "gelistirme-hatti"
 
 
 def oturum_satirlari(tarih):
-    """Maliyet tablosu için terminal oturumu başına satır (hat koşusu = bir oturum). Kaynak: hat | terminal."""
+    """Maliyet tablosu için terminal oturumu başına satır (hat koşusu = bir oturum). Kaynak: hat | terminal.
+    kullanim/toplam alt-ajanları içerir (alt_toplam ayrıca); usd_tahmini model bilinmiyorsa None.
+    ilk/model/etiket'i boş eski satırlar (1.0.72 öncesi biçim) `eski: True` ile en alta gider."""
     satirlar = []
     for sid, k in (_oku(tarih).get("_oturumlar") or {}).items():
         if not isinstance(k, dict) or not k.get("ajan"):
             continue
-        u = usage_al(k.get("usage"))
+        alt = usage_al(k.get("alt_usage"))
+        u = topla(usage_al(k.get("usage")), alt)
+        model = k.get("model") or ""
         satirlar.append({"oturum": str(sid)[:8], "ajan": k["ajan"], "kaynak": "hat" if k["ajan"] == HAT_AJAN else "terminal",
-                         "etiket": k.get("etiket") or "", "model": k.get("model") or "", "ilk": k.get("ilk") or "",
-                         "kullanim": u, "toplam": sum(u.values())})
-    return sorted(satirlar, key=lambda s: s["ilk"])
+                         "etiket": k.get("etiket") or "", "model": model, "ilk": k.get("ilk") or "",
+                         "kullanim": u, "toplam": sum(u.values()), "alt_toplam": sum(alt.values()),
+                         "usd_tahmini": usd_tahmini(u, model) if model else None,
+                         "eski": not (k.get("ilk") and model and k.get("etiket"))})
+    return sorted(satirlar, key=lambda s: (s["eski"], s["ilk"]))
+
+
+def tahmini_toplam(oturumlar, ofis_usd):
+    """Maliyet özet kutuları: ofis (ölçülen), hat ≈, terminal ≈, toplam ≈ (USD; modeli bilinmeyen satır sayılmaz)."""
+    t = {k: round(sum(s["usd_tahmini"] for s in oturumlar if s["kaynak"] == k and s.get("usd_tahmini") is not None), 6)
+         for k in ("hat", "terminal")}
+    t["ofis"] = round(float(ofis_usd or 0), 6)
+    t["toplam"] = round(t["ofis"] + t["hat"] + t["terminal"], 6)
+    return t
 
 
 def api_yaniti():

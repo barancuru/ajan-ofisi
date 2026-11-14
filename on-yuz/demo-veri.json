@@ -398,12 +398,23 @@
  ],
  "sanal_ornek": {
   "oturumlar": [
-   {"ajan": "ana-ajan", "kaynak": "terminal", "etiket": "terminal · ~", "model": "claude-opus-5-5", "dk": 95,
+   {"ajan": "ana-ajan", "kaynak": "terminal", "etiket": "terminal · ~", "model": "claude-opus-5-5", "dk": 95, "usd_tahmini": 1.21984, "alt_toplam": 48200,
     "kullanim": {"input_tokens": 210, "output_tokens": 18400, "cache_creation_input_tokens": 84200, "cache_read_input_tokens": 2150000}},
-   {"ajan": "gelistirme-hatti", "kaynak": "hat", "etiket": "homeos-1114-isik-sahnesi", "model": "claude-sonnet-5-5", "dk": 70,
+   {"ajan": "gelistirme-hatti", "kaynak": "hat", "etiket": "homeos-1114-isik-sahnesi", "model": "claude-sonnet-5-5", "dk": 70, "usd_tahmini": 0.318692,
     "kullanim": {"input_tokens": 96, "output_tokens": 9100, "cache_creation_input_tokens": 51800, "cache_read_input_tokens": 980000}},
-   {"ajan": "gelistirme-hatti", "kaynak": "hat", "etiket": "ajan-ofisi-1114-ofiste-ana-ajan", "model": "claude-opus-5-5", "dk": 12,
-    "kullanim": {"input_tokens": 140, "output_tokens": 12600, "cache_creation_input_tokens": 66300, "cache_read_input_tokens": 1420000}}
+   {"ajan": "gelistirme-hatti", "kaynak": "hat", "etiket": "ajan-ofisi-1114-ofiste-ana-ajan", "model": "claude-opus-5-5", "dk": 12, "usd_tahmini": 0.86806,
+    "kullanim": {"input_tokens": 140, "output_tokens": 12600, "cache_creation_input_tokens": 66300, "cache_read_input_tokens": 1420000}},
+   {"ajan": "blog-yazari", "kaynak": "terminal", "etiket": "", "model": "", "dk": null, "usd_tahmini": null, "eski": true,
+    "kullanim": {"input_tokens": 20, "output_tokens": 900, "cache_creation_input_tokens": 4000, "cache_read_input_tokens": 51000}}
+  ],
+  "ornekler": [
+   {"id": "gelistirme-hatti:homeos", "ust": "gelistirme-hatti", "proje": "homeos", "etiket": "homeos-1114-isik-sahnesi", "durum": "calisiyor",
+    "model": "claude-sonnet-5-5", "dk": 70, "token": 1040996, "alt_token": 0, "usd_tahmini": 0.318692},
+   {"id": "gelistirme-hatti:ajan-ofisi", "ust": "gelistirme-hatti", "proje": "ajan-ofisi", "etiket": "ajan-ofisi-1114-ofiste-ana-ajan", "durum": "calisiyor",
+    "model": "claude-opus-5-5", "dk": 12, "token": 1499040, "alt_token": 0, "usd_tahmini": 0.86806}
+  ],
+  "alt_ajanlar": [
+   {"ana": "ana-ajan", "tur": "Explore", "gorev": "Maliyet tablosunu incele", "model": "claude-haiku-5-5", "son_arac": "Grep", "son_hedef": "pattern=usd_tahmini", "token": 48200}
   ]
  },
  "nobetci": {

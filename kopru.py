@@ -7,7 +7,8 @@ mesaj metni, prompt içeriği, dosya içeriği hiçbir zaman yazılmaz.
 Eşleme: kopru.json (kopru.example.json'dan kopyala). `gizle` listesindeki parçayı cwd'sinde ya da tmux
 oturum adında taşıyan oturum hiçbir eşlemeyle gösterilmez.
 Sanal gözlem ajanları (ortak.SANAL_AJANLAR, iş atanamaz): `hat_cwd` (varsayılan ["~/beyin-is/wt"], alt klasörler
-ve etkileşimsiz `claude -p` koşuları dahil) → gelistirme-hatti, koşu başına bir satır; `ana_ajan_cwd` (varsayılan
+ve etkileşimsiz `claude -p` koşuları dahil) → gelistirme-hatti, koşu başına bir satır ve Atölye'de proje başına bir
+örnek (`ornekler()`, proje sistem/projeler.conf adlarıyla etiketten); `ana_ajan_cwd` (varsayılan
 ["~"], yalnız tam klasör, etkileşimli oturum) → ana-ajan. İkisi de `gizle`/`atla_cwd`'nin altında kalır; `[]` kapatır.
 """
 import json
@@ -48,6 +49,10 @@ HAT_AJAN = "gelistirme-hatti"
 ANA_AJAN_CWD = ["~"]            # kopru.json `ana_ajan_cwd` yoksa
 HAT_CWD = ["~/beyin-is/wt"]     # kopru.json `hat_cwd` yoksa
 HAT_ACIK_SN = 5 * 60            # son mesajı bu kadar eski hat koşusu bitti sayılır (uzun araç çağrısı kapatmasın)
+HAT_BITTI_SN = 10 * 60          # biten hat koşusu Atölye'de bu kadar "bitti" pozunda kalır, sonra yuva boşalır
+HAT_DIGER = "hat"               # etiketi sistem/projeler.conf'taki hiçbir adla başlamayan hat koşusunun projesi
+ALT_TOKEN_SN = 24 * 3600        # alt-ajan token taraması: yalnız son bu kadar sürede yazılmış transkriptler
+PROJELER_DOSYASI = os.path.join(os.path.expanduser(os.environ.get("OFIS_BEYIN", "~/beyin")), "sistem", "projeler.conf")
 
 
 def yol_listesi(deger, varsayilan):
@@ -74,6 +79,24 @@ def hat_etiketi(cwd, kok):
     """Hat koşusunun etiketi: kökün altındaki ilk klasör, yani worktree adı (<proje>-<dal>)."""
     ilk = os.path.relpath(os.path.normpath(cwd), kok).split(os.sep)[0]
     return _temiz(os.path.basename(kok) if ilk in (".", "") else ilk, 60)
+
+
+def proje_adlari(yol=None):
+    """sistem/projeler.conf'taki proje adları (`ad=yol` satırları), uzundan kısaya; dosya yoksa []."""
+    try:
+        with open(yol or PROJELER_DOSYASI, encoding="utf-8") as f:
+            adlar = {s.split("=", 1)[0].strip() for s in f if "=" in s and not s.lstrip().startswith("#")}
+    except OSError:
+        return []
+    return sorted((a for a in adlar if re.fullmatch(r"[a-z0-9][a-z0-9-]{0,39}", a)), key=lambda a: (-len(a), a))
+
+
+def hat_projesi(etiket, adlar):
+    """Hat etiketi (<proje>-<dal>) → proje adı (projeler.conf'taki adla başlıyorsa); eşleşmezse HAT_DIGER."""
+    for ad in adlar:
+        if etiket == ad or str(etiket).startswith(ad + "-"):
+            return ad
+    return HAT_DIGER
 
 
 def gizli_mi(cwd, tmux_oturum, gizle):
@@ -179,8 +202,9 @@ def satirlari_coz(ham, yan_dal=False):
     return araclar, yeni_gorev
 
 
-def token_satirlari(ham):
-    """Ham JSONL parçasından assistant usage'ları: [(yerel_tarih, message_id, usage)]. Metin okunmaz/saklanmaz."""
+def token_satirlari(ham, yan_dal=False):
+    """Ham JSONL parçasından assistant usage'ları: [(yerel_tarih, message_id, usage)]. Metin okunmaz/saklanmaz.
+    yan_dal=True: alt-ajanın kendi transkripti (isSidechain satırları sayılır)."""
     sonuc = []
     for satir in ham.splitlines():
         if '"usage"' not in satir or '"assistant"' not in satir:
@@ -189,7 +213,7 @@ def token_satirlari(ham):
             d = json.loads(satir)
         except (json.JSONDecodeError, UnicodeDecodeError):
             continue
-        if not isinstance(d, dict) or d.get("type") != "assistant" or d.get("isSidechain"):
+        if not isinstance(d, dict) or d.get("type") != "assistant" or (d.get("isSidechain") and not yan_dal):
             continue
         m = d.get("message") or {}
         tarih = token_sayac.yerel_tarih(d.get("timestamp"))
@@ -288,6 +312,32 @@ def alt_ajan_ozeti(jsonl, meta_yol):
             "son_arac": son_arac, "son_hedef": son_hedef}
 
 
+def alt_ajan_tokenleri(jsonl):
+    """Alt-ajan transkriptinin tarih başına usage toplamı {tarih: usage}; yalnız usage satırları, metin saklanmaz."""
+    tekil = {}
+    try:
+        with open(jsonl, "rb") as f:
+            for satir in f:
+                if b'"usage"' not in satir:
+                    continue
+                for tarih, mid, usage in token_satirlari(satir.decode("utf-8", "replace"), yan_dal=True):
+                    tekil.setdefault(tarih, token_sayac.MesajTekil()).isle(mid, usage)
+    except OSError:
+        return {}
+    return {t: m.toplam for t, m in tekil.items()}
+
+
+def ilk_zaman(yol):
+    """Transkriptin ilk timestamp'i (epoch): hat koşusunun başlangıcı (sunucu yeniden açılsa da süre doğru kalır)."""
+    try:
+        with open(yol, "rb") as f:
+            bas = f.read(MASAUSTU_BAS).decode("utf-8", "replace")
+        m = re.search(r'"timestamp"\s*:\s*"([0-9T:.+Z-]{10,40})"', bas)
+        return datetime.fromisoformat(m.group(1).replace("Z", "+00:00")).timestamp() if m else None
+    except (OSError, ValueError):
+        return None
+
+
 class Kopru:
     def __init__(self):
         self.kilit = threading.Lock()
@@ -304,6 +354,8 @@ class Kopru:
         self.zaman_onbellek = {}     # transkript yolu -> (mtime, son mesaj zamanı)
         self.uyarilan = set()        # eşlenmedi uyarısı verilmiş sessionId'ler
         self.alt_onbellek = {}       # alt-ajan transkripti -> (mtime, özet)
+        self.alt_token_onbellek = {}  # alt-ajan transkripti -> ((mtime, boyut), {tarih: usage})
+        self.biten_hat = {}          # "gelistirme-hatti:<proje>" -> biten koşunun son özeti (+ bitis_ts), HAT_BITTI_SN tutulur
 
     # ---------- yapılandırma ----------
     def esleme_yukle(self):
@@ -468,7 +520,11 @@ class Kopru:
              "ajan": ajan, "oda": self.ajanlar[ajan]["oda"], "oturum_adi": ad,
              "pencere_adi": _temiz(pencere_adi or "", 60), "tmux_oturum": tmux_oturum,
              "son_arac": None, "son_hedef": None, "model": None, "durum": None, "yayinlanan": None,
-             "tekil": {}, "token_bekleyen": set()}
+             "tekil": {}, "token_bekleyen": set(), "alt_usage": {}, "alt_zaman": 0.0}
+        if ajan == HAT_AJAN:                      # Atölye'de koşu başına masa: proje başına sabit yuva
+            k["proje"] = hat_projesi(ad, proje_adlari())
+            k["ornek"] = f"{HAT_AJAN}:{k['proje']}"
+            k["baslangic"] = (ilk_zaman(yol) if yol else None) or time.time()
         if yol and os.path.exists(yol):
             boyut = os.path.getsize(yol)
             gecmisi_tara(k, boyut)
@@ -516,10 +572,44 @@ class Kopru:
         return "bekliyor"
 
     def disari(self, k):
-        return {"ajan": k["ajan"], "oda": k["oda"], "oturum_adi": k["oturum_adi"],
-                "pencere_adi": k["pencere_adi"], "durum": k["durum"], "son_arac": k["son_arac"],
-                "son_hedef": k["son_hedef"], "model": k.get("model"),
-                "zaman": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(k["son_satir_ts"] or time.time()))}
+        d = {"ajan": k["ajan"], "oda": k["oda"], "oturum_adi": k["oturum_adi"],
+             "pencere_adi": k["pencere_adi"], "durum": k["durum"], "son_arac": k["son_arac"],
+             "son_hedef": k["son_hedef"], "model": k.get("model"),
+             "zaman": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(k["son_satir_ts"] or time.time()))}
+        if k.get("ornek"):
+            d.update(ornek=k["ornek"], proje=k["proje"])
+        return d
+
+    def ornek_disari(self, k, durum, bitis=None):
+        """Hat koşusunun Atölye örneği: kimlik, proje, etiket (görev adı = worktree), model, süre, token, ≈USD."""
+        bugun = ortak.bugun()
+        ana = k["tekil"][bugun].toplam if bugun in k["tekil"] else token_sayac.bos()
+        alt = k["alt_usage"].get(bugun) or token_sayac.bos()
+        u = token_sayac.topla(ana, alt)
+        zaman = lambda ts: time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(ts)) if ts else None
+        return {"id": k["ornek"], "ust": HAT_AJAN, "proje": k["proje"], "etiket": k["oturum_adi"], "durum": durum,
+                "model": k.get("model"), "son_arac": k["son_arac"], "son_hedef": k["son_hedef"],
+                "baslangic": zaman(k.get("baslangic")), "bitis": zaman(bitis), "bitis_ts": bitis,
+                "token": sum(u.values()), "alt_token": sum(alt.values()),
+                "usd_tahmini": token_sayac.usd_tahmini(u, k.get("model")) if k.get("model") else None}
+
+    def hat_bitti(self, k):
+        """Kapanan hat koşusu HAT_BITTI_SN boyunca 'bitti' örneği olarak kalır (kilit altında çağrılır)."""
+        if k.get("ornek"):
+            self.biten_hat[k["ornek"]] = self.ornek_disari(k, "bitti", time.time())
+
+    def ornekler(self):
+        """API `sanal_ornekler`: eşzamanlı her hat koşusu (proje başına bir yuva; aynı projede en yeni koşu) +
+        son HAT_BITTI_SN içinde biten koşular. Ön yüz bunları Atölye'ye dinamik masa olarak ekler."""
+        simdi = time.time()
+        with self.kilit:
+            self.biten_hat = {i: b for i, b in self.biten_hat.items() if simdi - b["bitis_ts"] < HAT_BITTI_SN}
+            sonuc = {}
+            for k in sorted((k for k in self.oturumlar.values() if k.get("ornek")), key=lambda k: k["son_satir_ts"]):
+                sonuc[k["ornek"]] = self.ornek_disari(k, k["durum"] or "bekliyor")
+            for i, b in self.biten_hat.items():
+                sonuc.setdefault(i, b)
+        return [{x: v for x, v in o.items() if x != "bitis_ts"} for o in sorted(sonuc.values(), key=lambda o: o["id"])]
 
     def tur(self):
         self.esleme_yukle()
@@ -532,6 +622,7 @@ class Kopru:
             for pid in list(self.oturumlar):
                 if pid not in canli or str(canli[pid]["sessionId"]) != self.oturumlar[pid]["sid"]:
                     k = self.oturumlar.pop(pid)
+                    self.hat_bitti(k)
                     if k["yayinlanan"]:
                         olaylar.append({"tur": "terminal_durum", **self.disari({**k, "durum": "kapandi"})})
             for pid, d in canli.items():
@@ -546,6 +637,7 @@ class Kopru:
                 if not ajan:
                     if k:
                         self.oturumlar.pop(pid)
+                        self.hat_bitti(k)
                         if k["yayinlanan"]:
                             olaylar.append({"tur": "terminal_durum", **self.disari({**k, "durum": "kapandi"})})
                     continue
@@ -555,15 +647,17 @@ class Kopru:
                 else:
                     k["pencere_adi"] = _temiz(pencere_adi, 60)
                     araclar, yeni_gorev = self.oku(k)
+                    self.alt_token_tara(k)
+                    ornek = {"ornek": k["ornek"], "proje": k["proje"]} if k.get("ornek") else {}
                     if yeni_gorev:
                         olaylar.append({"tur": "terminal_arac", "ajan": ajan, "oda": k["oda"],
-                                        "oturum_adi": k["oturum_adi"], "arac": "YeniGorev", "detay": ""})
+                                        "oturum_adi": k["oturum_adi"], "arac": "YeniGorev", "detay": "", **ornek})
                     if araclar:
                         k["son_arac"], k["son_hedef"] = araclar[-1]
                         # tur başına oturum başına tek araç olayı: akış taşmaz
                         olaylar.append({"tur": "terminal_arac", "ajan": ajan, "oda": k["oda"],
                                         "oturum_adi": k["oturum_adi"], "arac": k["son_arac"],
-                                        "detay": k["son_hedef"] or ""})
+                                        "detay": k["son_hedef"] or "", **ornek})
                 k["durum"] = self.durum_hesapla(k, d)
                 if k["yayinlanan"] != k["durum"]:
                     k["yayinlanan"] = k["durum"]
@@ -582,8 +676,10 @@ class Kopru:
             ilk = not k["token_ilk_yazildi"]
             ajan_gun = None
             for tarih in sorted(k["token_bekleyen"]):
-                g = token_sayac.kayit_koy(tarih, "_oturumlar", k["sid"], k["ajan"], k["tekil"][tarih].toplam,
-                                          etiket=k["oturum_adi"], model=k.get("model"))
+                ana = k["tekil"][tarih].toplam if tarih in k["tekil"] else token_sayac.bos()
+                g = token_sayac.kayit_koy(tarih, "_oturumlar", k["sid"], k["ajan"], ana,
+                                          etiket=k["oturum_adi"], model=k.get("model"),
+                                          alt_usage=k["alt_usage"].get(tarih))
                 if tarih == ortak.bugun():
                     ajan_gun = g
             k["token_bekleyen"] = set()
@@ -615,9 +711,42 @@ class Kopru:
             onceki = self.alt_onbellek.get(g.path)
             ozet = onceki[1] if onceki and onceki[0] == mtime else alt_ajan_ozeti(g.path, g.path[:-6] + ".meta.json")
             self.alt_onbellek[g.path] = (mtime, ozet)
+            tok = (self.alt_token_onbellek.get(g.path) or (None, {}))[1]
             sonuc.append({**ozet, "durum": "calisiyor" if simdi - mtime < CALISIYOR_SN else "bitti",
+                          "token": sum(sum(u.values()) for u in tok.values()),
                           "zaman": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(mtime))})
         return sorted(sonuc, key=lambda x: x["zaman"], reverse=True)[:ALT_MAKS]
+
+    def alt_token_tara(self, k):
+        """Oturumun alt-ajan transkriptlerinin (<sid>/subagents/agent-*.jsonl) bugünkü usage toplamı → k["alt_usage"].
+        Ebeveynin _oturumlar satırına `alt_usage` olarak yazılır. Dosya (mtime, boyut) değişmedikçe yeniden okunmaz."""
+        simdi = time.time()
+        if not k["yol"] or simdi - k["alt_zaman"] < MASAUSTU_TAZELE_SN:
+            return
+        k["alt_zaman"] = simdi
+        try:
+            girdiler = [g for g in os.scandir(os.path.join(k["yol"][:-6], "subagents"))
+                        if g.name.startswith("agent-") and g.name.endswith(".jsonl")]
+        except OSError:
+            return
+        bugun, toplam = ortak.bugun(), None
+        for g in girdiler:
+            try:
+                st = g.stat()
+            except OSError:
+                continue
+            if simdi - st.st_mtime > ALT_TOKEN_SN:
+                continue
+            anahtar = (st.st_mtime, st.st_size)
+            onceki = self.alt_token_onbellek.get(g.path)
+            if not onceki or onceki[0] != anahtar:
+                onceki = (anahtar, alt_ajan_tokenleri(g.path))
+                self.alt_token_onbellek[g.path] = onceki
+            if bugun in onceki[1]:
+                toplam = token_sayac.topla(toplam, onceki[1][bugun])
+        if toplam and toplam != k["alt_usage"].get(bugun):
+            k["alt_usage"][bugun] = toplam
+            k["token_bekleyen"].add(bugun)
 
     def liste(self):
         with self.kilit:
@@ -625,6 +754,8 @@ class Kopru:
         sonuc = [{**self.disari(k), "alt_ajanlar": self.alt_ajanlar(k)} for k in kayitlar]
         sinir = time.time() - MASAUSTU_ACIK_SN       # kapanmış alt-ajanlar önbellekte birikmez
         self.alt_onbellek = {y: v for y, v in self.alt_onbellek.items() if v[0] >= sinir}
+        tok_sinir = time.time() - ALT_TOKEN_SN
+        self.alt_token_onbellek = {y: v for y, v in list(self.alt_token_onbellek.items()) if v[0][0] >= tok_sinir}
         return sorted(sonuc, key=lambda x: (x["ajan"], x["oturum_adi"]))
 
     def dongu(self):

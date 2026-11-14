@@ -298,7 +298,8 @@ td.sayi,th.sayi{text-align:right}
 .maliyet-kap .kaynak span{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;background:rgba(59,52,44,.07);color:var(--soluk)}
 .maliyet-kap .kaynak span.hat{background:rgba(236,188,74,.25);color:#8a6a1e}
 .maliyet-kap .kaynak span.terminal{background:rgba(127,179,221,.22);color:#3f6f95}
-@media (max-width:768px){.maliyet-kap table{min-width:560px}.maliyet-kap th,.maliyet-kap td{padding:8px 6px}}
+@media (max-width:768px){.maliyet-kap table{min-width:560px}.maliyet-kap th,.maliyet-kap td{padding:8px 6px}
+  .ozet-sayilar{gap:8px}.ozet-sayilar div{flex:1 1 calc(50% - 4px);min-width:0;padding:10px 12px}.ozet-sayilar b{font-size:22px}}
 
 /* 3D bağlı etiketler */
 #etiketler{position:fixed;inset:0;pointer-events:none;z-index:2}
@@ -862,20 +863,27 @@ try {
 // odalar: `odalar` listesinin sırası + ajanlarda geçip listede olmayan id'ler; yalnız ajanı olan odalar kurulur (CEO her zaman).
 // `oda` alanı eksik/geçersiz ajan "genel" odasına oturur. Config'teki ad/açıklama/not temanın üstüne yazılır.
 const yerlesecek = apiAjanlar.filter(a => a && typeof a.id === 'string').map(a => ({ ...a, oda:odaIdGecerli(a.oda) ? a.oda : 'genel' }));
+// geliştirme hattı Atölye'de: eşzamanlı her koşu proje başına sabit bir yuvada (homeos, ajan-ofisi, turnusol, diğer).
+// Oda dört yuvayla ölçülür; yuvalar boşken orada yalnız tek, uyuyan "Geliştirme hattı" kedisi durur.
+const HAT_ID = 'gelistirme-hatti', HAT_YUVALARI = ['homeos', 'ajan-ofisi', 'turnusol', 'hat'];
+const hatVar = apiSanal.some(a => a.id === HAT_ID) && !yerlesecek.some(a => a.id === HAT_ID);
+const hatYuvalari = hatVar ? HAT_YUVALARI.map(p => ({ id:HAT_ID + ':' + p, oda:'atolye', yuva:p })) : [];
+const yerlesim = yerlesecek.concat(hatYuvalari);
 // mentor kurulu: ajanı olmasa da kendi odası olur (yuvarlak masa); kurul boşsa oda kurulmaz
-ODALAR = [...new Set(['ceo', ...(apiYkb ? ['ykb'] : []), ...apiOdalar.map(o => o?.id), ...yerlesecek.map(a => a.oda), ...(apiKurul.length ? ['kurul'] : [])])]
-  .filter(id => odaIdGecerli(id) && (id === 'ceo' || (id === 'ykb' && apiYkb) || (id === 'kurul' && apiKurul.length) || yerlesecek.some(a => a.oda === id)))
+ODALAR = [...new Set(['ceo', ...(apiYkb ? ['ykb'] : []), ...apiOdalar.map(o => o?.id), ...yerlesim.map(a => a.oda), ...(apiKurul.length ? ['kurul'] : [])])]
+  .filter(id => odaIdGecerli(id) && (id === 'ceo' || (id === 'ykb' && apiYkb) || (id === 'kurul' && apiKurul.length) || yerlesim.some(a => a.oda === id)))
   .map(id => {
     const o = { id, ...odaTema(id) }, c = apiOdalar.find(x => x?.id === id);
     if (c) ['ad', 'aciklama', 'not'].forEach(k => { if (typeof c[k] === 'string') o[k] = c[k].slice(0, k === 'ad' ? 40 : 600); });
-    odaOlcu(o, yerlesecek); return o;
+    odaOlcu(o, yerlesim); return o;
   });
 yerlesimKur(ODALAR);
-AJANLAR = yerlesecek.map(a => ({ ...a, ...yerHesapla(a, yerlesecek) }));
-// sanal masalar CEO odasının (cam, 21 birim) boş iki yanında sabit yerde: CEO masası ve diğer odalar kaymaz
-const SANAL_YER = { 'ana-ajan':{ x:-4.4 }, 'gelistirme-hatti':{ x:3.6 } };
+AJANLAR = yerlesecek.map(a => ({ ...a, ...yerHesapla(a, yerlesim) }));
+const HAT_YER = Object.fromEntries(hatYuvalari.map(y => [y.yuva, yerHesapla(y, yerlesim)]));
+// ana ajan CEO odasının (cam, 21 birim) boş sol yanında sabit yerde; geliştirme hattı Atölye'nin ilk yuvasında
+const SANAL_YER = { 'ana-ajan':{ oda:'ceo', x:-4.4 }, [HAT_ID]:{ oda:'atolye', ...HAT_YER.homeos } };
 SANALLAR = apiSanal.filter(a => SANAL_YER[a.id] && !AJANLAR.some(x => x.id === a.id))
-  .map(a => ({ ...a, oda:'ceo', sanal:true, hazir_gorevler:[], ...SANAL_YER[a.id] }));
+  .map(a => ({ ...a, sanal:true, hazir_gorevler:[], ...SANAL_YER[a.id] }));
 const KULLANICI = String(apiAyarlar.kullanici || '').slice(0, 40);
 const MARKA = String(apiAyarlar.marka || 'Ajan Ofisi').slice(0, 40);
 const SEN = KULLANICI || 'Sen';
@@ -1323,13 +1331,14 @@ function ajanKur(a) {
   a.yuzMat = new THREE.MeshBasicMaterial(); // durum geçişleri hâlâ yüz dokusu atar; kedide görünmez
   if (a.id === 'bekci') bekciEkle(g);
   if (a.id === 'ana-ajan') yoneticiEkle(g);
-  if (a.id === 'gelistirme-hatti') bantEkle(g);
+  if ((a.ust || a.id) === HAT_ID) bantEkle(g);
+  if (a.ornek) a.plaka = masaPlakasi(g, a.proje === 'hat' ? 'diğer' : a.proje);
   a.zler = [0, 1, 2].map(() => {
     const s = new THREE.Sprite(new THREE.SpriteMaterial({ map:zDoku, transparent:true, depthWrite:false }));
     s.scale.setScalar(.3); g.add(s); return s;
   });
   const hit = new THREE.Mesh(new THREE.BoxGeometry(1.9, 2.4, 2.4), new THREE.MeshBasicMaterial());
-  hit.visible = false; hit.position.set(0, 1.2, .4); hit.userData.ajan = a.id; g.add(hit); secilebilir.push(hit);
+  hit.visible = false; hit.position.set(0, 1.2, .4); hit.userData.ajan = a.id; g.add(hit); secilebilir.push(hit); a.hit = hit;
   Object.assign(a, { durum:'uyku', is:'', eylem:'', adimlar:[], faz:Math.random() * 6, ekranZaman:0 });
   ekranCiz(a); a.ekran.t.needsUpdate = true;
 }
@@ -1353,13 +1362,24 @@ function bantEkle(g) {
   [-1.15, 1.15].forEach(x => kutu(g, .08, .26, .3, '#8d8276', x, .14, 1.8, .02));
   [-.85, -.2, .55].forEach((x, i) => kutu(g, .26, .2, .24, ['#ecbc4a', '#e9805f', '#7fb3dd'][i], x, .44, 1.8, .04));
 }
-// ajan figürü: kedi görünümünde oda deseni (aynı odadakiler hafif ton farkı), duygu görünümünde sabit duygu türü
-function ajanKarakteri(a) {
-  const ton = a.sanal ? 0 : AJANLAR.filter(x => x.oda === a.oda).indexOf(a) * .5 - .25;
-  if (GORUNUM === 'duygu') return createDuygu({ tur:ajanDuyguTuru(a), ton });
-  return createCat({ desen:ajanDeseni(a.id, a.oda), ton, aksesuar:ajanAksesuari(a.id, a.oda) });
+function masaPlakasi(g, metin) {
+  // hat koşusu masası: masanın önünde proje adı yazan küçük ayaklı kart (doku ve malzeme masaya özel, yuva boşalınca atılır)
+  const { ctx, t } = tuvalDoku(256, 72);
+  ctx.fillStyle = '#3b342c'; yuvarlakDikdortgen(ctx, 0, 0, 256, 72, 14); ctx.fill();
+  ctx.fillStyle = '#ffd27a'; ctx.font = '600 34px Inter'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(kisalt(ctx, metin, 228), 128, 38); t.needsUpdate = true;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(.78, .22), new THREE.MeshBasicMaterial({ map:t, transparent:true, toneMapped:false }));
+  m.position.set(-.55, 1.0, 1.28); m.rotation.x = -.35; g.add(m);
+  return t;
 }
-function ajanDuyguTuru(a) { return ajanDuygusu(a.id, AJANLAR.map(x => x.id)); }
+// ajan figürü: kedi görünümünde oda deseni (aynı odadakiler hafif ton farkı), duygu görünümünde sabit duygu türü
+// hat örnekleri (gelistirme-hatti:<proje>) üst ajanın desenini ve aksesuarını taşır
+function ajanKarakteri(a) {
+  const ton = a.sanal ? 0 : AJANLAR.filter(x => x.oda === a.oda).indexOf(a) * .5 - .25, id = a.ust || a.id;
+  if (GORUNUM === 'duygu') return createDuygu({ tur:ajanDuyguTuru(a), ton });
+  return createCat({ desen:ajanDeseni(id, a.oda), ton, aksesuar:ajanAksesuari(id, a.oda) });
+}
+function ajanDuyguTuru(a) { return ajanDuygusu(a.ust || a.id, AJANLAR.map(x => x.id)); }
 AJANLAR.forEach(ajanKur);
 SANALLAR.forEach(ajanKur);
 // panel avatarları: her ajanın kendi karakteri (kedi: meme pozunda); açılışta ve görünüm değişince üretilir
@@ -1850,9 +1870,9 @@ selamla(); setInterval(selamla, 30000);
 
 /* akış */
 function avatar(ajanId, sinif = '') {
-  const a = ajanBul(ajanId), foto = PORTRE.get(ajanId);
+  const a = ajanBul(ajanId), pid = PORTRE.has(ajanId) ? ajanId : a?.ust, foto = PORTRE.get(pid);   // hat örneği: üst ajanın portresi
   const d = el('span', 'avatar' + (foto ? ' foto' : '') + (sinif ? ' ' + sinif : ''), foto ? null : (a?.ad || ajanId || '?').slice(0, 1).toLocaleUpperCase('tr-TR'));
-  if (foto) { d.style.backgroundImage = 'url(' + foto + ')'; d.dataset.portre = ajanId; } else d.style.background = ajanRenk(ajanId);
+  if (foto) { d.style.backgroundImage = 'url(' + foto + ')'; d.dataset.portre = pid; } else d.style.background = ajanRenk(ajanId);
   return d;
 }
 /* Küçük, güvenli markdown çizici: yalnız DOM düğümleri üretir (innerHTML yok) */
@@ -2215,7 +2235,7 @@ function olayIsle(o) {
   gorulen.add(anahtar);
   const zaman = o.zaman ? new Date(o.zaman) : new Date();
   const tekrar = zaman.getTime() < SAYFA_ACILIS - 3000;
-  const a = ajanBul(o.ajan);
+  const a = (o.ornek && ajanBul(o.ornek)) || ajanBul(o.ajan);   // hat koşusu olayı kendi Atölye örneğine gider
   const ad = a?.ad || o.ajan || 'Ajan';
   const isler = {
     kosu_basladi() {
@@ -2312,14 +2332,17 @@ function olayIsle(o) {
     hata() { akisEkle(o.ajan, ad + ': hata · ' + kisa(o.detay || '', 80), '', '', zaman, o.detay || ''); },
     terminal_durum() {
       if (tekrar || !o.oturum_adi) return;
+      if (o.ornek && o.durum !== 'kapandi') ornekGuncelle({ id:o.ornek, proje:o.proje, etiket:o.oturum_adi, model:o.model });
       if (o.durum === 'kapandi') terminaller.delete(o.oturum_adi);
       else terminaller.set(o.oturum_adi, { ...(terminaller.get(o.oturum_adi) || {}), ...o });
       terminalSenkron();
+      if (o.ornek && o.durum === 'kapandi' && ajanBul(o.ornek)) ornekBitir(ajanBul(o.ornek));
     },
     terminal_arac() {
       if (tekrar || !o.oturum_adi) return;
       const e = eylemYaz(o.arac, o.detay);
-      const onceki = terminaller.get(o.oturum_adi) || { ajan:o.ajan, oda:o.oda, oturum_adi:o.oturum_adi };
+      if (o.ornek) ornekGuncelle({ id:o.ornek, proje:o.proje, etiket:o.oturum_adi });
+      const onceki = terminaller.get(o.oturum_adi) || { ajan:o.ajan, oda:o.oda, oturum_adi:o.oturum_adi, ...(o.ornek ? { ornek:o.ornek, proje:o.proje } : {}) };
       const yeniGorev = o.arac === 'YeniGorev';
       terminaller.set(o.oturum_adi, { ...onceki, durum:'calisiyor', ...(yeniGorev ? {} : { son_arac:o.arac, son_hedef:o.detay }) });
       terminalSenkron();
@@ -2380,13 +2403,77 @@ const TERMINAL_AKIS_SN = 5;
 function terminalEylem(t) {
   return t.son_arac ? eylemYaz(t.son_arac, t.son_hedef).simdi : 'çalışıyor';
 }
+/* hat örnekleri: eşzamanlı her hat koşusu Atölye'de kendi yuvasında ayrı kedi (API `sanal_ornekler`). Ajan listesine
+   dinamik eklenir (ajanlar.json'a yazılmaz); yuva boşalınca sahneden çıkarılır ve özel doku/malzeme/geometrisi atılır. */
+const HAT_BITTI_MS = 10 * 60000;
+const terminalSahibi = t => (t.ornek && ajanBul(t.ornek) ? t.ornek : t.ajan);
+const ornekler = () => SANALLAR.filter(a => a.ornek);
+function hatTabanGoster() {
+  // boştayken tek uyuyan "Geliştirme hattı" kedisi; koşu varken yerini örneklere bırakır
+  const taban = SANALLAR.find(a => a.id === HAT_ID); if (!taban) return;
+  const gizli = ornekler().length > 0;
+  if (taban.gizli === gizli) return;
+  taban.gizli = gizli; taban.grup.visible = !gizli;
+  const i = secilebilir.indexOf(taban.hit);
+  if (gizli && i >= 0) secilebilir.splice(i, 1); else if (!gizli && i < 0) secilebilir.push(taban.hit);
+}
+function ornekGuncelle(o) {
+  if (!o || typeof o.id !== 'string' || !o.id.startsWith(HAT_ID + ':') || !HAT_YER.homeos) return null;
+  let a = ajanBul(o.id);
+  if (!a) {
+    const ust = SANALLAR.find(x => x.id === HAT_ID); if (!ust) return null;
+    const proje = String(o.proje || 'hat').slice(0, 40), yuva = HAT_YUVALARI.includes(proje) ? proje : 'hat';
+    if (ornekler().some(x => x.yuva === yuva)) return null;      // yuva dolu: koşu ana "Geliştirme hattı" satırında kalır
+    a = { id:o.id, ust:HAT_ID, ornek:true, yuva, proje, oda:'atolye', sanal:true, hazir_gorevler:[], bilgi:{},
+          ad:'Hat · ' + (proje === 'hat' ? 'diğer' : proje), aciklama:ust.aciklama, ...HAT_YER[yuva] };
+    ajanKur(a); SANALLAR.push(a); hatTabanGoster();
+  }
+  a.bilgi = { ...a.bilgi, ...Object.fromEntries(Object.entries(o).filter(([, v]) => v != null)) };
+  if (o.durum === 'bitti' && a.durum !== 'bitti' && !a.terminal) ornekBitir(a);
+  return a;
+}
+function ornekBitir(a) {
+  // ajanBitir gibi, ama uykuya dönmez: yuva boşalana kadar (10 dk) "bitti" pozunda kalır
+  clearTimeout(a.uykuZamanlayici);
+  const b = a.bilgi || {}, bas = Date.parse(b.baslangic || '') || a.t0;
+  a.bilgi = { ...b, durum:'bitti', bitis:b.bitis || new Date().toISOString() };
+  Object.assign(a, { durum:'bitti', terminal:false, is:b.etiket || a.is, bittiZaman:Date.now(),
+    sonSure:bas ? Math.round((Date.now() - bas) / 1000) : a.sonSure });
+  a.yuzMat.map = YUZ.mutlu; altAjanTemizle(a.id, true); ekranYenile(a); ustGuncelle(); panelYenile();
+}
+function ornekKaldir(a) {
+  clearTimeout(a.uykuZamanlayici);
+  altAjanTemizle(a.id);
+  const i = SANALLAR.indexOf(a); if (i >= 0) SANALLAR.splice(i, 1);
+  const h = secilebilir.indexOf(a.hit); if (h >= 0) secilebilir.splice(h, 1);
+  const e = etiketler.get(a.id); if (e) { e.d.remove(); etiketler.delete(a.id); }
+  if (a.kedi) { a.grup.remove(a.kedi.group); a.kedi.dispose?.(); }
+  scene.remove(a.grup);
+  // paylaşılan önbellekler (geoCache, malzemeler, zDoku) atılmaz; yalnız bu masaya özel olanlar
+  const ortakGeo = new Set(geoCache.values()), ortakMat = new Set(malzemeler.values());
+  a.grup.traverse(n => {
+    if (n.geometry && !ortakGeo.has(n.geometry)) n.geometry.dispose();
+    [].concat(n.material || []).forEach(m => { if (!ortakMat.has(m) && (m.isMeshBasicMaterial || m.isSpriteMaterial)) m.dispose(); });
+  });
+  a.ekran?.t.dispose(); a.plaka?.dispose(); a.yuzMat?.dispose();
+  if (panelAjan === a.id) panelKapat();
+  hatTabanGoster();
+}
+function ornekleriUygula(liste) {
+  // API listesi esas: listede olmayan örnek ve 10 dk'yı geçmiş "bitti" örnek yuvadan çıkar
+  const gelen = (Array.isArray(liste) ? liste : []).filter(o => o && typeof o.id === 'string');
+  gelen.forEach(ornekGuncelle);
+  ornekler().forEach(a => {
+    if (!gelen.some(o => o.id === a.id) || (a.durum === 'bitti' && Date.now() - (a.bittiZaman || 0) > HAT_BITTI_MS)) ornekKaldir(a);
+  });
+}
 function terminalSenkron() {
   tumAjanlar().forEach(a => {
     if (a.id === 'ceo') return;
-    const hepsi = [...terminaller.values()].filter(t => t.ajan === a.id);
+    const hepsi = [...terminaller.values()].filter(t => terminalSahibi(t) === a.id);
     const calisan = hepsi.filter(t => t.durum === 'calisiyor');
     a.terminalSay = hepsi.length;
-    const ofisKosusu = a.durum !== 'uyku' && !a.terminal;   // ofisin kendi koşusu her zaman önce gelir
+    const ofisKosusu = !a.ornek && a.durum !== 'uyku' && !a.terminal;   // ofisin kendi koşusu her zaman önce gelir; "bitti" hat örneği yeni koşuyla uyanır
     if (calisan.length && !ofisKosusu) {
       if (!a.terminal) { ajanUyandir(a, 'terminal oturumu', null, Date.now()); a.terminal = true; }
       a.eylem = 'terminal · ' + terminalEylem(calisan[0]);
@@ -2394,14 +2481,18 @@ function terminalSenkron() {
     } else if (a.terminal && !calisan.length) {
       ajanUyut(a);
     }
-    // ana figür ilk oturum; diğer çalışan oturumlar yarı saydam alt figür (en fazla 4)
-    const istenen = a.terminal ? calisan.slice(1, 5) : [];
+    // ana figür ilk oturum; diğer çalışan oturumlar ve oturumların çalışan alt-ajanları yavru kedi (toplam en fazla 4)
+    const altlar = a.terminal ? calisan.flatMap(t => (t.alt_ajanlar || []).filter(x => x.durum === 'calisiyor')) : [];
+    const istenen = a.terminal ? [...calisan.slice(1).map(t => ({ t })), ...altlar.map(x => ({ x }))].slice(0, 4) : [];
     const mevcut = altAjanlar.filter(x => x.ana === a.id && x.terminal);
     if (mevcut.length !== istenen.length) {
       altAjanTemizle(a.id, true);
-      istenen.forEach(t => { const x = altAjanEkle(a, ''); if (x) { x.terminal = true; x.oturum = t.oturum_adi; } });
+      istenen.forEach(({ t }) => { const x = altAjanEkle(a, ''); if (x) { x.terminal = true; x.oturum = t?.oturum_adi; } });
     }
-    altAjanlar.filter(x => x.ana === a.id && x.terminal).forEach((x, i) => { if (istenen[i]) x.eylem = kisa(terminalEylem(istenen[i]), 30); });
+    altAjanlar.filter(x => x.ana === a.id && x.terminal).forEach((y, i) => {
+      const s = istenen[i]; if (!s) return;
+      y.eylem = kisa(s.t ? terminalEylem(s.t) : '↳ ' + (s.x.gorev || s.x.tur || 'alt-ajan'), 30);
+    });
     if (a.terminal) ekranYenile(a);
   });
   ustGuncelle(); panelYenile();
@@ -2415,16 +2506,18 @@ function modelAdi(m) {
 // Ofis koşusu ajanlar.json'daki modelle çalışır; terminal oturumu senin açtığın modelle (transkriptten okunur).
 function modelSatiri(a) {
   const ofis = modelAdi(a.model);
-  const term = [...new Set([...terminaller.values()].filter(t => t.ajan === a.id && t.model).map(t => modelAdi(t.model)))];
+  const term = [...new Set([...terminaller.values()].filter(t => terminalSahibi(t) === a.id && t.model).map(t => modelAdi(t.model)))];
   return term.length ? `Ofis koşusu: ${ofis} · Terminal: ${term.join(', ')}` : ofis;
 }
 async function terminalleriYukle() {
   if (DEMO) return;
   try {
-    const { terminaller:liste } = await getJSON('/api/terminaller');
+    const { terminaller:liste, sanal_ornekler:orn } = await getJSON('/api/terminaller');
     terminaller.clear();
     (liste || []).forEach(t => terminaller.set(t.oturum_adi, t));
+    ornekleriUygula(orn);      // önce örnekler kurulur ki oturumlar kendi masasına düşsün
     terminalSenkron();
+    ornekleriUygula(orn);      // kapanan koşu senkrondan sonra "bitti" pozuna geçer
   } catch { /* köprü yoksa ofis eskisi gibi çalışır */ }
 }
 
@@ -2623,15 +2716,22 @@ const demo = (() => {
           kullanim:{ input_tokens:38200, output_tokens:9100 }, model:'claude-fable-5-2' }] };
       // sanal gözlem masaları: ana ajan (ev klasörü oturumu) ve geliştirme hattı (worktree koşuları)
       (demoVeri?.sanal_ornek?.oturumlar || []).forEach(r => tokenEkle(r.ajan, 'terminal', r.kullanim.input_tokens, r.kullanim.output_tokens, r.kullanim.cache_creation_input_tokens, r.kullanim.cache_read_input_tokens));
-      sayac.oturumlar = (demoVeri?.sanal_ornek?.oturumlar || []).map(r => ({ ...r, ilk:'T' + saatYazi(new Date(Date.now() - r.dk * 60000)),
+      const so = demoVeri?.sanal_ornek || {};
+      sayac.oturumlar = (so.oturumlar || []).map(r => ({ ...r, ilk:r.dk == null ? '' : 'T' + saatYazi(new Date(Date.now() - r.dk * 60000)),
         toplam:Object.values(r.kullanim).reduce((t, x) => t + x, 0) }));
-      if (ajanBul('ana-ajan')) olayIsle({ tur:'terminal_durum', ajan:'ana-ajan', oda:'ceo', oturum_adi:'terminal · ~', durum:'calisiyor', son_arac:'Read', son_hedef:'file_path=CLAUDE.md', model:'claude-opus-5-5' });
-      if (ajanBul('gelistirme-hatti')) {
-        const hat = { ajan:'gelistirme-hatti', oda:'ceo', oturum_adi:'ajan-ofisi-1114-ofiste-ana-ajan', model:'claude-opus-5-5' };
+      const tah = k => sayac.oturumlar.filter(r => r.kaynak === k && typeof r.usd_tahmini === 'number').reduce((t, r) => t + r.usd_tahmini, 0);
+      sayac.tahmini_toplam_usd = { ofis:0, hat:tah('hat'), terminal:tah('terminal') };
+      sayac.tahmini_toplam_usd.toplam = sayac.tahmini_toplam_usd.hat + sayac.tahmini_toplam_usd.terminal;
+      if (ajanBul('ana-ajan')) olayIsle({ tur:'terminal_durum', ajan:'ana-ajan', oda:'ceo', oturum_adi:'terminal · ~', durum:'calisiyor', son_arac:'Read', son_hedef:'file_path=CLAUDE.md', model:'claude-opus-5-5',
+        alt_ajanlar:(so.alt_ajanlar || []).filter(x => x.ana === 'ana-ajan').map(x => ({ ...x, durum:'calisiyor' })) });
+      // iki paralel hat koşusu: Atölye'de iki ayrı, etiketli kedi
+      if (ajanBul(HAT_ID)) (so.ornekler || []).forEach((r, n) => {
+        ornekGuncelle({ ...r, baslangic:new Date(Date.now() - r.dk * 60000).toISOString() });
+        const hat = { ajan:HAT_ID, oda:'atolye', oturum_adi:r.etiket, model:r.model, ornek:r.id, proje:r.proje };
         olayIsle({ tur:'terminal_durum', ...hat, durum:'calisiyor', son_arac:'Edit', son_hedef:'file_path=index.html' });
         [['Grep', 'pattern=maliyetSayfasi'], ['Read', 'file_path=kopru.py'], ['Edit', 'file_path=token_sayac.py'], ['Bash', 'command=graf-oku']]
-          .forEach(([arac, detay], i) => zamanla(2500 + i * 2600, () => olayIsle({ tur:'terminal_arac', ...hat, arac, detay })));
-      }
+          .forEach(([arac, detay], i) => zamanla(2500 + n * 1300 + i * 2600, () => olayIsle({ tur:'terminal_arac', ...hat, arac, detay })));
+      });
       if (!OTO) return;
       zamanla(300, () => kosu('tasarimci', 'Kapak fikirleri'));
       zamanla(900, () => kosu('gun-sonu', 'Bugünün 3 maddesi'));
@@ -2669,12 +2769,18 @@ function ajanPaneli(a) {
   const oda = odaBul(a.oda);
   const kapat = el('button', 'kapat', '×'); kapat.onclick = () => { SES.tik(); panelKapat(); };
   const satirlar = el('div', 'satirlar');
-  [['Görev', a.aciklama], ['Model', modelSatiri(a)], ['Ne zaman', a.ne_zaman_metin]].forEach(([k, v]) => { const s = el('div', 'satir'); s.append(el('span', null, k), el('span', null, v || '—')); satirlar.append(s); });
+  const b = a.bilgi || {};   // hat örneği: koşunun görev adı (worktree etiketi), model, süre, token, ≈USD
+  const sure = () => { const bas = Date.parse(b.baslangic || ''), son = Date.parse(b.bitis || '') || Date.now();
+    if (!bas) return '—'; const sn = Math.max(0, Math.round((son - bas) / 1000)); return sn < 90 ? sn + ' sn' : Math.round(sn / 60) + ' dk'; };
+  (a.ornek ? [['Görev', b.etiket], ['Model', modelAdi(b.model)], ['Süre', sure()],
+    ['Token', b.token ? kisaSayi(b.token) + (b.alt_token ? ' · alt-ajan ' + kisaSayi(b.alt_token) : '') : ''],
+    ['≈USD', typeof b.usd_tahmini === 'number' ? '≈' + b.usd_tahmini.toFixed(3) : '']]
+    : [['Görev', a.aciklama], ['Model', modelSatiri(a)], ['Ne zaman', a.ne_zaman_metin]]).forEach(([k, v]) => { const s = el('div', 'satir'); s.append(el('span', null, k), el('span', null, v || '—')); satirlar.append(s); });
   const baslik = el('div', 'portre-bas'); const bm = el('div');
   bm.append(el('div', 'oda-etiket', oda.ad), el('h2', null, a.ad));
   const yazi = memeBul(a.id, a.oda)?.yazi; if (yazi) bm.append(el('div', 'meme-alt', yazi));
   baslik.append(avatar(a.id, 'buyuk'), bm);
-  const parcalar = [kapat, baslik, tokenKarti(a.id), durumRozet(a), satirlar];
+  const parcalar = [kapat, baslik, ...(a.ornek ? [] : [tokenKarti(a.id)]), durumRozet(a), satirlar];
   if (a.id !== 'ceo') parcalar.push(el('h3', null, 'Şu an'), canliListe(a));
   if (a.sanal) {   // gözlem masası: iş verilmez, sohbet yok; yalnız durum ve token
     parcalar.push(el('div', 'not', 'Bu masa yalnız gözlenir. İş atanamaz, zamanlanamaz; token Maliyet sekmesinde ayrı satırda.'));
@@ -2741,7 +2847,7 @@ function ajanPaneli(a) {
 function oturumAdi(t) { return t.pencere_adi && !/^claude(\.exe)?$/.test(t.pencere_adi) ? t.pencere_adi : t.oturum_adi; }
 function canliListe(a) {
   const kok = el('div', 'canli-liste');
-  const liste = [...terminaller.values()].filter(t => t.ajan === a.id);
+  const liste = [...terminaller.values()].filter(t => terminalSahibi(t) === a.id);
   liste.forEach(t => {
     const kutu = el('div', 'oturum');
     const ust = el('div', 'ust' + (t.durum === 'calisiyor' ? ' calisiyor' : ''));
@@ -2751,7 +2857,7 @@ function canliListe(a) {
       const satir = el('div', 'alt' + (x.durum === 'calisiyor' ? ' calisiyor' : ''));
       const yazi = el('div');
       const eylem = x.durum === 'calisiyor' ? (x.son_arac ? eylemYaz(x.son_arac, x.son_hedef).simdi : 'çalışıyor') : 'Bitti';
-      yazi.append(el('span', null, '↳ ' + (x.gorev || x.tur)), el('small', null, [x.tur, modelAdi(x.model), eylem].filter(Boolean).join(' · ')));
+      yazi.append(el('span', null, '↳ ' + (x.gorev || x.tur)), el('small', null, [x.tur, modelAdi(x.model), eylem, x.token ? kisaSayi(x.token) + ' token' : ''].filter(Boolean).join(' · ')));
       satir.append(el('span', 'nokta'), yazi);
       kutu.append(satir);
     });
@@ -3251,22 +3357,30 @@ function maliyetSayfasi() {
   const token = u => u ? (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0) : null;
   const ozet = el('div', 'ozet-sayilar');
   const sanalToplam = id => sayac.sanal_toplam?.[id] ?? ot.filter(r => r.ajan === id).reduce((t, r) => t + (r.toplam || 0), 0);
-  [[sayac.bugun_kosu ?? 0, 'bugünkü ajan koşusu'], [sayac.bugun_ceo ?? 0, 'CEO kararı'], ...(apiYkb ? [[sayac.bugun_ykb ?? 0, 'Başkan planı']] : []),['0', 'boşta harcanan token'], ['$' + Number(sayac.toplam_maliyet_usd || 0).toFixed(2), 'ölçülen (API liste fiyatı)'],
-    ...SANALLAR.map(a => [kisaSayi(sanalToplam(a.id)), a.ad + ' · token' + (a.id === 'gelistirme-hatti' ? ' (' + ot.filter(r => r.ajan === a.id).length + ' koşu)' : '')])]
+  // USD: ofis koşusu ölçülen (claude -p), hat ve terminal token × liste fiyatı tahmini (token_sayac.FIYATLAR)
+  const tah = sayac.tahmini_toplam_usd || {}, dolar = v => '$' + Number(v || 0).toFixed(2);
+  const ofisUsd = tah.ofis ?? sayac.toplam_maliyet_usd;
+  [[sayac.bugun_kosu ?? 0, 'bugünkü ajan koşusu'], [sayac.bugun_ceo ?? 0, 'CEO kararı'], ...(apiYkb ? [[sayac.bugun_ykb ?? 0, 'Başkan planı']] : []),['0', 'boşta harcanan token'],
+    [dolar(ofisUsd), 'ofis (ölçülen)'], ['≈' + dolar(tah.hat), 'hat ≈'], ['≈' + dolar(tah.terminal), 'terminal ≈'],
+    ['≈' + dolar(tah.toplam ?? (Number(ofisUsd || 0) + Number(tah.hat || 0) + Number(tah.terminal || 0))), 'toplam ≈'],
+    ...SANALLAR.filter(a => !a.ornek).map(a => [kisaSayi(sanalToplam(a.id)), a.ad + ' · token' + (a.id === 'gelistirme-hatti' ? ' (' + ot.filter(r => r.ajan === a.id).length + ' koşu)' : '')])]
     .forEach(([b, s]) => { const d = el('div'); d.append(el('b', null, String(b)), el('span', null, s)); ozet.append(d); });
   const tablo = el('table'); const bas = el('tr');
   [['Saat'], ['Kaynak'], ['Ajan'], ['Durum'], ['Süre', 1], ['Token', 1], ['USD', 1]].forEach(([t, s]) => bas.append(el('th', s ? 'sayi' : '', t)));
   tablo.append(bas);
-  // ofis koşuları (olaylardan) + terminal oturumları / hat koşuları (token sayacından); USD yalnız ofis koşusunda ölçülür
+  // ofis koşuları (olaylardan, USD ölçülen) + terminal oturumları / hat koşuları (token sayacından, ≈USD tahmin;
+  // alt-ajan token'ı satıra dahil). ilk/model/etiket'i boş eski satırlar en alta.
   const satirlar = [
     ...k.map(r => { const s = /-(\d{2})(\d{2})\d{2}-/.exec(r.kosu_id || ''); return { saat:s ? s[1] + ':' + s[2] : '', kaynak:'ofis',
       ad:(ajanBul(r.ajan)?.ad || (r.ajan === 'ykb' ? apiYkb?.ad || 'Yönetim Kurulu Başkanı' : r.ajan)) + (r.model ? ' · ' + modelAdi(r.model) : ''),
       durum:r.durum === 'basarili' ? 'bitti' : r.durum || '—', sure:r.sure_sn != null ? Math.round(r.sure_sn) + ' sn' : '—', token:token(r.kullanim),
       usd:typeof r.maliyet_usd === 'number' ? r.maliyet_usd.toFixed(3) : '—' }; }),
     ...ot.map(r => { const s = /T(\d{2}):(\d{2})/.exec(r.ilk || ''); const ad = ajanBul(r.ajan)?.ad || r.ajan;
-      return { saat:s ? s[1] + ':' + s[2] : '', kaynak:r.kaynak === 'hat' ? 'hat' : 'terminal', ad:r.etiket ? ad + ' · ' + r.etiket : ad,
-        durum:modelAdi(r.model) || '—', sure:'—', token:r.toplam ?? token(r.kullanim), usd:'—' }; }),
-  ].sort((x, y) => (y.saat || '').localeCompare(x.saat || ''));
+      return { saat:s ? s[1] + ':' + s[2] : '', kaynak:r.kaynak === 'hat' ? 'hat' : 'terminal',
+        ad:(r.etiket ? ad + ' · ' + r.etiket : ad) + (r.alt_toplam ? ' · alt-ajan ' + kisaSayi(r.alt_toplam) : ''),
+        durum:modelAdi(r.model) || '—', sure:'—', token:r.toplam ?? token(r.kullanim),
+        usd:typeof r.usd_tahmini === 'number' ? '≈' + r.usd_tahmini.toFixed(3) : '—', eski:!!(r.eski ?? !(r.ilk && r.model && r.etiket)) }; }),
+  ].sort((x, y) => (x.eski ? 1 : 0) - (y.eski ? 1 : 0) || (y.saat || '').localeCompare(x.saat || ''));
   satirlar.forEach(r => {
     const tr = el('tr');
     const kay = el('td', 'kaynak'); kay.append(el('span', r.kaynak, r.kaynak));
@@ -3276,7 +3390,8 @@ function maliyetSayfasi() {
   });
   if (!satirlar.length) { const tr = el('tr'); const td = el('td', null, 'Bugün henüz koşu yok.'); td.colSpan = 7; tr.append(td); tablo.append(tr); }
   const kap = el('div', 'maliyet-kap'); kap.append(tablo);
-  return [el('h2', null, 'Maliyet'), el('p', 'alt', sayac.maliyet_notu || 'Ajanlar yalnız iş gelince çalışır; boştayken model çağrısı yok.'), ozet, kap];
+  return [el('h2', null, 'Maliyet'), el('p', 'alt', sayac.maliyet_notu || 'Ajanlar yalnız iş gelince çalışır; boştayken model çağrısı yok.'),
+    el('p', 'alt', 'Pro aboneliğinde gerçek fatura değil; API liste fiyatı eşdeğeri.'), ozet, kap];
 }
 /* ---------- dizin sekmesi: ~/beyin altında gezin, .md dosyalarını oku (salt okuma) ---------- */
 let dizinYol = '', dizinDosya = null, dizinDuzenle = false;
@@ -4099,6 +4214,8 @@ function etiketGuncelle() {
   const ogeler = [];
   [...AJANLAR, ...SANALLAR, ...altAjanlar].forEach(a => {
     const e = etiketAl(a);
+    if (a.gizli !== undefined) e.d.style.display = a.gizli ? 'none' : '';   // örnekler varken taban hat masası gizli
+    if (a.gizli) return;
     const [sinif, metin] = etiketMetni(a);
     const balonMetin = a.balon && Date.now() < a.balonBitis ? a.balon : null;
     let degisti = false;
@@ -4236,6 +4353,7 @@ function gorunumUygula(yeni) {
   try { localStorage.setItem(GORUNUM_K, yeni); } catch { /* seçim yalnız bu oturumda kalır */ }
   meme.kapat();
   tumAjanlar().forEach(a => { if (a.kedi) a.kedi = karakterDegistir(a.kedi, ajanKarakteri(a)); });
+  tumAjanlar().forEach(a => altAjanTemizle(a.id, true)); terminalSenkron();   // terminal yavruları yeni görünümle yeniden doğar
   KURUL.forEach(m => { m.kedi = karakterDegistir(m.kedi, mentorKarakteri(m.kaynak, m.sira)); });
   if (cayci) { cayci.kedi = karakterDegistir(cayci.kedi, cayciKarakteri()); cayci.kedi.setDurum('dusunuyor'); }
   if (yeni === 'duygu') kontrolOdasiAc(); else { kontrolOdasi?.dispose(); kontrolOdasi = null; }

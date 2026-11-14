@@ -1068,6 +1068,7 @@ def sayac_yaniti():
                      "kullanim": o.get("kullanim"), "model": o.get("model"), "tur": o.get("tur")} for o in biten],
         "toplam_kullanim": toplam,
         "toplam_maliyet_usd": round(maliyet, 6),
+        "tahmini_toplam_usd": token_sayac.tahmini_toplam(oturumlar, maliyet),
         "maliyet_notu": "claude -p çıktısındaki total_cost_usd toplamı (API liste fiyatı karşılığı); "
                         "abonelikte faturaya yansıyan tutar değildir. Ölçülen koşu: "
                         f"{maliyet_olculen}/{len(biten)}",
@@ -2199,7 +2200,7 @@ class Isleyici(SimpleHTTPRequestHandler):
             except IstekHatasi as e:
                 return self._json(e.kod, {"hata": str(e)})
         if yol.path == "/api/terminaller":
-            return self._json(200, {"terminaller": KOPRU.liste()})
+            return self._json(200, {"terminaller": KOPRU.liste(), "sanal_ornekler": KOPRU.ornekler()})
         if yol.path == "/api/olaylar":
             return self._sse(parse_qs(yol.query))
         if yol.path.startswith("/api/"):

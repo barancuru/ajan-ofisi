@@ -188,7 +188,7 @@ eşleşmeyenler gizlenir. `gizle` listesindeki parçayı taşıyan oturum hiçbi
 `claude -p` koşuları ve diğer etkileşimsiz koşular varsayılana düşmez.
 
 **Ana ajan ve Geliştirme hattı (sanal gözlem masaları):** `ajanlar.json`'a yazılmazlar, kodda sabittir
-(`ortak.SANAL_AJANLAR`); CEO odasında iki yan masada otururlar. İş atanamaz, zamanlanamaz, kuyruğa alınamaz; panelde
+(`ortak.SANAL_AJANLAR`); Ana ajan CEO odasının yan masasında, Geliştirme hattı Atölye'de oturur. İş atanamaz, zamanlanamaz, kuyruğa alınamaz; panelde
 yalnız durum ve token görünür, ajan sayısına girmezler. `kopru.json` anahtarları (yazılmazsa varsayılanlar çalışır):
 - `ana_ajan_cwd` (varsayılan `["~"]`): yalnız bu klasörün **tam kendisinde** açılan etkileşimli oturum (terminal ya da
   masaüstü) "Ana ajan" masasına düşer; alt klasörler eski kurallarla eşlenir. Aynı klasöre açık `cwd`/`pencere`
@@ -196,12 +196,21 @@ yalnız durum ve token görünür, ajan sayısına girmezler. `kopru.json` anaht
 - `hat_cwd` (varsayılan `["~/beyin-is/wt"]`): bu klasörün altındaki her oturum, `bin/calistir`'ın etkileşimsiz
   `claude -p` koşuları dahil, "Geliştirme hattı" masasına düşer. Koşu adı worktree adıdır (`<proje>-<dal>`); son
   mesajından 5 dakika sonra kapanır. Maliyet sekmesinde koşu başına bir satır olur (Kaynak: `hat`).
+  **Atölye'de koşu başına masa:** aynı anda çalışan her hat koşusu kendi kedisiyle oturur. Proje, etiketin başından
+  `~/beyin/sistem/projeler.conf`'taki adlarla çıkarılır (eşleşmezse `hat` = "diğer"); dört sabit yuva vardır: homeos,
+  ajan-ofisi, turnusol, diğer. Masa önünde proje adı yazar; panelde görev adı (etiket), model, süre, token ve ≈USD.
+  Koşu bitince 10 dakika "bitti" pozunda kalır, sonra yuva boşalır; hiç koşu yokken tek, uyuyan "Geliştirme hattı"
+  kedisi durur. Örnekler `GET /api/terminaller` yanıtındaki `sanal_ornekler` listesinden (`id: gelistirme-hatti:<proje>`)
+  dinamik kurulur; `ajanlar.json`'a yazılmaz.
 - `[]` yazmak eşlemeyi kapatır; `gizle` ve `atla_cwd` ikisinin de üstündedir. Gizlilik kuralı aynıdır: yalnız araç adı
   ve kısa hedef. Ev klasörü eşlemesi kendi özel oturumlarını ofiste görünür yapar; istemiyorsan `"ana_ajan_cwd": []`.
 
 **Kediye (ya da yanındaki yavruya) basınca** panelde "Şu an" bölümü açılır: o ajana bağlı her oturum, ne yaptığı ve
 o oturumun alt-ajanları (görev başlığı, tür, model, son araç; son 30 dakika). Alt-ajan bilgisi
-`<oturum>/subagents/agent-*.meta.json` ve transkript kuyruğundan okunur, mesaj metni okunmaz.
+`<oturum>/subagents/agent-*.meta.json` ve transkript kuyruğundan okunur, mesaj metni okunmaz. Çalışan alt-ajanlar
+(Ana ajan ve hat örnekleri dahil) masanın önünde yavru kedi olarak da görünür. Alt-ajanın token'ı (transkriptin yalnız
+usage satırları) ebeveyn oturumun satırına eklenir; panelde ve Maliyet tablosunda ayrıca yazar. Hat koşularında `Agent`
+aracı `bin/calistir`'da kapalı olduğundan orada yavru çıkmaz.
 
 Kapsam: düz terminal, VS Code / IDE terminali ve tmux (`~/.claude/sessions`); Claude masaüstü uygulaması ve diğer
 terminal dışı girişler (transkript taraması).
@@ -228,8 +237,15 @@ yeniden okunan bağlamdır (CLAUDE.md, önceki mesajlar); yeni işlenen iş değ
 toplamda en büyük sayı odur. Maliyet sekmesi yalnız `claude -p`'nin bildirdiği `total_cost_usd` toplamını gösterir
 (API liste fiyatı karşılığı; abonelikte faturaya yansıyan tutar değildir). Tabloda "Kaynak" sütunu satırın nereden
 geldiğini söyler: `ofis` (ofis koşusu), `terminal` (köprünün eşlediği oturum), `hat` (geliştirme hattı koşusu).
-Terminal ve hat satırlarında token gerçek usage'dandır, USD ölçülemediği için `—` kalır; Ana ajan ve Geliştirme hattı
-özet kutularında ayrı toplam olarak da görünür.
+Terminal ve hat satırlarında token gerçek usage'dandır; USD ölçülmez, **tahmin** edilir (`≈0.123`): token × API liste
+fiyatı. Özet kutuları: "ofis (ölçülen)", "hat ≈", "terminal ≈", "toplam ≈". Pro aboneliğinde gerçek fatura değildir.
+Modeli bilinmeyen satırda (1.0.72 öncesi eski satırlar dahil) USD `—` kalır; `ilk`/`model`/`etiket`'i boş eski satırlar
+tablonun en altına gider. Ana ajan ve Geliştirme hattı özet kutularında ayrı token toplamı olarak da görünür.
+
+**Fiyatları güncellemek:** tek yer `token_sayac.py` içindeki `FIYATLAR` sözlüğüdür: model kimliği →
+`(giriş, çıkış, önbellek okuma)` $/milyon token. Önbelleğe yazma = giriş × `ONBELLEK_YAZMA_KAT` (1,25). Kısa adlar
+(`opus`, `sonnet`, `haiku`) `KISA_MODEL`'den eşlenir; tarihli kimlikler (`claude-opus-5-5-20261101`) ön ekle eşleşir.
+Yeni model gelince satırı ekle, sunucuyu yeniden başlat; geçmiş günler de yeni fiyatla yeniden hesaplanır.
 
 ### API
 | Uç | Ne |
