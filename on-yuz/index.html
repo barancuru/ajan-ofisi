@@ -597,6 +597,8 @@ import { memeKur, memeBul } from './meme.js';
 import { portreleriUret } from './portre.js';
 import { dekorKur, masaLambasi } from './dekor.js';
 import { createDuygu, ajanDuygusu, duyguSirayla, kontrolOdasiKur, parlamaAyarla } from './duygu.js';
+// model kısa adları: modelAdi() sahne kurulurken de çağrılıyor (YKB tabelası), bu yüzden en üstte tanımlı
+const MODEL_ADI = { haiku:'Haiku 5.5', sonnet:'Sonnet 5.5', opus:'Opus 5.5', fable:'Fable 5.2' };
 
 const PARAM = new URLSearchParams(location.search);
 const HAREKETSIZ = matchMedia('(prefers-reduced-motion: reduce)');
@@ -2404,7 +2406,6 @@ function terminalSenkron() {
   });
   ustGuncelle(); panelYenile();
 }
-const MODEL_ADI = { haiku:'Haiku 4.5', sonnet:'Sonnet 5.5', opus:'Opus 5.5', fable:'Fable 5.1' };
 function modelAdi(m) {
   if (!m) return '';
   if (MODEL_ADI[m]) return MODEL_ADI[m];
