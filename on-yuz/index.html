@@ -366,6 +366,17 @@ td.sayi,th.sayi{text-align:right}
 .gelistirme-kart .rapor-dugme{display:block;margin-top:8px;min-height:36px;font-size:13px;font-weight:600;cursor:pointer}
 .gelistirme-kart summary{font-size:12.5px;font-weight:600;cursor:pointer;color:var(--soluk)}
 .gelistirme-kart pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11.5px;line-height:1.45;max-height:280px;overflow:auto;margin-top:6px;padding:8px;border-radius:8px;background:rgba(59,52,44,.05)}
+.alarm-bant{position:fixed;top:60px;left:0;right:0;z-index:5;display:flex;align-items:center;gap:12px;padding:8px 20px;background:#b3261e;color:#fff;font-size:13.5px;box-shadow:0 2px 10px rgba(0,0,0,.18)}
+.alarm-bant[hidden]{display:none}
+.alarm-bant .metin{flex:1;min-width:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.alarm-bant button{flex:0 0 auto;min-height:36px;padding:0 14px;border-radius:8px;border:1px solid rgba(255,255,255,.6);background:rgba(255,255,255,.14);color:#fff;font-weight:600;cursor:pointer}
+.takili-rozet{flex:0 0 auto;min-height:36px;padding:0 12px;border-radius:999px;border:1px solid rgba(179,38,30,.4);background:#fde8e6;color:#b3261e;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+.takili-rozet[hidden]{display:none}
+.takilan-kart .neden{font-weight:600;margin-top:6px;font-size:13.5px}
+.takilan-kart .ayrinti{font-size:12.5px;color:var(--soluk);margin-top:4px;overflow-wrap:anywhere}
+.takilan-kart .meta{font-size:12px;color:var(--soluk);margin-top:6px;display:flex;gap:10px;flex-wrap:wrap}
+.takilan-kart .dugmeler{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+@media (max-width:768px){.alarm-bant{top:calc(52px + env(safe-area-inset-top));padding:8px 10px;width:100%;box-sizing:border-box}.alarm-bant button{min-height:44px}.takili-rozet{min-height:44px;padding:0 10px}.takilan-kart .dugmeler{flex-direction:column}.takilan-kart .dugmeler button{min-height:44px;width:100%}.takilan-kart .mini.rapor-dugme{min-height:44px}}
 @media (max-width:768px){.gelistirme-kart .rapor-dugme{min-height:44px;width:100%}.gelistirme-form select,.gelistirme-form input,.gelistirme-form textarea,.gelistirme-kart textarea{font-size:16px}.gelistirme-izgara{grid-template-columns:1fr}.gelistirme-kart .dugmeler button{padding:10px 12px}}
 .dizin-yol{display:flex;flex-wrap:wrap;gap:2px 6px;align-items:center;font-size:13px;margin-bottom:12px}
 .dizin-yol button{font-size:13px;font-weight:600;color:var(--mercan-k);padding:4px 6px;min-height:32px}
@@ -500,12 +511,14 @@ td.sayi,th.sayi{text-align:right}
   </nav>
   <div class="bosluk"></div>
   <div class="hap"><span class="nokta" id="aktifNokta"></span><b id="aktif">0</b><span class="yazi"> ajan çalışıyor</span></div>
+  <button class="takili-rozet" id="takiliRozet" type="button" hidden></button>
   <span class="saat" id="saat"></span>
   <button class="dugme gorunum" id="gorunumDugme" type="button" aria-pressed="false" aria-label="Duygu karakterleri görünümü"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0"/><path d="M9 9.5v.5M15 9.5v.5"/></svg><span class="yazi">Kediler / <b>Duygular</b></span></button>
   <button class="dugme" id="genel" type="button">Genel bakış</button>
   <a class="dugme cikis" href="/cikis" title="Oturumu kapat">Çıkış</a>
   <button class="dugme mobil-gecis" id="mobilGecis" type="button">Ofisi göster</button>
 </header>
+<div class="alarm-bant" id="alarmBant" role="alert" hidden><span class="metin" id="alarmMetin"></span><button type="button" id="alarmGordum">Gördüm</button></div>
 <div class="arac-menu" id="aracMenu" role="menu" aria-label="Araçlar" hidden>
   <button type="button" role="menuitem" data-sekme="dizin">Dizin</button>
   <button type="button" role="menuitem" data-sekme="kodgrafi">Kod Grafı</button>
@@ -694,6 +707,7 @@ const SES = {
   uyan: () => ton(392, .18, .035, 'sine', 0, 1.6),
   bitti: () => [523, 659, 784, 1047].forEach((f, i) => ton(f, .16, .04, 'sine', i * .06)),
   hafiza: () => [880, 1320].forEach((f, i) => ton(f, .3, .03, 'sine', i * .09)),
+  alarm: () => [880, 660, 880].forEach((f, i) => ton(f, .18, .05, 'triangle', i * .22)),
 };
 addEventListener('pointerdown', sesAc);
 addEventListener('keydown', sesAc);
@@ -2804,8 +2818,9 @@ let gelistirmeZaman = null;
 async function gelistirmeSayfasi() {
   clearInterval(gelistirmeZaman);
   let veri;
-  try { veri = DEMO ? { projeler:['ajan-ofisi'], gorevler:[] } : await getJSON('/api/gelistirme'); }
+  try { veri = DEMO ? { projeler:['ajan-ofisi'], gorevler:[], ...nobetciDemo() } : await getJSON('/api/gelistirme'); }
   catch { return [el('h2', null, 'Geliştirme'), el('p', 'alt', 'Geliştirme listesi alınamadı.')]; }
+  nobetciUygula(veri);
   // refresh every 20 s while open, but never wipe text you're typing
   gelistirmeZaman = setInterval(() => {
     if (aktifSekme !== 'gelistirme') return clearInterval(gelistirmeZaman);
@@ -2842,6 +2857,10 @@ async function gelistirmeSayfasi() {
   if (oneriler.length) {
     const izO = el('div', 'izgara gelistirme-izgara'); oneriler.forEach(g => izO.append(oneriKarti(g)));
     parcalar.push(el('h3', 'ara-baslik', 'Ofisin önerileri · ' + oneriler.length), izO);
+  }
+  if ((veri.takilanlar || []).length) {
+    const izT = el('div', 'izgara gelistirme-izgara'); veri.takilanlar.forEach(t => izT.append(takilanKarti(t)));
+    parcalar.push(el('h3', 'ara-baslik', 'Takılanlar · ' + veri.takilanlar.length), izT);
   }
   parcalar.push(el('h3', 'ara-baslik', 'Açık görevler'), iz);
   if (bitti.length) {
@@ -2913,6 +2932,39 @@ function oneriTaramaSatiri(veri) {
   };
   const satir = el('div', 'satir2'); satir.append(proje, dug);
   k.append(el('h4', null, 'Ofisin önerileri'), satir, bilgi);
+  return k;
+}
+const TESHIS_YAZI = { '':'Teşhis yok', basladi:'Teşhis sürüyor', yapildi:'Teşhis hazır', hata:'Teşhis başarısız' };
+function takilanKarti(t) {
+  const k = el('div', 'kart gelistirme-kart takilan-kart');
+  const ust = el('div', 'ust');
+  ust.append(el('span', 'rozet takildi', 'Takıldı'), document.createTextNode(t.proje || '-'));
+  const meta = el('div', 'meta');
+  meta.append(el('span', null, sureYazi(t.takili_since) + 'dir takılı'), el('span', null, 'Deneme: ' + (t.deneme ?? 0)), el('span', null, TESHIS_YAZI[t.teshis] || t.teshis));
+  k.append(ust, el('h4', null, String(t.gorev || '').replace(/\.md$/, '')), el('div', 'neden', t.neden || ''));
+  if (t.ayrinti) k.append(el('div', 'ayrinti', t.ayrinti));
+  k.append(meta);
+  if (t.teshis === 'yapildi') {
+    const oku = el('button', 'mini rapor-dugme', 'Teşhisi oku'); oku.type = 'button';
+    oku.onclick = () => akisPopAc(String(t.gorev || '').replace(/\.md$/, '') + ' · teşhis', t.teshis_metin || 'Görev dosyasında teşhis bölümü bulunamadı.', '');
+    k.append(oku);
+  }
+  const dug = el('div', 'dugmeler'); k.append(dug);
+  [['yeniden-dene', 'Yeniden dene', 'onay', 'Sıraya alındı; ajan birazdan başlar', ''],
+   ['teshis-iste', 'Teşhis iste', 'sonra', 'Teşhis istendi; nöbetçi sıradaki turda yapar', ''],
+   ['iptal', 'İptal', 'sonra', 'Görev iptal edildi', 'Görev iptal edilsin mi? Bu işlem geri alınamaz.']].forEach(([eylem, yazi, sinif, mesaj, sor]) => {
+    const b = el('button', sinif, yazi); b.type = 'button';
+    if (eylem === 'teshis-iste' && t.teshis === 'basladi') b.disabled = true;
+    b.onclick = async () => {
+      if (DEMO) return tost('Demo modunda görev değiştirilemez');
+      if (sor && !confirm(sor)) return;
+      dug.querySelectorAll('button').forEach(x => x.disabled = true);
+      const { durum, veri } = await postJSON('/api/gelistirme', { islem:'takilan', gorev:t.gorev, eylem });
+      tost(durum === 200 ? mesaj : (veri.hata || 'hata ' + durum));
+      sekmeAc('gelistirme');
+    };
+    dug.append(b);
+  });
   return k;
 }
 function oneriKarti(g) {
@@ -4046,11 +4098,53 @@ function gorunumGuncelle(t) {
   parlamaAyarla(parilti);
 }
 
+/* ---------- nöbetçi: kritik alarm bandı + takılı görev rozeti (her sekmede) ---------- */
+let nobetci = { alarmlar:[], takilanlar:[] }, bildirilenAlarm = null, demoAlarmGordu = false;
+const zamanOnce = dk => new Date(Date.now() - dk * 60000).toISOString();
+function nobetciDemo() {
+  const n = demoVeri?.nobetci || {};
+  return { alarmlar:(n.alarmlar || []).map(a => ({ ...a, zaman:zamanOnce(a.dk_once || 0), okundu:demoAlarmGordu })),
+    takilanlar:(n.takilanlar || []).map(t => ({ ...t, takili_since:zamanOnce(t.takili_dk || 0) })) };
+}
+function sureYazi(iso) {
+  const dk = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  return isNaN(dk) ? '—' : dk < 60 ? dk + ' dk' : dk < 1440 ? Math.floor(dk / 60) + ' sa' : Math.floor(dk / 1440) + ' gün';
+}
+function nobetciUygula(v) {
+  nobetci = { alarmlar:v.alarmlar || [], takilanlar:v.takilanlar || [] };
+  const kritik = nobetci.alarmlar.filter(a => a.seviye === 'kritik' && !a.okundu);
+  const bant = $('alarmBant');
+  bant.hidden = !kritik.length;
+  if (kritik.length) {
+    const a = kritik[0];
+    $('alarmMetin').textContent = '⚠ ' + (a.proje ? a.proje + ': ' : '') + a.mesaj + ' · ' + saatYazi(new Date(a.zaman)) + (kritik.length > 1 ? ' (+' + (kritik.length - 1) + ' daha)' : '');
+  }
+  const yeni = kritik.filter(a => bildirilenAlarm && !bildirilenAlarm.has(a.id));
+  bildirilenAlarm = new Set([...(bildirilenAlarm || []), ...kritik.map(a => a.id)]);
+  if (yeni.length) {
+    SES.alarm();
+    try { if ('Notification' in window && Notification.permission === 'granted') new Notification('Ajan Ofisi · kritik alarm', { body:(yeni[0].proje ? yeni[0].proje + ': ' : '') + yeni[0].mesaj }); } catch {}
+  }
+  const r = $('takiliRozet'), n = nobetci.takilanlar.length;
+  r.hidden = !n; r.textContent = 'Takılı görev: ' + n;
+}
+async function nobetciYukle() {
+  try { nobetciUygula(DEMO ? nobetciDemo() : await getJSON('/api/nobetci')); } catch {}
+}
+$('alarmGordum').onclick = async () => {
+  SES.tik();
+  if (DEMO) { demoAlarmGordu = true; return nobetciUygula(nobetciDemo()); }
+  const { durum, veri } = await postJSON('/api/gelistirme', { islem:'alarm-gordum' });
+  if (durum === 200) nobetciUygula(veri); else tost(veri.hata || ('hata ' + durum));
+};
+$('takiliRozet').onclick = () => { SES.tik(); sekmeAc('gelistirme'); };
+addEventListener('pointerdown', () => { try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); } catch {} }, { once:true });
+
 /* ---------- başlangıç ---------- */
 kartlariCiz();
-if (DEMO) { modGoster('demo', 'Demo · arka uç kapalı'); demo.basla(); ustGuncelle(); }
+if (DEMO) { modGoster('demo', 'Demo · arka uç kapalı'); demo.basla(); ustGuncelle(); nobetciYukle(); }
 else if (!apiAjanlar.length) { modGoster('kopuk', 'Sunucu yok · ?demo=1 ile dene'); tost('Sunucuya ulaşılamadı. Bağlamadan denemek için adrese ?demo=1 ekle.'); }
-else { ilkDurum(); await sayacYukle(); await tokenYukle(); await terminalleriYukle(); canliBaglan(); setInterval(sayacYukle, 30000); setInterval(terminalleriYukle, 8000); setInterval(tokenYukle, 60000); }
+else { ilkDurum(); nobetciYukle(); setInterval(nobetciYukle, 30000); await sayacYukle(); await tokenYukle(); await terminalleriYukle(); canliBaglan(); setInterval(sayacYukle, 30000); setInterval(terminalleriYukle, 8000); setInterval(tokenYukle, 60000); }
 const hash = new URLSearchParams(location.hash.slice(1));
 const hOda = odaBul(hash.get('oda') || ''), hAjan = ajanBul(hash.get('ajan') || '');
 if (hAjan) { odayaGit(odaBul(hAjan.oda), true); ajanPaneli(hAjan); odaVurgu(hAjan.oda); }

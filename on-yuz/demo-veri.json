@@ -372,5 +372,15 @@
    {"ajan": "gelistirme-hatti", "kaynak": "hat", "etiket": "ajan-ofisi-1114-ofiste-ana-ajan", "model": "claude-opus-5-5", "dk": 12,
     "kullanim": {"input_tokens": 140, "output_tokens": 12600, "cache_creation_input_tokens": 66300, "cache_read_input_tokens": 1420000}}
   ]
+ },
+ "nobetci": {
+  "alarmlar": [
+   {"id": "demo-alarm-1", "dk_once": 12, "proje": "homeos", "seviye": "kritik", "mesaj": "Görev iki kez üst üste takıldı: HomeOS ışık sahnesi testleri geçmiyor.", "okundu": false}
+  ],
+  "takilanlar": [
+   {"gorev": "HomeOS ışık sahnesi.md", "proje": "homeos", "neden": "Doğrulama başarısız", "ayrinti": "test_sahne.py 2 hatayla bitti; ajan aynı düzeltmeyi iki kez denedi.", "deneme": 2, "teshis": "yapildi", "degisti": false, "takili_dk": 95,
+    "teshis_metin": "## Teşhis (nöbetçi)\nTest, eski sahne kimliğini bekliyor. Görev dosyasındaki beklenen kimlik güncellenmeli; kod doğru."},
+   {"gorev": "Turnusol rapor sayfası.md", "proje": "turnusol", "neden": "Ajan zaman aşımına uğradı", "ayrinti": "Koşu 40 dakikada bitmedi.", "deneme": 1, "teshis": "", "degisti": false, "takili_dk": 340}
+  ]
  }
 }

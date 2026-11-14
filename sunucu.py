@@ -1392,7 +1392,154 @@ def gelistirme_yaniti():
                     o = None
                 if o:
                     gorevler.append(o)
-    return {"projeler": gelistirme_projeleri(), "gorevler": gorevler, "oneri_taraniyor": oneri_taraniyor(), "oto_onay": oto_onay_durumu()}
+    return {"projeler": gelistirme_projeleri(), "gorevler": gorevler, "oneri_taraniyor": oneri_taraniyor(), "oto_onay": oto_onay_durumu(),
+            "alarmlar": alarmlar_oku(), "takilanlar": takilanlari_oku()}
+
+
+# ---------- Nöbetçi: alarmlar ve takılan görevler (koşucu yazar, ofis yalnız okur; sabit yollar) ----------
+
+ALARM_DOSYASI = os.path.join(BEYIN, ".cache", "alarm.json")
+TAKILAN_DOSYASI = os.path.join(BEYIN, ".cache", "takilanlar.json")
+ALARM_OKUNDU_DOSYASI = os.path.join(ortak.DURUM_DIZINI, "alarm-okundu.json")
+TEKRAR_DEN = ("yeniden-dene", "teshis-iste", "iptal")
+TESHIS_BASLIGI = "## Teşhis (nöbetçi)"
+
+
+def _cache_liste(yol):
+    """JSON list of dicts from a fixed path; missing or corrupt file → []."""
+    try:
+        with open(yol, encoding="utf-8") as f:
+            veri = json.load(f)
+    except (OSError, ValueError):
+        return []
+    return [x for x in veri if isinstance(x, dict)] if isinstance(veri, list) else []
+
+
+def _alarm_zamani(deger):
+    try:
+        if isinstance(deger, (int, float)) and not isinstance(deger, bool):
+            return datetime.fromtimestamp(deger)
+        t = datetime.fromisoformat(str(deger).strip().replace("Z", "+00:00"))
+        return t.astimezone().replace(tzinfo=None) if t.tzinfo else t
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
+def _alarm_kimligi(a):
+    return hashlib.sha1(f"{a.get('zaman')}|{a.get('proje')}|{a.get('mesaj')}".encode("utf-8")).hexdigest()[:16]
+
+
+def _okunmuslar():
+    try:
+        with open(ALARM_OKUNDU_DOSYASI, encoding="utf-8") as f:
+            veri = json.load(f)
+        return {x for x in veri.get("okundu", []) if isinstance(x, str)}
+    except (OSError, ValueError, AttributeError):
+        return set()
+
+
+def alarmlar_oku():
+    """Last 24 h of nöbetçi alarms, newest first, each with a stable id and its read flag."""
+    sinir = datetime.now() - timedelta(hours=24)
+    okunan = _okunmuslar()
+    sonuc = []
+    for a in _cache_liste(ALARM_DOSYASI):
+        t = _alarm_zamani(a.get("zaman"))
+        if t is None or t < sinir:
+            continue
+        o = {"zaman": t.isoformat(timespec="seconds"), "proje": str(a.get("proje") or "")[:60],
+             "seviye": "kritik" if a.get("seviye") == "kritik" else "bilgi", "mesaj": str(a.get("mesaj") or "")[:500]}
+        o["id"] = _alarm_kimligi(a)
+        o["okundu"] = o["id"] in okunan
+        sonuc.append(o)
+    sonuc.sort(key=lambda x: x["zaman"], reverse=True)
+    return sonuc
+
+
+def alarm_gordum(kapi_imzasi):
+    """'Gördüm': marks every current critical alarm as read. Persisted under durum/; only the web login may do it."""
+    if not kapidan_geldi(kapi_imzasi):
+        raise IstekHatasi(403, "alarm yalnız ofis girişinden kapatılabilir")
+    with GELISTIRME_KILIDI:
+        okunan = _okunmuslar() | {a["id"] for a in alarmlar_oku() if a["seviye"] == "kritik"}
+        os.makedirs(os.path.dirname(ALARM_OKUNDU_DOSYASI), exist_ok=True)
+        atomik_yaz(ALARM_OKUNDU_DOSYASI, json.dumps({"okundu": sorted(okunan)[-500:]}))
+
+
+def _teshis_metni(govde):
+    i = govde.find(TESHIS_BASLIGI)
+    if i < 0:
+        return ""
+    son = govde.find("\n## ", i + len(TESHIS_BASLIGI))
+    return govde[i:son if son > 0 else None].strip()[:4000]
+
+
+def takilanlari_oku():
+    """Stuck tasks from the nöbetçi cache, kept only while the real task file in gorevler/ still says durum: takildi."""
+    sonuc = []
+    for t in _cache_liste(TAKILAN_DOSYASI)[:50]:
+        try:
+            yol = takilan_dosya(t.get("gorev"))
+            with open(yol, encoding="utf-8", errors="replace") as f:
+                fm, govde = on_bilgi(f.read())
+            mtime = os.path.getmtime(yol)
+        except (IstekHatasi, OSError):
+            continue
+        if fm.get("durum") != "takildi":
+            continue
+        teshis = str(t.get("teshis") or "")
+        o = {"gorev": os.path.basename(yol), "proje": str(t.get("proje") or fm.get("proje", ""))[:60],
+             "neden": str(t.get("neden") or "")[:200], "ayrinti": str(t.get("ayrinti") or "")[:600],
+             "deneme": t.get("deneme") if isinstance(t.get("deneme"), int) else 0,
+             "teshis": teshis if teshis in ("", "basladi", "yapildi", "hata") else "",
+             "degisti": bool(t.get("degisti")),
+             "takili_since": datetime.fromtimestamp(mtime).isoformat(timespec="seconds")}
+        if o["teshis"] == "yapildi":
+            o["teshis_metin"] = _teshis_metni(govde)
+        sonuc.append(o)
+    return sonuc
+
+
+def takilan_dosya(ad):
+    """Task name → real file under gorevler/ (matched against the directory listing, never built from raw input)."""
+    if not isinstance(ad, str) or not ad.strip() or "\x00" in ad:
+        raise IstekHatasi(400, "geçersiz görev")
+    ad = ad.strip()
+    if not ad.endswith(".md"):
+        ad += ".md"
+    if not DOSYA_DESENI.match(ad) or ad.startswith("."):
+        raise IstekHatasi(400, "geçersiz görev")
+    try:
+        gercek = next((a for a in os.listdir(GOREV_DIZINI) if a == ad), None)
+    except OSError:
+        gercek = None
+    yol = os.path.join(GOREV_DIZINI, gercek) if gercek else ""
+    if not gercek or os.path.islink(yol) or not os.path.isfile(yol):
+        raise IstekHatasi(404, "görev yok")
+    return yol
+
+
+def takilan_islem(gorev, eylem, kapi_imzasi):
+    if not kapidan_geldi(kapi_imzasi):
+        raise IstekHatasi(403, "takılan görev işlemi yalnız ofis girişinden yapılabilir")
+    if eylem not in TEKRAR_DEN:
+        raise IstekHatasi(400, "eylem: yeniden-dene | teshis-iste | iptal")
+    yol = takilan_dosya(gorev)
+    with GELISTIRME_KILIDI:
+        with open(yol, encoding="utf-8", errors="replace") as f:
+            metin = f.read()
+        fm, _ = on_bilgi(metin)
+        if fm.get("durum") != "takildi":
+            raise IstekHatasi(409, f"görev takılı değil (durum: {fm.get('durum') or '-'})")
+        if eylem == "yeniden-dene":
+            metin = on_bilgi_yaz(on_bilgi_yaz(metin, "durum", "hazir"), "deneme", "0")
+        elif eylem == "teshis-iste":
+            metin = on_bilgi_yaz(metin, "teshis", "")
+        else:
+            metin = on_bilgi_yaz(metin, "durum", "reddedildi")
+        atomik_yaz(yol, metin)
+    if eylem == "yeniden-dene":
+        kosucuyu_durt()
 
 
 ONERI_BIRIMI = "beyin-oneri-elle"
@@ -1509,6 +1656,12 @@ def gelistirme_degistir(veri, kapi_imzasi=""):
     if islem == "oto-onay":
         oto_onay_degistir(veri.get("proje"), veri.get("acik"), kapi_imzasi)
         return gelistirme_yaniti()
+    if islem == "alarm-gordum":
+        alarm_gordum(kapi_imzasi)
+        return gelistirme_yaniti()
+    if islem == "takilan":
+        takilan_islem(veri.get("gorev"), veri.get("eylem"), kapi_imzasi)
+        return gelistirme_yaniti()
     if islem == "yeni":
         proje, baslik, istek = veri.get("proje"), veri.get("baslik"), veri.get("istek")
         model = veri.get("model") or "sonnet"
@@ -1594,7 +1747,7 @@ def gelistirme_degistir(veri, kapi_imzasi=""):
     if islem == "oneri-tara":
         oneri_taramasi_baslat(veri.get("proje"))
         return gelistirme_yaniti()
-    raise IstekHatasi(400, "islem: yeni | onay | oneri | oneri-tara | oto-onay")
+    raise IstekHatasi(400, "islem: yeni | onay | oneri | oneri-tara | oto-onay | alarm-gordum | takilan")
 
 
 # ---------- Öngörülebilirlik (tekrar eden işler) ----------
@@ -1928,6 +2081,8 @@ class Isleyici(SimpleHTTPRequestHandler):
                 return self._json(e.kod, {"hata": str(e)})
         if yol.path == "/api/hafiza":
             return self._json(200, hafiza_yaniti())
+        if yol.path == "/api/nobetci":
+            return self._json(200, {"alarmlar": alarmlar_oku(), "takilanlar": takilanlari_oku()})
         if yol.path == "/api/gelistirme":
             return self._json(200, gelistirme_yaniti())
         if yol.path == "/api/gelistirme/rapor":
