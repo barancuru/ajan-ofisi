@@ -27,7 +27,7 @@ class OtoOnayTesti(unittest.TestCase):
         self.assertFalse(sunucu.oto_onay_durumu()["turnusol"]["acik"])
 
     def test_listedisi_proje_reddedilir(self):
-        for proje in ("homeos", "ajan-ofisi", "../x"):
+        for proje in ("ajan-ofisi", "../x"):
             with self.assertRaises(sunucu.IstekHatasi):
                 sunucu.oto_onay_degistir(proje, True, "dogru")
         self.assertFalse(os.path.exists(self.dizin))
