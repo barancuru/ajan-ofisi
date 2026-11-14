@@ -133,6 +133,9 @@ prompt + 5 alanlı cron; aç/kapa, sil). Kayıtlar `durum/tekrarlar.json`'da dur
 (bilinen, kurulu, CEO olmayan ajan; hazır görev ya da prompt'tan tam biri; sır kalıbı yok; en sık 15 dakikada bir;
 en fazla 50 iş). Bozuk dosya `.bozuk-<zaman>` olarak yana alınır.
 
+### Oto-onay anahtarı
+Geliştirme sekmesinde Turnusol, HomeOS ve Ajan Ofisi için süreli (30 gün) oto-onay anahtarı vardır; yalnız ofis girişinden (kapı imzası) açılıp kapanır, süre dolunca kapalı sayılır. Açıkken bütün kontrollerden geçen, uyarısı olmayan paket onaysız canlıya geçer. Ajan Ofisi için: onay, giriş kapısı, SSH geçidi ya da ajan izinlerine dokunan paketler anahtar açık olsa da yine sana gelir (koşucu `hassas_degisim()`); canlıya alınınca ofis yeniden başlar.
+
 ### Operatör Panosu
 "Operatör Panosu" sekmesi (Öngörülebilirlik'in yanında) `GET /api/gelistirme` yanıtından senden karar/girdi bekleyen açık görevleri (`uat`, `oneri`, `takildi`) salt okunur listeler. Bitmemiş geliştirme görevlerinin gövdesindeki açık `- [ ]` maddeleri ve "Kullanıcı kararı gerektiren noktalar" bölümü de (`aksiyonlar` alanı, en çok 8 madde) kartta gösterilir; aksiyonu olan `calisiyor`/`hazir` görevler de panoya girer. Onay/ret Geliştirme sekmesinde kalır.
 - **İş başına systemd timer.** Her ekle/sil/aç/kapat sonrası sunucu `durum/systemd/` altına

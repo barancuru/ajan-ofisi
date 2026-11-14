@@ -1431,7 +1431,7 @@ KAPI_IMZA_DOSYASI = os.path.expanduser("~/.config/ofis-kapi/kapi.env")
 PAKET_MUHUR_DIZINI = os.path.expanduser(os.path.join(os.environ.get("XDG_STATE_HOME", "~/.local/state"), "beyin/paket-muhur"))
 CANLI_ONAY_DIZINI = os.path.expanduser("~/.config/ofis-kapi/onaylar")
 OTO_ONAY_DIZINI = os.path.expanduser("~/.config/ofis-kapi/oto-onay")
-OTO_ONAY_PROJELERI = ("turnusol", "homeos")
+OTO_ONAY_PROJELERI = ("turnusol", "homeos", "ajan-ofisi")
 OTO_ONAY_GUN = 30
 
 

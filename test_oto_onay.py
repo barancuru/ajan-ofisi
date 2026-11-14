@@ -27,7 +27,7 @@ class OtoOnayTesti(unittest.TestCase):
         self.assertFalse(sunucu.oto_onay_durumu()["turnusol"]["acik"])
 
     def test_listedisi_proje_reddedilir(self):
-        for proje in ("ajan-ofisi", "../x"):
+        for proje in ("baska-proje", "../x"):
             with self.assertRaises(sunucu.IstekHatasi):
                 sunucu.oto_onay_degistir(proje, True, "dogru")
         self.assertFalse(os.path.exists(self.dizin))
@@ -37,6 +37,15 @@ class OtoOnayTesti(unittest.TestCase):
         self.assertTrue(sunucu.oto_onay_durumu()["turnusol"]["acik"])
         sunucu.oto_onay_degistir("turnusol", False, "dogru")
         self.assertFalse(sunucu.oto_onay_durumu()["turnusol"]["acik"])
+
+    def test_ajan_ofisi_ac_kapat(self):
+        self.assertFalse(sunucu.oto_onay_durumu()["ajan-ofisi"]["acik"])
+        sunucu.oto_onay_degistir("ajan-ofisi", True, "dogru")
+        d = sunucu.oto_onay_durumu()["ajan-ofisi"]
+        self.assertTrue(d["acik"])
+        self.assertTrue(d["bitis"])
+        sunucu.oto_onay_degistir("ajan-ofisi", False, "dogru")
+        self.assertFalse(sunucu.oto_onay_durumu()["ajan-ofisi"]["acik"])
 
     def test_suresi_dolunca_kapali(self):
         sunucu.oto_onay_degistir("turnusol", True, "dogru")
