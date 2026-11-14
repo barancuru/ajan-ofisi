@@ -19,6 +19,8 @@ HAFIZA_DIZINI = os.path.join(KOK, "hafiza")
 MAKS_GIRDI = 4000
 MAKS_HAFIZA_EKI = 1200
 AJAN_ID_DESENI = re.compile(r"^[a-z0-9-]{1,40}$")
+# İş atanamayan/zamanlanamayan id'ler: CEO (/api/ceo) ve Yönetim Kurulu Başkanı (yalnız /api/ykb, kullanıcı tetikler)
+ATANAMAZ = ("ceo", "ykb")
 # Oda id'si serbest (sahnede yoksa otomatik açılır) ama prompt'a ve olaylara girdiği için harf/rakam/_/- ve en çok 40 karakter.
 ODA_ID_DESENI = re.compile(r"[\w-]{1,40}")
 

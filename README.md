@@ -97,6 +97,18 @@ araçlarını ve hazır görevlerini tutar. CEO araçsız tek bir `claude -p --j
 klasör, boş/uzun prompt, en fazla 5 atama); bozuksa **hiçbir koşu başlamaz**. `tetik_kelime` alanı olan bir ajan
 (ör. posta) yalnız istekte o kelime geçince atanabilir.
 
+**Atama başına model.** CEO her atamada isteğe bağlı `"model": "haiku|sonnet|opus"` seçer (mekanik iş haiku, normal
+iş sonnet, çok adımlı muhakeme opus). `kosucu.py` yalnız bu üçünü kabul eder; başka değer (fable dahil) reddedilir,
+ajanın kendi modeli kullanılır ve `model_reddedildi` olayı yazılır. Opus yükseltmesinde bütçe ajan bütçesinin 2 katı.
+
+**Yönetim Kurulu Başkanı (YKB, `ykb.py`).** Yalnız sen tetiklersin (ofiste "Yönetim kurulu" odası → `POST /api/ykb`);
+CEO, zamanlayıcı ve kuyruk başlatamaz. Varsayılan `claude-fable-5-2`, `--effort high`, 5 $ tavan, 20 dk; ajanlar.json'da
+`"id": "ykb"` girdisi ezer. Sunucu model çağırmadan ~30 bin karakterlik bağlam özeti hazırlar (proje notları, açık
+görevler, son 40 kayıt satırı, `.cache/projeler.md`, son plan); YKB'nin araçları salt okunur. Plan
+`~/beyin/planlar/YYYY-AA-GG HHMM <başlık>.md` olarak yazılır, yönergeler (en fazla 6) tek istekte CEO'ya verilir
+("Dağıtmadan önce bana göster" açıksa sen işaretleyip "CEO'ya ver" dersin). Aynı anda tek YKB koşusu. Pro limiti
+dolarsa Fable ile API'ye geçilmez; `OFIS_YKB_API_YEDEK=opus` ise `claude-opus-5-5` ile bir kez denenir.
+
 **Mentor kurulu.** CEO'nun danışabileceği 5 mentor var: strateji, teknoloji, finans, pazarlama, hukuk/etik. Her birinin
 ayrı uzmanlığı ve tecrübesi var. Karar stratejikse, riskliyse ya da belirsizse (ya da sen "kurula sor" dersen) CEO ilk
 cevabında `"kurul": {"soru", "uyeler"}` döndürür. Sunucu seçilen mentorları paralel, araçsız `claude -p` ile sorar

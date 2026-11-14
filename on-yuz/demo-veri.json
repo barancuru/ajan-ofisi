@@ -5,6 +5,39 @@
   "marka": "Ajan Ofisi"
  },
  "odalar": [],
+ "ykb": {
+  "ad": "Yönetim Kurulu Başkanı",
+  "model": "claude-fable-5-2",
+  "calisiyor": false,
+  "acik": null,
+  "hazir": ["Yol haritası", "Çeyrek planı", "Önceliklendirme"],
+  "projeler": ["ajan-ofisi", "homeos", "turnusol"],
+  "tanim": {"ad": "Yönetim Kurulu Başkanı", "model": "claude-fable-5-2"},
+  "son": {
+   "kosu_id": "2026-11-14-091500-ykb-demo",
+   "zaman": "2026-11-14T09:22:12+03:00",
+   "baslik": "Yol haritası",
+   "proje": "hepsi",
+   "model": "claude-fable-5-2",
+   "saglayici": "claude",
+   "durum": "basarili",
+   "hata": null,
+   "plan": "planlar/2026-11-14 0922 Yol haritası.md",
+   "ozet": "Örnek plan: önce ofisin maliyet görünürlüğü, sonra HomeOS bakım işleri. Turnusol bu ay yalnız hata düzeltme.",
+   "plan_md": "## Hedefler\n- Maliyet sekmesinde haftalık özet\n- HomeOS yedekleri otomatik doğrulansın\n\n## Kilometre taşları\n1. Hafta 1: maliyet özeti\n2. Hafta 2-3: yedek doğrulama",
+   "yonergeler": [
+    {"baslik": "Haftalık maliyet özeti", "hedef": "Maliyet sekmesine son 7 günün model bazlı toplamını ekle.", "oncelik": 1, "kabul_kriteri": "Sekmede 7 günlük tablo görünür, testler geçer.", "proje": "ajan-ofisi", "onerilen_model": "sonnet"},
+    {"baslik": "Yedek doğrulama planı", "hedef": "HomeOS yedeklerinin geri yüklenebilirliğini denetleyen adımları çıkar.", "oncelik": 2, "kabul_kriteri": "Adım listesi ve risk notu hazır.", "proje": "homeos", "onerilen_model": "opus"},
+    {"baslik": "Açık görevleri özetle", "hedef": "Turnusol açık görevlerini tek sayfada özetle.", "oncelik": 3, "kabul_kriteri": "En fazla 15 satırlık özet.", "proje": "turnusol", "onerilen_model": "haiku"}
+   ],
+   "riskler": ["Fable maliyeti: yalnız elle tetiklenir"],
+   "sonraki_gozden_gecirme": "2026-11-28",
+   "once_goster": true,
+   "dagitim": null,
+   "maliyet_usd": 1.84,
+   "kullanim": {"input_tokens": 38200, "output_tokens": 9100}
+  }
+ },
  "ajanlar": [
   {
    "id": "ceo",

@@ -227,7 +227,7 @@ def is_dogrula(ham, tablo):
         raise ValueError("geçersiz iş")
     ajan_id = ham.get("ajan")
     ajan = tablo.get(ajan_id) if isinstance(ajan_id, str) else None
-    if not ajan or ajan_id == "ceo":
+    if not ajan or ajan_id in ortak.ATANAMAZ:
         raise ValueError("bilinmeyen ajan")
     if not ajan.get("kurulu"):
         raise ValueError("ajan kurulmadı (klasör yok)")

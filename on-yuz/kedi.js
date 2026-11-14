@@ -275,6 +275,11 @@ export function createCat({ desen = 'tekir', ton = 0, yavru = false, aksesuar = 
     mesh(dugum.gogus, GEO.kutu, ORTAK.kravat, [0, -.08, .97], [.15, .5, .1]);
     mesh(dugum.gogus, GEO.kutu, ORTAK.kravat, [0, .28, .98], [.22, .14, .12]);
   }
+  if (aksesuar.gozluk) { // yuvarlak altın çerçeveli gözlük: iki halka + köprü
+    const cerceve = new THREE.TorusGeometry(.068, .009, 8, 28);
+    [-1, 1].forEach(s => { const h = new THREE.Mesh(cerceve, ORTAK.altin); h.position.set(s * .105, .03, .262); h.rotation.y = s * .3; kafa.add(h); });
+    mesh(kafa, GEO.kutu, ORTAK.altin, [0, .04, .272], [.07, .012, .012], false);
+  }
 
   // durum makinesi
   const NODLAR = Object.keys(POZ.otur);

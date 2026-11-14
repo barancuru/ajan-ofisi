@@ -46,12 +46,22 @@
       "ad": "CEO",
       "oda": "ceo",
       "cwd": ".",
-      "model": "sonnet",
+      "model": "opus",
       "ne_zaman": "istek",
       "ne_zaman_metin": "Sen konuşunca",
-      "aciklama": "Yalnız onunla konuşursun; işi ajanlara dağıtır. Araçsız, yalnız plan çıkarır.",
+      "aciklama": "Yalnız onunla konuşursun; işi ajanlara dağıtır ve her atamada haiku/sonnet/opus seçer. Araçsız, yalnız plan çıkarır.",
       "izinli_araclar": [],
       "hazir_gorevler": []
+    },
+    {
+      "id": "ykb",
+      "_not": "İsteğe bağlı. Yönetim Kurulu Başkanı kodda yerleşik (sunucu ykb.py); bu girdi yalnız ad/model/effort/butce_usd/zaman_asimi_dk'yı ezer. Yalnız ofisteki Yönetim kurulu odasından elle tetiklenir; CEO ve zamanlayıcı başlatamaz.",
+      "ad": "Yönetim Kurulu Başkanı",
+      "oda": "ykb",
+      "model": "claude-fable-5-2",
+      "effort": "high",
+      "butce_usd": 5,
+      "zaman_asimi_dk": 20
     },
     {
       "id": "blog-yazari",

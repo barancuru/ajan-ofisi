@@ -371,6 +371,26 @@ def api_ping():
     print(maskele(json.dumps({"stop_reason": yanit.get("stop_reason"), "usage": yanit.get("usage")})))
 
 
+ATAMA_MODELLERI = ("haiku", "sonnet", "opus")  # CEO'nun atama başına seçebildiği modeller (fable ve tam id'ler yok)
+
+
+def model_sec(ajan, istenen):
+    """Argüman dosyasındaki isteğe bağlı model. Dönen: (model, reddedilen değer ya da None).
+    Yalnız beyaz liste kabul edilir; liste dışı değer (fable dahil) reddedilir, ajanın kendi modeline düşülür."""
+    if istenen is None:
+        return ajan["model"], None
+    if isinstance(istenen, str) and istenen in ATAMA_MODELLERI:
+        return istenen, None
+    return ajan["model"], str(istenen)[:60]
+
+
+def secilen_butce(ajan_model, model, butce):
+    """Opus, ajanın kendi modelinden yükseltme olarak seçildiyse bütçe en fazla 2 katına çıkar."""
+    if model == "opus" and "opus" not in str(ajan_model or "").lower():
+        return butce * 2
+    return butce
+
+
 def gecit_var(ajan, ad):
     """Every agent with tools gets the read gateways, including ones added later. Setting the flag to false turns one off."""
     return bool(ajan.get("izinli_araclar")) and ajan.get(ad) is not False
@@ -519,6 +539,9 @@ def kos(arg_dosyasi):
     veri, tablo = ortak.ajanlari_yukle()
     MASKE_YOLLARI[:] = ortak.maske_yollari(veri)
     ajan = tablo[arg["ajan"]]
+    kendi_model = ajan["model"]
+    model, reddedilen_model = model_sec(ajan, arg.get("model"))
+    ajan = {**ajan, "model": model}
     kosu_id = arg["kosu_id"]
     # alt ajan koşusu (sunucu.alt_yuva): durum ayrı dosyada (<ajan>--alt-N), ana ajanın durumu ezilmez
     durum_id = arg.get("durum_id") if re.fullmatch(re.escape(ajan["id"]) + r"--alt-\d",
@@ -552,6 +575,9 @@ def kos(arg_dosyasi):
         tam_prompt += (f"\n## SSH\nSunucuda komut için yalnız: python3 {SSH_GECIT} {ajan['id']} -- <komut> "
                        "(tek komut; ; | & $ > < tırnak ve joker yasak). Onay gerekenler çalışmaz, kullanıcıya öneri olarak yaz.\n")
     butce = float(ajan.get("butce_usd") or veri.get("ayarlar", {}).get("butce_usd") or VARSAYILAN_BUTCE)
+    butce = secilen_butce(kendi_model, model, butce)
+    if reddedilen_model is not None:
+        ortak.olay_yaz({**baglam, "tur": "model_reddedildi", "istenen": reddedilen_model, "model": model})
     komut = komut_kur(ajan, veri.get("varsayilan_yasak_araclar", []), cikti_dizini, butce)
 
     # Kilit beklenirken de ajan (süreç yaşadığı sürece) meşgul sayılsın
@@ -627,7 +653,7 @@ def bitir(ajan, baglam, sonuc, hata, baslangic, log_yolu, cikti_dizini, durum_id
         hata = f"{hata}; {yazma_hatasi}" if hata else yazma_hatasi
     olay = {
         **baglam, "tur": "kosu_bitti", "durum": "basarili" if basarili else "hata",
-        "sure_sn": sure, "ozet": temiz[:400], "hata": hata,
+        "sure_sn": sure, "ozet": temiz[:400], "hata": hata, "model": ajan.get("model"),
         "kullanim": (sonuc or {}).get("usage"),
         "maliyet_usd": (sonuc or {}).get("total_cost_usd"),
         "tur_sayisi": (sonuc or {}).get("num_turns"),
