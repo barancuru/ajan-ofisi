@@ -44,6 +44,15 @@ class AjanBulTesti(unittest.TestCase):
     def test_hat_kardes_klasor_eslenmez(self):
         self.assertEqual(kopru_kur().ajan_bul(HAT + "-eski", "", "", etkilesimli=False), (None, False))
 
+    def test_oneri_taramasi_hat_kokunde_taninir(self):
+        # calistir `oneri` kod kopyasını ~/beyin-is/wt/<proje>-oneri altında açar; /tmp altındaki oturum tanınmaz
+        k = kopru_kur()
+        self.assertEqual(k.ajan_bul(os.path.join(HAT, "homeos-oneri"), "", "", etkilesimli=False),
+                         ("gelistirme-hatti", False))
+        self.assertEqual(kopru.hat_etiketi(os.path.join(HAT, "homeos-oneri"), HAT), "homeos-oneri")
+        self.assertEqual(kopru.hat_projesi("homeos-oneri", ["homeos"]), "homeos")
+        self.assertEqual(k.ajan_bul("/tmp/tmp.abc123", "", "", etkilesimli=False), (None, False))
+
     def test_gizle_onceligi(self):
         k = kopru_kur({"varsayilan": "", "gizle": ["homeos"]})
         self.assertEqual(k.ajan_bul(os.path.join(HAT, "homeos-1114-x"), "", "", etkilesimli=False), (None, True))
