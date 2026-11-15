@@ -25,6 +25,7 @@ import ortak  # noqa: E402
 import kopru  # noqa: E402
 import kosucu  # noqa: E402  (CEO limit yedeği: aynı anahtar/model/limit kuralları)
 import token_sayac  # noqa: E402
+import model_kullanim  # noqa: E402
 import zamanlayici  # noqa: E402
 import ykb  # noqa: E402
 
@@ -2292,6 +2293,10 @@ class Isleyici(SimpleHTTPRequestHandler):
             return self._json(200, ykb_yaniti())
         if yol.path == "/api/token":
             return self._json(200, token_sayac.api_yaniti())
+        if yol.path == "/api/model-kullanim":
+            _, tablo = ortak.ajanlari_yukle()
+            return self._json(200, model_kullanim.ozet(
+                olaylari_oku(eski=True, turler=("kosu_bitti", "ceo_bitti", "ykb_bitti")), tablo))
         if yol.path == "/api/son-is":
             try:
                 q = parse_qs(yol.query)

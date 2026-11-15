@@ -254,6 +254,19 @@ tablonun en altına gider. Ana ajan ve Geliştirme hattı özet kutularında ayr
 `(giriş, çıkış, önbellek okuma)` $/milyon token. Önbelleğe yazma = giriş × `ONBELLEK_YAZMA_KAT` (1,25). Kısa adlar
 (`opus`, `sonnet`, `haiku`) `KISA_MODEL`'den eşlenir; tarihli kimlikler (`claude-opus-5-5-20261101`) ön ekle eşleşir.
 Yeni model gelince satırı ekle, sunucuyu yeniden başlat; geçmiş günler de yeni fiyatla yeniden hesaplanır.
+Anthropic dışı modeller (OpenAI, Google) `model_kullanim.py` içindeki `DIS_FIYATLAR`'dadır: model öneki, tarihe bağlı
+fiyat dönemleri ve varsa istek başına uzun bağlam eşiği; her satırda kaynak sayfa ve okunduğu tarih yazar.
+
+### Model kullanımı
+Araçlar → **Model kullanımı** (`#sekme=modeller`, `GET /api/model-kullanim`): bugün / 7 gün / 30 gün token ve API
+karşılığı USD, 30 günlük modele göre yığılmış grafik, model ve laboratuvar payı, ofis rolleri. `model_kullanim.py`
+dört kaynaktan yalnız sayıları okur (metin içeriği önbelleğe ya da API'ye girmez):
+Claude Code transkriptleri (`~/.claude/projects` + diğer Pro hesabı; `message.id` tüm dosyalar arasında tekil),
+Codex oturumları (`~/.codex/sessions`, `token_usage_record` `response_id` ile tekil), Antigravity CLI konuşmaları
+(`~/.gemini/antigravity-cli/conversations/*.db`, salt okunur SQLite, `gen_metadata` protobuf'u) ve ofis koşu olayları
+(`claude -p --no-session-persistence` transkript yazmaz). Dosya başına özet `durum/model-kullanim.json`'da
+(mtime, boyut) ile tutulur; tarama en sık 5 dakikada bir, yalnız değişen dosyalar okunur. Maliyet sekmesinden yüksek
+çıkması normaldir: o sekme yalnız köprünün eşlediği oturumları sayar, bu sayfa tüm transkriptleri.
 
 ### API
 | Uç | Ne |
