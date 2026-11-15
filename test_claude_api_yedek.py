@@ -192,6 +192,7 @@ class KosuYedekTest(unittest.TestCase):
         yamalar = [
             mock.patch.dict("os.environ", ortam, clear=True),
             mock.patch.object(kosucu.ortak, "KOSU_DIZINI", self.d),
+            mock.patch.object(kosucu.ortak, "DURUM_DIZINI", self.d),  # limit-bekleyen/ burada
             mock.patch.object(kosucu.ortak, "CIKTI_DIZINI", self.d),
             mock.patch.object(kosucu.ortak, "HAFIZA_DIZINI", self.d),
             mock.patch.object(kosucu.ortak, "durum_yaz"),

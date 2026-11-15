@@ -4295,7 +4295,7 @@ async function ongorulebilirlikSayfasi() {
       (d.alt.length ? ' · ' : '') + 'CEO aynı anda en çok 1 + ' + d.maks_alt + ' koşu. Koşular yine sırayla yürür (ortak kilit).'));
   if (!d.kuyruk.length) kuy.append(el('p', 'alt', 'Kuyrukta bekleyen iş yok.'));
   const kuyListe = el('ul', 'ong-oto');
-  d.kuyruk.forEach((q, i) => { const li = el('li'); li.append(el('b', null, (i + 1) + '. ' + q.ajan), el('span', null, (q.etiket || q.kaynak) + ' · ' + ongTarih(q.zaman))); kuyListe.append(li); });
+  d.kuyruk.forEach((q, i) => { const li = el('li'); li.append(el('b', null, (i + 1) + '. ' + q.ajan), el('span', null, (q.etiket || q.kaynak) + ' · ' + ongTarih(q.zaman) + (q.limit_sonra ? ' · limit: ' + ongTarih(q.limit_sonra) + ' sonra başlar' : ''))); kuyListe.append(li); });
   kuy.append(kuyListe);
   // (c) ekleme formu
   const form = el('form', 'kart gelistirme-form ong-form'); form.autocomplete = 'off';
