@@ -119,5 +119,40 @@ class AntigravityTest(unittest.TestCase):
         self.assertEqual(mk.model_adi("claude-sonnet-4-6"), "Sonnet 4.6")
 
 
+class TumZamanlarTest(unittest.TestCase):
+    def test_otuz_gun_disi_tumde_sayilir(self):
+        dos = {"/p/a.jsonl": {"kayit": {"eski": ["2026-09-01", "claude-opus-5-5", 1, 1, 0, 0],
+                                         "yeni": ["2026-11-15", "claude-opus-5-5", 2, 2, 0, 0],
+                                         "gelecek": ["2026-11-16", "claude-opus-5-5", 9, 9, 0, 0]}}}
+        o = mk.ozet([], {}, bugun="2026-11-15", dosya_ozeti=dos)
+        self.assertEqual((o["donemler"]["30"]["token"], o["donemler"]["tum"]["token"]), (4, 6))
+        self.assertEqual(o["ilk_gun"], "2026-09-01")
+
+    def test_silinen_dosya_ve_dusen_ofis_olayi_arsivde_kalir(self):
+        with tempfile.TemporaryDirectory() as d:
+            eski_onb, eski_kok, eski_cx, eski_ag = mk.ONBELLEK, mk.claude_kokleri, mk.CODEX_DIZINI, mk.ANTIGRAVITY_DIZINI
+            try:
+                mk.ONBELLEK = os.path.join(d, "onb.json")
+                kok = os.path.join(d, "projects")
+                mk.claude_kokleri = lambda: [kok]
+                mk.CODEX_DIZINI = mk.ANTIGRAVITY_DIZINI = os.path.join(d, "yok")
+                mk._durum.update(zaman=0.0, dosyalar=None)
+                yol = os.path.join(kok, "x", "s.jsonl")
+                yaz(yol, [asistan("m1", "claude-opus-5-5", "2026-11-01T10:00:00Z")])
+                self.assertEqual(len(mk.tara(zorla=True)), 1)
+                os.remove(yol)
+                kalan = mk.tara(zorla=True)
+                self.assertTrue(next(iter(kalan.values()))["silindi"])
+                olay = {"tur": "kosu_bitti", "kosu_id": "k1", "zaman": "2026-11-01T10:00:00", "ajan": "veri",
+                        "kullanim": {"input_tokens": 5}}
+                mk.ofis_arsivle(mk.ofis_kayitlari([olay], {}))
+                self.assertEqual(len(mk.ofis_arsivle({})), 1)          # olay artık okunmasa da arşivde
+                mk._durum.update(zaman=0.0, dosyalar=None)              # sunucu yeniden başladı
+                self.assertEqual(len(mk.tara(zorla=True)), 1)
+            finally:
+                mk.ONBELLEK, mk.claude_kokleri, mk.CODEX_DIZINI, mk.ANTIGRAVITY_DIZINI = eski_onb, eski_kok, eski_cx, eski_ag
+                mk._durum.update(zaman=0.0, dosyalar=None)
+
+
 if __name__ == "__main__":
     unittest.main()

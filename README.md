@@ -267,6 +267,10 @@ Codex oturumları (`~/.codex/sessions`, `token_usage_record` `response_id` ile t
 (`claude -p --no-session-persistence` transkript yazmaz). Dosya başına özet `durum/model-kullanim.json`'da
 (mtime, boyut) ile tutulur; tarama en sık 5 dakikada bir, yalnız değişen dosyalar okunur. Maliyet sekmesinden yüksek
 çıkması normaldir: o sekme yalnız köprünün eşlediği oturumları sayar, bu sayfa tüm transkriptleri.
+"Toplam" kutusu ve "Tümü" dönemi ilk kayıttan bugüne sayar. Claude Code transkriptleri 30 günde siler; silinen dosyanın
+özeti ve olaylar.jsonl döndürülünce düşen ofis koşuları önbellekte kalır, toplam küçülmez. **Tam sayfa ↗** düğmesi
+`modeller.html`'yi yeni sekmede açar (3D sahne yok, 5 dakikada bir yenilenir); kod `on-yuz/modeller.js` +
+`modeller.css`, ofis sekmesiyle ortaktır.
 
 ### API
 | Uç | Ne |

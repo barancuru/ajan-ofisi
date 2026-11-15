@@ -1,0 +1,25 @@
+/* Model kullanımı: ofis sekmesi (index.html) ve tam sayfa (modeller.html) ortak */
+.mk-ust{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:-4px 0 16px;font-size:13px;color:var(--soluk)}
+.mk-ust b{font-family:"Space Grotesk",sans-serif;font-size:15px;color:var(--murekkep)}
+.mk-grafik{background:rgba(255,255,255,.72);border-radius:12px;padding:14px 16px 10px;margin-bottom:18px}
+.mk-grafik svg{display:block;width:100%;height:auto}
+.mk-grafik .eksen{fill:var(--soluk)}
+@media (max-width:768px){.maliyet-kap.mk-tablo table{min-width:0}}
+.mk-lejant{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--soluk);margin-top:8px}
+.mk-lejant i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.mk-donem{display:inline-flex;gap:4px;background:rgba(59,52,44,.06);border-radius:999px;padding:3px;margin-bottom:10px}
+.mk-donem button{padding:6px 14px;border-radius:999px;font-size:13px;color:var(--soluk);min-height:32px}
+.mk-donem button.secili{background:#fffaf3;color:var(--murekkep);font-weight:600;box-shadow:0 1px 3px rgba(90,70,50,.15)}
+.mk-pay{display:inline-block;height:6px;border-radius:3px;vertical-align:middle;margin-right:8px}
+.mk-lab{display:flex;height:12px;border-radius:6px;overflow:hidden;margin:6px 0 4px;background:rgba(59,52,44,.07)}
+.mk-roller{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:8px}
+.mk-roller div{background:rgba(255,255,255,.72);border-radius:12px;padding:12px 14px}
+.mk-roller b{display:block;font-size:14px}.mk-roller small{display:block;font-size:12px;color:var(--soluk);margin-top:2px}
+.mk-roller p{font-size:12.5px;color:#4d453c;margin-top:6px}
+h3.mk-b{font-family:"Space Grotesk",sans-serif;font-size:16px;margin:22px 0 8px}
+.mk-ozet .toplam{background:#3b342c;color:#fff7ee}.mk-ozet .toplam span{color:#d9cfc2}
+.mk-baslik{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.mk-tam{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;padding:8px 14px;border-radius:999px;border:1px solid rgba(59,52,44,.16);color:var(--murekkep);text-decoration:none;background:rgba(255,255,255,.7);min-height:36px}
+.mk-tam:hover{background:#fff}
+.mk-alt-toplam th{border-bottom:none;border-top:1px solid rgba(59,52,44,.16);color:var(--murekkep);font-size:12px}
+.mk-tablo td.sayi,.mk-tablo th.sayi{white-space:nowrap}

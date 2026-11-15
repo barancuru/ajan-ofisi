@@ -11,6 +11,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="modeller.css">
 <style>
 :root{
   --krem:#efe7da; --murekkep:#3b342c; --soluk:#6f665a; --mercan:#ff7a59; --mercan-k:#c2482a; --mercan-kk:#a83d22;
@@ -303,24 +304,6 @@ td.sayi,th.sayi{text-align:right}
 .ozet-sayilar div{background:rgba(255,255,255,.72);border-radius:12px;padding:12px 16px;min-width:150px}
 .ozet-sayilar b{display:block;font-family:"Space Grotesk",sans-serif;font-size:26px;font-weight:700}
 .ozet-sayilar span{font-size:12px;color:var(--soluk)}
-.mk-ust{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:-4px 0 16px;font-size:13px;color:var(--soluk)}
-.mk-ust b{font-family:"Space Grotesk",sans-serif;font-size:15px;color:var(--murekkep)}
-.mk-grafik{background:rgba(255,255,255,.72);border-radius:12px;padding:14px 16px 10px;margin-bottom:18px}
-.mk-grafik svg{display:block;width:100%;height:auto}
-.mk-grafik .eksen{fill:var(--soluk)}
-@media (max-width:768px){.maliyet-kap.mk-tablo table{min-width:0}}
-.mk-lejant{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--soluk);margin-top:8px}
-.mk-lejant i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
-.mk-donem{display:inline-flex;gap:4px;background:rgba(59,52,44,.06);border-radius:999px;padding:3px;margin-bottom:10px}
-.mk-donem button{padding:6px 14px;border-radius:999px;font-size:13px;color:var(--soluk);min-height:32px}
-.mk-donem button.secili{background:#fffaf3;color:var(--murekkep);font-weight:600;box-shadow:0 1px 3px rgba(90,70,50,.15)}
-.mk-pay{display:inline-block;height:6px;border-radius:3px;vertical-align:middle;margin-right:8px}
-.mk-lab{display:flex;height:12px;border-radius:6px;overflow:hidden;margin:6px 0 4px;background:rgba(59,52,44,.07)}
-.mk-roller{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:8px}
-.mk-roller div{background:rgba(255,255,255,.72);border-radius:12px;padding:12px 14px}
-.mk-roller b{display:block;font-size:14px}.mk-roller small{display:block;font-size:12px;color:var(--soluk);margin-top:2px}
-.mk-roller p{font-size:12.5px;color:#4d453c;margin-top:6px}
-.sayfa h3.mk-b{font-family:"Space Grotesk",sans-serif;font-size:16px;margin:22px 0 8px}
 .maliyet-kap{overflow-x:auto;-webkit-overflow-scrolling:touch}
 .maliyet-kap td.kaynak{white-space:nowrap;width:1%}
 .maliyet-kap .kaynak span{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;background:rgba(59,52,44,.07);color:var(--soluk)}
@@ -651,6 +634,7 @@ body.boyut-2d #sahne,body.boyut-2d .vinyet,body.boyut-2d #etiketler,body.boyut-2
 <div class="mod" id="mod"><span class="nokta"></span><span id="modYazi">Canlı</span></div>
 
 
+<script src="modeller.js"></script>
 <script>
 /* Phone: toggle between panel and office scene; choice remembered per device */
 (function () {
@@ -3608,96 +3592,8 @@ function maliyetSayfasi() {
   return [el('h2', null, 'Maliyet'), git, el('p', 'alt', sayac.maliyet_notu || 'Ajanlar yalnız iş gelince çalışır; boştayken model çağrısı yok.'),
     el('p', 'alt', 'Pro aboneliğinde gerçek fatura değil; API liste fiyatı eşdeğeri.'), ozet, kap];
 }
-/* ---------- model kullanımı: bugün / 7 / 30 gün, model ve laboratuvar payı (transkript + ofis olayları) ---------- */
-const MK_RENK = { 'claude-opus-5-5':'#c2482a', 'claude-fable-5-2':'#8a5cc7', 'claude-sonnet-5-5':'#ecbc4a', 'claude-haiku-5-5':'#7fb3dd' };
-const MK_YEDEK = ['#4f9a78', '#3f6f95', '#b8865a', '#9a8f80'];
-let mkDonem = '30';
-function mkSayi(n) {
-  n = Math.max(0, Math.round(n || 0));
-  const f = (x, ek) => x.toLocaleString('tr-TR', { maximumFractionDigits:1 }) + ' ' + ek;
-  if (n >= 1e9) return f(n / 1e9, 'mlr');
-  if (n >= 1e6) return f(n / 1e6, 'mn');
-  if (n >= 1e3) return f(n / 1e3, 'bin');
-  return String(n);
-}
-const mkUsd = v => v == null ? '—' : '$' + Math.round(v).toLocaleString('tr-TR');
-async function modellerSayfasi() {
-  let v;
-  try { v = await getJSON('/api/model-kullanim'); }
-  catch (e) { return [el('h2', null, 'Model kullanımı'), el('p', 'alt', 'Veri alınamadı: ' + e.message)]; }
-  const renk = {}; let y = 0;
-  const renkAl = m => renk[m] || (renk[m] = MK_RENK[m] || MK_YEDEK[y++ % MK_YEDEK.length]);
-  const d30 = v.donemler['30'];
-  d30.modeller.forEach(m => renkAl(m.model));
-  const ad = m => (d30.modeller.find(x => x.model === m) || {}).ad || m;
-  const ust = el('div', 'mk-ust');
-  if (v.su_an) ust.append(el('span', null, 'Şu an'), el('b', null, v.su_an.ad));
-  ust.append(el('span', null, '· son güncelleme ' + String(v.guncelleme || '').replace('T', ' ')));
-  const ozet = el('div', 'ozet-sayilar');
-  [['bugun', 'Bugün'], ['7', '7 gün'], ['30', '30 gün']].forEach(([k, s]) => {
-    const d = el('div'); d.append(el('b', null, mkSayi(v.donemler[k].token)), el('span', null, s + ' · token')); ozet.append(d); });
-  const dd = el('div'); dd.append(el('b', null, mkUsd(d30.usd) + (d30.eksik_fiyat.length ? '+' : '')), el('span', null, '30 günün API karşılığı')); ozet.append(dd);
-  // 30 günlük yığılmış sütun grafiği (inline SVG)
-  const NS = 'http://www.w3.org/2000/svg', W = 720, ENS = innerWidth < 600 ? 26 : 11, ALT = ENS + 8, H = 200 + ALT - 18, seri = v.seri;
-  const enb = Math.max(1, ...seri.map(g => Object.values(g.modeller).reduce((a, b) => a + b, 0)));
-  const svg = document.createElementNS(NS, 'svg'); svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('role', 'img');
-  svg.setAttribute('aria-label', 'Son 30 gün, günlük token, modele göre');
-  const sw = W / seri.length;
-  seri.forEach((g, i) => {
-    let yy = H - ALT;
-    const top = Object.values(g.modeller).reduce((a, b) => a + b, 0);
-    d30.modeller.forEach(m => {
-      const t = g.modeller[m.model] || 0; if (!t) return;
-      const h = Math.max(1, t / enb * (H - ALT - 6)); yy -= h;
-      const r = document.createElementNS(NS, 'rect');
-      r.setAttribute('x', (i * sw + sw * .15).toFixed(1)); r.setAttribute('width', (sw * .7).toFixed(1));
-      r.setAttribute('y', yy.toFixed(1)); r.setAttribute('height', h.toFixed(1)); r.setAttribute('fill', renkAl(m.model));
-      const tt = document.createElementNS(NS, 'title'); tt.textContent = g.tarih + ' · ' + m.ad + ': ' + mkSayi(t) + ' (gün ' + mkSayi(top) + ')';
-      r.append(tt); svg.append(r);
-    });
-  });
-  const tarihYaz = t => new Date(t + 'T12:00').toLocaleDateString('tr-TR', { day:'numeric', month:'short' });
-  [[0, 'start'], [seri.length - 1, 'end']].forEach(([i, a]) => {
-    const t = document.createElementNS(NS, 'text'); t.setAttribute('class', 'eksen'); t.setAttribute('font-size', ENS); t.setAttribute('text-anchor', a);
-    t.setAttribute('x', a === 'start' ? 2 : W - 2); t.setAttribute('y', H - 3); t.textContent = tarihYaz(seri[i].tarih); svg.append(t); });
-  const graf = el('div', 'mk-grafik'); const lej = el('div', 'mk-lejant');
-  d30.modeller.forEach(m => { const s = el('span'); const i = el('i'); i.style.background = renkAl(m.model); s.append(i, m.ad); lej.append(s); });
-  graf.append(el('h3', 'kucuk', 'Son 30 gün'), svg, lej);
-  // dönem seçmeli model tablosu
-  const tabloKap = el('div');
-  const ciz = () => {
-    const d = v.donemler[mkDonem];
-    const t = el('table'); const bas = el('tr');
-    [['Model'], ['Pay', 1], ['Token', 1], ['USD', 1]].forEach(([x, s]) => bas.append(el('th', s ? 'sayi' : '', x))); t.append(bas);
-    d.modeller.forEach(m => {
-      const tr = el('tr'); const ilk = el('td'); const cubuk = el('span', 'mk-pay');
-      cubuk.style.width = Math.max(3, m.pay * 80) + 'px'; cubuk.style.background = renkAl(m.model); ilk.append(cubuk, m.ad);
-      ilk.title = m.lab; tr.append(ilk, el('td', 'sayi', '%' + Math.round(m.pay * 100)), el('td', 'sayi', mkSayi(m.token)), el('td', 'sayi', mkUsd(m.usd)));
-      t.append(tr);
-    });
-    if (!d.modeller.length) { const tr = el('tr'); const td = el('td', null, 'Bu dönemde kullanım yok.'); td.colSpan = 4; tr.append(td); t.append(tr); }
-    const kap = el('div', 'maliyet-kap mk-tablo'); kap.append(t);
-    const lab = el('div', 'mk-lab'); const labYazi = el('p', 'alt');
-    d.laboratuvar.forEach((l, i) => { const p = el('span'); p.style.width = (l.pay * 100) + '%'; p.style.background = ({ Anthropic:'#c2482a', OpenAI:'#3f6f95', Google:'#4f9a78', Moonshot:'#8a5cc7' })[l.lab] || '#9a8f80'; p.title = l.lab; lab.append(p); });
-    labYazi.textContent = d.laboratuvar.map(l => l.lab + ' %' + Math.round(l.pay * 100)).join(' · ') || '—';
-    const ks = d.kaynaklar || {}, KAD = { terminal:'terminal ve hat', ofis:'ofis ajanları', codex:'Codex', antigravity:'Antigravity' };
-    const kay = el('p', 'alt', 'Kaynak: ' + Object.entries(ks).sort((a, b) => b[1] - a[1]).map(([k, n]) => (KAD[k] || k) + ' ' + mkSayi(n)).join(' · '));
-    tabloKap.replaceChildren(kap, el('h3', 'mk-b', 'Laboratuvar'), lab, labYazi, kay,
-      ...(d.eksik_fiyat.length ? [el('p', 'alt', 'Fiyatı tanımlı değil: ' + d.eksik_fiyat.join(', ') + ' (USD toplamına girmedi; model_kullanim.DIS_FIYATLAR).')] : []));
-  };
-  const sec = el('div', 'mk-donem'); sec.setAttribute('role', 'group'); sec.setAttribute('aria-label', 'Dönem');
-  [['bugun', 'Bugün'], ['7', '7 gün'], ['30', '30 gün']].forEach(([k, s]) => {
-    const b = el('button', k === mkDonem ? 'secili' : '', s); b.type = 'button'; b.setAttribute('aria-pressed', k === mkDonem);
-    b.onclick = () => { mkDonem = k; sec.querySelectorAll('button').forEach(x => { const on = x === b; x.classList.toggle('secili', on); x.setAttribute('aria-pressed', on); }); ciz(); };
-    sec.append(b); });
-  ciz();
-  // ofis rolleri: ajanlar.json'daki model ve effort
-  const roller = el('div', 'mk-roller');
-  v.roller.forEach(r => { const k = el('div'); k.append(el('b', null, r.ad), el('small', null, [r.model_ad, r.effort, r.lab].filter(Boolean).join(' · ')));
-    if (r.aciklama) k.append(el('p', null, r.aciklama)); roller.append(k); });
-  return [el('h2', null, 'Model kullanımı'), ust, ozet, graf, el('h3', 'mk-b', 'Modeller'), sec, tabloKap,
-    ...(v.roller.length ? [el('h3', 'mk-b', 'Ofis rolleri'), roller] : []), el('p', 'alt', v.not)];
-}
+/* ---------- model kullanımı: kod on-yuz/modeller.js'de (tam sayfa modeller.html de kullanır) ---------- */
+function modellerSayfasi() { return window.ModelKullanim.sayfa({ tamSayfaDugmesi:true }); }
 /* ---------- dizin sekmesi: ~/beyin altında gezin, .md dosyalarını oku (salt okuma) ---------- */
 let dizinYol = '', dizinDosya = null, dizinDuzenle = false;
 function mdSatirici(kap, s) {

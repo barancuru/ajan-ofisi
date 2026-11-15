@@ -8,6 +8,8 @@ Kaynaklar (yalnız sayılar okunur; metin içeriği ne önbelleğe ne API'ye gir
           1.19 model, 1.4 {2 giriş, 3 çıkış, 4 önbellek yazma, 5 önbellek okuma}; gün, last_step_index adımının zamanından.
   ofis    olaylar.jsonl kosu_bitti / ceo_bitti / ykb_bitti (claude -p --no-session-persistence: transkript yok).
 Dosya başına özet durum/model-kullanim.json'da (mtime, boyut) anahtarıyla tutulur; değişmeyen dosya yeniden okunmaz.
+Tüm zamanlar toplamı için silinen kaynak dosyanın özeti (Claude Code transkriptleri 30 günde siler) ve döndürülüp
+düşen ofis olayları önbellekte kalır; önbellek silinirse toplam diskte kalan kayıtlardan yeniden kurulur.
 """
 import glob
 import json
@@ -275,23 +277,45 @@ _kilit = threading.Lock()
 _durum = {"zaman": 0.0, "dosyalar": None}
 
 
-def _onbellek_oku():
+def _onbellek_ham():
     try:
         with open(ONBELLEK, encoding="utf-8") as f:
             v = json.load(f)
-        if v.get("surum") == ONBELLEK_SURUM and isinstance(v.get("dosyalar"), dict):
-            return v["dosyalar"]
-    except (OSError, ValueError, AttributeError):
+        if isinstance(v, dict) and v.get("surum") == ONBELLEK_SURUM:
+            return v
+    except (OSError, ValueError):
         pass
     return {}
 
 
-def _onbellek_yaz(dos):
+def _onbellek_oku():
+    d = _onbellek_ham().get("dosyalar")
+    return d if isinstance(d, dict) else {}
+
+
+def _onbellek_yaz(dos=None, ofis=None):
+    ham = _onbellek_ham()
+    if dos is None:
+        dos = ham.get("dosyalar") if isinstance(ham.get("dosyalar"), dict) else {}
+    if ofis is None:
+        ofis = ham.get("ofis") if isinstance(ham.get("ofis"), dict) else {}
     os.makedirs(ortak.DURUM_DIZINI, exist_ok=True)
     gecici = ONBELLEK + ".tmp"
     with open(gecici, "w", encoding="utf-8") as f:
-        json.dump({"surum": ONBELLEK_SURUM, "dosyalar": dos}, f, separators=(",", ":"))
+        json.dump({"surum": ONBELLEK_SURUM, "dosyalar": dos, "ofis": ofis}, f, separators=(",", ":"))
     os.replace(gecici, ONBELLEK)
+
+
+def ofis_arsivle(satirlar):
+    """Ofis olay satırlarını {anahtar: satır} arşiviyle birleştirir (olaylar.jsonl döndürülünce kaybolmasın)."""
+    with _kilit:
+        arsiv = _onbellek_ham().get("ofis")
+        arsiv = dict(arsiv) if isinstance(arsiv, dict) else {}
+        yeni = {k: v for k, v in satirlar.items() if k not in arsiv}
+        if yeni:
+            arsiv.update(yeni)
+            _onbellek_yaz(ofis=arsiv)
+    return list(arsiv.values())
 
 
 def tara(zorla=False):
@@ -300,9 +324,8 @@ def tara(zorla=False):
         if not zorla and _durum["dosyalar"] is not None and time.time() - _durum["zaman"] < TARAMA_ARALIK_SN:
             return _durum["dosyalar"]
         eski = _durum["dosyalar"] if _durum["dosyalar"] is not None else _onbellek_oku()
-        sinir = time.time() - (GUN + 1) * 86400
         yeni, degisti = {}, _durum["dosyalar"] is None
-        for tur, yol, st in dosyalar(sinir):
+        for tur, yol, st in dosyalar(0):
             e = eski.get(yol)
             if e and e.get("mt") == st.st_mtime and e.get("boy") == st.st_size:
                 yeni[yol] = e
@@ -313,6 +336,9 @@ def tara(zorla=False):
                 continue
             yeni[yol] = {"mt": st.st_mtime, "boy": st.st_size, "kayit": kayit}
             degisti = True
+        for yol, e in eski.items():          # diskten silinen dosya: özeti tüm zamanlar için kalır
+            if yol not in yeni and e.get("kayit"):
+                yeni[yol] = {**e, "silindi": True}
         if degisti or set(yeni) != set(eski):
             _onbellek_yaz(yeni)
         _durum.update(zaman=time.time(), dosyalar=yeni)
@@ -320,8 +346,8 @@ def tara(zorla=False):
 
 
 def ofis_kayitlari(olaylar, tablo):
-    """Ofis olayları → [gün, model, 4 alan, usd ölçülen|None]."""
-    satirlar = []
+    """Ofis olayları → {anahtar: [gün, model, 4 alan, usd ölçülen|None]}."""
+    satirlar = {}
     for o in olaylar:
         if o.get("tur") not in ("kosu_bitti", "ceo_bitti", "ykb_bitti") or not isinstance(o.get("kullanim"), dict):
             continue
@@ -329,7 +355,8 @@ def ofis_kayitlari(olaylar, tablo):
         ajan = "ceo" if o["tur"] == "ceo_bitti" and not o.get("ajan") else o.get("ajan")
         model = o.get("model") or (tablo.get(ajan) or {}).get("model") or ""
         olcum = o.get("maliyet_usd") if isinstance(o.get("maliyet_usd"), (int, float)) else None
-        satirlar.append([gun, model_normal(model)] + _u4(o["kullanim"]) + [olcum])
+        anahtar = f'{o["tur"]}:{o.get("kosu_id") or o.get("zaman")}'
+        satirlar[anahtar] = [gun, model_normal(model)] + _u4(o["kullanim"]) + [olcum]
     return satirlar
 
 
@@ -355,12 +382,11 @@ def ozet(olaylar, tablo, bugun=None, dosya_ozeti=None):
     bugun = bugun or ortak.bugun()
     b = date.fromisoformat(bugun)
     gunler = [(b - timedelta(days=i)).isoformat() for i in range(GUN - 1, -1, -1)]
-    gun_kume = set(gunler)
-    # (gün, model, kaynak) → [4 alan, usd]
+    # (gün, model, kaynak) → [4 alan, usd]; tüm günler (tüm zamanlar toplamı için), bugünden sonrası yok
     hucre = {}
 
     def ekle(gun, model, kaynak, u4, olcum=None):
-        if gun not in gun_kume:
+        if not gun or gun > bugun:
             return
         h = hucre.setdefault((gun, model, kaynak), [0, 0, 0, 0, 0.0, True])
         for i in range(4):
@@ -381,11 +407,13 @@ def ozet(olaylar, tablo, bugun=None, dosya_ozeti=None):
     for kimlik, r in birlesik.items():
         kaynak = "codex" if kimlik.startswith("codex:") else "antigravity" if kimlik.startswith("ag:") else "terminal"
         ekle(r[0], r[1], kaynak, r[2:6])
-    for r in ofis_kayitlari(olaylar, tablo):
+    ofis = ofis_kayitlari(olaylar, tablo)
+    for r in (ofis_arsivle(ofis) if dosya_ozeti is None else ofis.values()):
         ekle(r[0], r[1], "ofis", r[2:6], r[6])
+    tum_gunler = sorted({g for g, _, _ in hucre})
 
     def donem(n):
-        kapsam = set(gunler[-n:])
+        kapsam = set(gunler[-n:]) if n else set(tum_gunler)
         modeller, kaynaklar = {}, {}
         for (g, m, k), h in hucre.items():
             if g not in kapsam:
@@ -433,7 +461,8 @@ def ozet(olaylar, tablo, bugun=None, dosya_ozeti=None):
               for a in tablo.values() if a.get("model")]
     return {"tarih": bugun, "guncelleme": datetime.fromtimestamp(_durum["zaman"] or time.time()).isoformat(timespec="minutes"),
             "su_an": {"model": son, "ad": model_adi(son)} if son else None,
-            "donemler": {"bugun": donem(1), "7": donem(7), "30": donem(GUN)},
+            "donemler": {"bugun": donem(1), "7": donem(7), "30": donem(GUN), "tum": donem(0)},
+            "ilk_gun": tum_gunler[0] if tum_gunler else None,
             "seri": seri, "roller": roller,
             "not": "Token = giriş + çıkış + önbellek yazma + önbellek okuma. USD API liste fiyatı eşdeğeridir; "
                    "Pro aboneliğinde fatura değildir. Ofis koşularında ölçülen total_cost_usd kullanılır."}
