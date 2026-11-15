@@ -60,7 +60,7 @@ class HesapOrtami(unittest.TestCase):
     def isaretle(self, ad, zaman=None):
         os.makedirs(self.cache, exist_ok=True)
         with open(self.isaret(ad), "w") as f:
-            f.write(str(int(zaman if zaman is not None else time.time())))
+            f.write(str(int(zaman if zaman is not None else time.time() + kosucu.CLAUDE_LIMIT_SN)))
 
     def kos(self, surecler, anahtar=(ANAHTAR, None), codex=None):
         ajan = {"id": "a", "ad": "A", "oda": "o", "model": "sonnet", "cwd": self.d}
@@ -102,7 +102,7 @@ class KosucuHesapTest(HesapOrtami):
         self.assertEqual(self.envler[1]["CLAUDE_CONFIG_DIR"], self.hesap2)
         self.pro_envleri_anahtarsiz(2)
         with open(self.isaret("claude-limit")) as f:
-            self.assertLessEqual(abs(int(f.read()) - time.time()), 5)
+            self.assertGreater(int(f.read()), time.time())  # reset time, not the write time
         self.assertFalse(os.path.exists(self.isaret("claude-limit-claude-hesap2")))
         self.assertIsNone(self.bitis["hata"])
         self.assertEqual(self.bitis["sonuc"]["saglayici"], "claude (hesap2)")
@@ -129,7 +129,7 @@ class KosucuHesapTest(HesapOrtami):
         self.assertEqual(self.bitis["sonuc"]["saglayici"], "claude (hesap2)")
 
     def test_suresi_dolmus_isaret_hesap1_ile_baslar(self):
-        self.isaretle("claude-limit", time.time() - kosucu.CLAUDE_LIMIT_SN - 5)
+        self.isaretle("claude-limit", time.time() - 5)
         self.kos([tay.basarili_surec()])
         self.assertNotIn("CLAUDE_CONFIG_DIR", self.envler[0])
 

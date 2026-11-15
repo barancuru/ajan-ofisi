@@ -276,22 +276,57 @@ def hesap_hazir(hesap):
     return hesap == "-" or os.path.isfile(os.path.join(hesap, ".credentials.json"))
 
 
-def hesap_limitte(hesap):
+LIMIT_BITISI = os.path.expanduser(os.environ.get("OFIS_LIMIT_BITISI", "~/beyin/bin/limit-bitisi"))
+
+
+def hesap_acilis(hesap):
+    """Epoch when the account opens again (marker content), or None. Old markers (write time) are in the past = open."""
     try:
         with open(hesap_isaret(hesap), encoding="utf-8") as f:
-            zaman = int(f.read().strip())
+            return int(f.read().strip())
     except (OSError, ValueError):
-        return False
-    return time.time() - zaman < CLAUDE_LIMIT_SN
+        return None
 
 
-def hesap_isaretle(hesap):
+def hesap_limitte(hesap):
+    zaman = hesap_acilis(hesap)
+    return zaman is not None and zaman > time.time()
+
+
+_limit_modulu = None
+
+
+def limit_bitisi(metin):
+    """Reset time from the limit message ("resets 3:40am (Europe/Istanbul)") via beyin/bin/limit-bitisi, the same
+    parser calistir and ofis use; if it can't be read: now + CLAUDE_LIMIT_SN."""
+    global _limit_modulu
     try:
+        if _limit_modulu is None:
+            import importlib.machinery
+            import importlib.util
+            yukleyici = importlib.machinery.SourceFileLoader("limit_bitisi", LIMIT_BITISI)
+            modul = importlib.util.module_from_spec(importlib.util.spec_from_loader("limit_bitisi", yukleyici))
+            yukleyici.exec_module(modul)
+            _limit_modulu = modul
+        return int(_limit_modulu.bitis(metin or ""))
+    except Exception:  # parser missing/broken: fixed window as before
+        return int(time.time()) + CLAUDE_LIMIT_SN
+
+
+def hesap_isaretle(hesap, metin=""):
+    try:
+        zaman = limit_bitisi(metin)
         os.makedirs(LIMIT_DIZINI, exist_ok=True)
         with open(hesap_isaret(hesap), "w", encoding="utf-8") as f:
-            f.write(str(int(time.time())))
+            f.write(str(zaman))
     except OSError:
         pass  # marker is an optimization; the run goes on
+
+
+def limit_acilisi():
+    """Earliest time a limited account opens again (epoch), or None if none is limited."""
+    zamanlar = [hesap_acilis(h) for h in CLAUDE_HESAPLARI if hesap_hazir(h) and hesap_limitte(h)]
+    return min(zamanlar) if zamanlar else None
 
 
 def hesap_etiket(hesap):
@@ -318,6 +353,8 @@ def hesap_ortami(hesap):
     env = pro_ortami()
     if hesap != "-":
         env["CLAUDE_CONFIG_DIR"] = hesap
+    else:
+        env.pop("CLAUDE_CONFIG_DIR", None)  # hesap1 = ~/.claude even if the parent was started with another account
     return env
 
 
@@ -333,7 +370,7 @@ def pro_dene(calistir, log=None):
         sonuc, hata, ham = calistir(hesap_ortami(hesap))
         if not limit_hatasi_mi(sonuc, hata, ham):
             return sonuc, hata, ham, hesap, False
-        hesap_isaretle(hesap)
+        hesap_isaretle(hesap, " ".join(str(x) for x in ((sonuc or {}).get("result"), hata, ham) if x))
     return sonuc, hata, ham, hesap, True
 
 

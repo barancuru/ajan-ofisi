@@ -386,6 +386,8 @@ class CeoYedekTest(unittest.TestCase):
             mock.patch.object(sunucu, "ceo_promptu", return_value="istem"),
             mock.patch.object(sunucu, "kurul_yukle", return_value=None),
             mock.patch.object(sunucu, "ceo_kaydi_yaz", side_effect=lambda k: self.kayitlar.append(k) or "x.md"),
+            mock.patch.object(kosucu, "CLAUDE_HESAPLARI", ["-"]),  # tek Pro hesabı; iki hesap: CeoHesapTest
+            mock.patch.object(kosucu, "LIMIT_DIZINI", self.d + "-limit"),
         ]
         for y in yamalar:
             y.start()
@@ -452,3 +454,41 @@ class CeoYedekTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CeoHesapTest(unittest.TestCase):
+    """CEO da iki Pro hesabı arasında geçer (kullanıcı, 2026-11-15)."""
+    calistir = CeoYedekTest.calistir
+
+    def setUp(self):
+        CeoYedekTest.setUp(self)
+        self.hesap2 = os.path.join(tempfile.mkdtemp(), "claude-hesap2")
+        os.makedirs(self.hesap2)
+        open(os.path.join(self.hesap2, ".credentials.json"), "w").close()
+        y = mock.patch.object(kosucu, "CLAUDE_HESAPLARI", ["-", self.hesap2])
+        y.start()
+        self.addCleanup(y.stop)
+
+    def test_hesap1_limitte_hesap2_ile_cevaplar(self):
+        run, sonuc, logs = self.calistir([tamamlanan(CEO_LIMIT, 1), tamamlanan(CEO_TAMAM)])
+        self.assertEqual(sonuc["cevap"], "tamam")
+        ilk, ikinci = run.call_args_list
+        self.assertNotIn("CLAUDE_CONFIG_DIR", ilk.kwargs["env"])
+        self.assertEqual(ikinci.kwargs["env"]["CLAUDE_CONFIG_DIR"], self.hesap2)
+        self.assertNotIn("ANTHROPIC_API_KEY", ikinci.kwargs["env"])
+        self.assertEqual(self.kayitlar[-1]["saglayici"], "claude (hesap2)")
+        self.assertTrue(kosucu.hesap_limitte("-"))
+        self.assertNotIn(self.hesap2, logs)
+
+    def test_isaretli_hesap1_atlanir(self):
+        kosucu.hesap_isaretle("-", "You've hit your limit · resets 11:59pm (Europe/Istanbul)")
+        run, sonuc, _ = self.calistir([tamamlanan(CEO_TAMAM)])
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(run.call_args.kwargs["env"]["CLAUDE_CONFIG_DIR"], self.hesap2)
+
+    def test_iki_hesap_limitte_api_yedegi(self):
+        run, sonuc, _ = self.calistir([tamamlanan(CEO_LIMIT, 1), tamamlanan(CEO_LIMIT, 1), tamamlanan(CEO_TAMAM)])
+        self.assertEqual(sonuc["cevap"], "tamam")
+        self.assertEqual(run.call_count, 3)
+        self.assertEqual(run.call_args_list[2].kwargs["env"]["ANTHROPIC_API_KEY"], SAHTE_ANAHTAR)
+        self.assertEqual(self.kayitlar[-1]["saglayici"], "claude (API yedeği)")

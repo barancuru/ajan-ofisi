@@ -741,18 +741,28 @@ def _ceo_calistir(metin, kuru=False, ekler=None):
     def ceo_sor(prompt, sema, log_adi):
         komut = [claude, "-p", "--model", ceo["model"], "--output-format", "json",
                  "--no-session-persistence", "--max-budget-usd", "0.20", "--tools", "", "--json-schema", json.dumps(sema)]
-        surec = subprocess.run(komut, cwd=ortak.KOK, input=prompt, text=True,
-                               capture_output=True, timeout=CEO_ZAMAN_ASIMI, env=kosucu.pro_ortami())
-        kayit =surec.stdout + ("\n--- stderr ---\n" + surec.stderr if surec.stderr else "")
-        saglayici = "claude"
-        try:
-            ilk = json.loads(surec.stdout)
-        except ValueError:
-            ilk = None
-        ilk = ilk if isinstance(ilk, dict) else None
-        hata = f"claude çıkış kodu {surec.returncode}" if surec.returncode != 0 else None
-        if kosucu.limit_hatasi_mi(ilk, hata, surec.stderr + ("" if ilk else surec.stdout)) \
-                and kosucu.api_yedegi_acik():
+        son, parcalar = {}, []
+
+        def pro(env):  # Pro hesapları sırayla (kosucu.pro_dene; hesap1 limitteyse hesap2, aynı işaret dosyaları)
+            surec = subprocess.run(komut, cwd=ortak.KOK, input=prompt, text=True,
+                                   capture_output=True, timeout=CEO_ZAMAN_ASIMI, env=env)
+            son["surec"] = surec
+            if parcalar:
+                parcalar.append(f"\n--- {kosucu.hesap_saglayici(env.get('CLAUDE_CONFIG_DIR', '-'))} ---\n")
+            parcalar.append(surec.stdout + ("\n--- stderr ---\n" + surec.stderr if surec.stderr else ""))
+            try:
+                ilk = json.loads(surec.stdout)
+            except ValueError:
+                ilk = None
+            ilk = ilk if isinstance(ilk, dict) else None
+            hata = f"claude çıkış kodu {surec.returncode}" if surec.returncode != 0 else None
+            return ilk, hata, surec.stderr + ("" if ilk else surec.stdout)
+
+        _, _, _, hesap, limitte = kosucu.pro_dene(pro)
+        surec = son["surec"]
+        kayit = "".join(parcalar)
+        saglayici = kosucu.hesap_saglayici(hesap)
+        if limitte and kosucu.api_yedegi_acik():
             # Limit yedeği: aynı komut, yalnız bu alt sürecin env'inde API anahtarıyla bir kez daha (CEO'da Codex yok)
             anahtar, anahtar_hata = kosucu.api_anahtari()
             if anahtar:
@@ -770,7 +780,9 @@ def _ceo_calistir(metin, kuru=False, ekler=None):
         return json.loads(surec.stdout)
 
     def saglayici_ozeti():
-        return kosucu.API_SAGLAYICI if kosucu.API_SAGLAYICI in saglayicilar else ("claude" if saglayicilar else None)
+        if kosucu.API_SAGLAYICI in saglayicilar:
+            return kosucu.API_SAGLAYICI
+        return next((x for x in saglayicilar if x != "claude"), "claude" if saglayicilar else None)  # "claude (hesap2)"
 
     baslangic = time.time()
     try:
