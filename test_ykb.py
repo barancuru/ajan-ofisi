@@ -35,7 +35,9 @@ class Ortam(unittest.TestCase):
                    mock.patch.object(ortak, "OLAYLAR", os.path.join(k, "olaylar.jsonl")),
                    mock.patch.object(ortak, "CIKTI_DIZINI", os.path.join(k, "cikti")),
                    mock.patch.object(ortak, "DURUM_DIZINI", os.path.join(k, "durum")),
-                   mock.patch.object(ortak, "KOSU_DIZINI", os.path.join(k, "kosular"))]
+                   mock.patch.object(ortak, "KOSU_DIZINI", os.path.join(k, "kosular")),
+                   mock.patch.object(kosucu, "CLAUDE_HESAPLARI", ["-"]),
+                   mock.patch.object(kosucu, "LIMIT_DIZINI", os.path.join(self.beyin, ".cache"))]
         for y in yamalar:
             y.start()
             self.addCleanup(y.stop)

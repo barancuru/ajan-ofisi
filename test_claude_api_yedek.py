@@ -201,6 +201,9 @@ class KosuYedekTest(unittest.TestCase):
             mock.patch.object(kosucu, "token_isle"),
             mock.patch.object(kosucu, "token_kesinle"),
             mock.patch.object(kosucu, "bitir", side_effect=self.bitti),
+            # hermetic: no real second account, no real ~/beyin/.cache limit markers
+            mock.patch.object(kosucu, "CLAUDE_HESAPLARI", ["-"]),
+            mock.patch.object(kosucu, "LIMIT_DIZINI", os.path.join(self.d, "cache")),
         ]
         for y in yamalar:
             y.start()

@@ -258,6 +258,85 @@ def pro_ortami():
     return {k: v for k, v in os.environ.items() if k != API_ANAHTAR_ORTAM}
 
 
+# Claude Pro accounts, same order and same limit markers as beyin/bin/calistir (user, 2026-11-15).
+# "-" = default login (~/.claude); others are CLAUDE_CONFIG_DIR dirs under ~/.config/ofis-kapi (hidden from agents).
+CLAUDE_HESAPLARI = ["-", os.path.expanduser("~/.config/ofis-kapi/claude-hesap2")]
+CLAUDE_LIMIT_SN = 1800
+LIMIT_DIZINI = os.path.expanduser(os.environ.get("OFIS_LIMIT_DIZINI", "~/beyin/.cache"))
+
+
+def hesap_isaret(hesap):
+    """Per-account limit marker (epoch seconds), same file names as calistir."""
+    ad = "claude-limit" if hesap == "-" else f"claude-limit-{os.path.basename(hesap)}"
+    return os.path.join(LIMIT_DIZINI, ad)
+
+
+def hesap_hazir(hesap):
+    """Default account, or a dir with a login. Only checks that the file exists; never opens it."""
+    return hesap == "-" or os.path.isfile(os.path.join(hesap, ".credentials.json"))
+
+
+def hesap_limitte(hesap):
+    try:
+        with open(hesap_isaret(hesap), encoding="utf-8") as f:
+            zaman = int(f.read().strip())
+    except (OSError, ValueError):
+        return False
+    return time.time() - zaman < CLAUDE_LIMIT_SN
+
+
+def hesap_isaretle(hesap):
+    try:
+        os.makedirs(LIMIT_DIZINI, exist_ok=True)
+        with open(hesap_isaret(hesap), "w", encoding="utf-8") as f:
+            f.write(str(int(time.time())))
+    except OSError:
+        pass  # marker is an optimization; the run goes on
+
+
+def hesap_etiket(hesap):
+    if hesap == "-":
+        return "hesap1"
+    ad = os.path.basename(hesap)
+    return ad[len("claude-"):] if ad.startswith("claude-") else ad
+
+
+def hesap_saglayici(hesap):
+    """Provider label: 'claude' for the default account, 'claude (hesap2)' otherwise. No path, token or e-mail."""
+    return "claude" if hesap == "-" else f"claude ({hesap_etiket(hesap)})"
+
+
+def hesap_sirasi():
+    """Accounts to try: ready ones not at their limit, in order; if all are at their limit, all of them."""
+    hepsi = [h for h in CLAUDE_HESAPLARI if hesap_hazir(h)]
+    bos = [h for h in hepsi if not hesap_limitte(h)]
+    return bos or hepsi or ["-"]
+
+
+def hesap_ortami(hesap):
+    """Pro env (without the API key); only CLAUDE_CONFIG_DIR is added for a non-default account."""
+    env = pro_ortami()
+    if hesap != "-":
+        env["CLAUDE_CONFIG_DIR"] = hesap
+    return env
+
+
+def pro_dene(calistir, log=None):
+    """Runs calistir(env) -> (sonuc, hata, ham_metin) on each Pro account in order. A limit error marks that account
+    and the next one is tried; any other outcome stops. Returns (sonuc, hata, ham, hesap, limitte)."""
+    hesaplar = hesap_sirasi()
+    for i, hesap in enumerate(hesaplar):
+        if i:
+            print(f"\n↪ {hesap_etiket(hesaplar[i - 1])} is at its limit, trying the next Pro account…", flush=True)
+            if log is not None:
+                log.write(f"\n--- {hesap_saglayici(hesap)} ---\n")
+        sonuc, hata, ham = calistir(hesap_ortami(hesap))
+        if not limit_hatasi_mi(sonuc, hata, ham):
+            return sonuc, hata, ham, hesap, False
+        hesap_isaretle(hesap)
+    return sonuc, hata, ham, hesap, True
+
+
 def api_yedegi_acik():
     """Is the 'second Claude Code' (API key) step enabled? (OFIS_YEDEK=1 and OFIS_YEDEK_SAGLAYICI zincir|claude-api)"""
     saglayici = os.environ.get("OFIS_YEDEK_SAGLAYICI", "zincir").strip().lower() or "zincir"
@@ -604,8 +683,15 @@ def kos(arg_dosyasi):
         with open(log_yolu, "w", encoding="utf-8") as log:
             calisma_dizini = YALIN_DIZIN if ajan.get("yalin") else ajan["cwd"]
             os.makedirs(calisma_dizini, exist_ok=True)
-            sonuc, hata, ham = claude_akis_kos(komut, calisma_dizini, tam_prompt, log, baglam, sayac)
-            if limit_hatasi_mi(sonuc, hata, " ".join(ham[-20:])) and os.environ.get("OFIS_YEDEK", "1") == "1":
+
+            def pro(env):
+                s, h, ham = claude_akis_kos(komut, calisma_dizini, tam_prompt, log, baglam, sayac, env=env)
+                return s, h, " ".join(ham[-20:])
+
+            sonuc, hata, _, hesap, limitte = pro_dene(pro, log)
+            if sonuc and hesap != "-":
+                sonuc = {**sonuc, "saglayici": hesap_saglayici(hesap)}
+            if limitte and os.environ.get("OFIS_YEDEK", "1") == "1":
                 yedek, yedek_hata = yedek_kos(ajan, tam_prompt, calisma_dizini, cikti_dizini, log,
                                               komut=komut, baglam=baglam, sayac=sayac)
                 if yedek:

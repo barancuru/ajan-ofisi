@@ -174,7 +174,8 @@ class HatOrnekTesti(unittest.TestCase):
         with open(conf, "w", encoding="utf-8") as f:
             f.write("# yorum\nturnusol=~/development/turnusol\nhomeos=~/development/homeos\najan-ofisi=~/ajan-ofisi\najan=~/x\n")
         for yama in (mock.patch.object(kopru, "PROJELER_DOSYASI", conf),
-                     mock.patch.object(kopru, "PROJE_DIZINI", os.path.join(self.gecici.name, "projects"))):
+                     mock.patch.object(kopru, "PROJE_DIZINI", os.path.join(self.gecici.name, "projects")),
+                     mock.patch.object(kopru.kosucu, "CLAUDE_HESAPLARI", ["-"])):
             yama.start()
             self.addCleanup(yama.stop)
 

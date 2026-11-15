@@ -22,6 +22,7 @@ import time
 from datetime import datetime
 from urllib.parse import urlparse
 
+import kosucu
 import ortak
 import token_sayac
 
@@ -53,6 +54,13 @@ HAT_BITTI_SN = 10 * 60          # biten hat koşusu Atölye'de bu kadar "bitti" 
 HAT_DIGER = "hat"               # etiketi sistem/projeler.conf'taki hiçbir adla başlamayan hat koşusunun projesi
 ALT_TOKEN_SN = 24 * 3600        # alt-ajan token taraması: yalnız son bu kadar sürede yazılmış transkriptler
 PROJELER_DOSYASI = os.path.join(os.path.expanduser(os.environ.get("OFIS_BEYIN", "~/beyin")), "sistem", "projeler.conf")
+
+
+def proje_dizinleri():
+    """Transcript roots, read-only: ~/.claude/projects first, then <CLAUDE_CONFIG_DIR>/projects of the other Pro
+    accounts (kosucu.CLAUDE_HESAPLARI) that have a login. Paths never go into events."""
+    return [PROJE_DIZINI] + [os.path.join(h, "projects") for h in kosucu.CLAUDE_HESAPLARI
+                             if h != "-" and kosucu.hesap_hazir(h)]
 
 
 def yol_listesi(deger, varsayilan):
@@ -464,9 +472,14 @@ class Kopru:
         sinir, yeni, gorulen = time.time() - MASAUSTU_ACIK_SN, {}, {}
         hat_sinir = time.time() - HAT_ACIK_SN
         hat_kokleri = yol_listesi(self.esleme.get("hat_cwd"), HAT_CWD) if HAT_AJAN in self.ajanlar else []
-        try:
-            klasorler = list(os.scandir(PROJE_DIZINI))
-        except OSError:
+        klasorler, okundu = [], False
+        for kok in proje_dizinleri():
+            try:
+                klasorler += list(os.scandir(kok))
+                okundu = True
+            except OSError:
+                continue
+        if not okundu:
             return {}
         for klasor in klasorler:
             if not klasor.is_dir(follow_symlinks=False):     # klasör mtime'ı dosya yazılınca değişmez, filtrelenmez
@@ -510,8 +523,10 @@ class Kopru:
 
     def kayit_kur(self, pid, d, ajan, tmux_oturum, pencere_adi):
         cwd, sid = d["cwd"], str(d["sessionId"])
-        yol = os.path.join(PROJE_DIZINI, proje_klasoru(cwd), f"{sid}.jsonl") \
-            if re.fullmatch(r"[A-Za-z0-9-]+", sid) else None
+        yol = None
+        if re.fullmatch(r"[A-Za-z0-9-]+", sid):
+            adaylar = [os.path.join(kok, proje_klasoru(cwd), f"{sid}.jsonl") for kok in proje_dizinleri()]
+            yol = next((a for a in adaylar if os.path.exists(a)), adaylar[0])
         ad = _temiz(d.get("name") or f"pid-{pid}", 60)
         if ajan == HAT_AJAN:                      # koşu etiketi: worktree adı (<proje>-<dal>)
             kok = kok_bul(cwd, yol_listesi(self.esleme.get("hat_cwd"), HAT_CWD))
