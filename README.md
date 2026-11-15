@@ -27,6 +27,14 @@ Alt kutuya "blog taslağı yaz" gibi bir şey yazarsan sahte CEO işi uygun ajan
 kapatır, `?hafif=1` düşük çözünürlük ve küçük gölgeyle çizer. (Ön yüz ES modülü kullandığı için dosyayı çift tıklayıp
 `file://` ile açmak çalışmaz; yukarıdaki gibi basit bir sunucu yeter.)
 
+**2D / 3D:** Üst çubuktaki **2D** düğmesi ofisi hafif 2D görünüme alır: odalar, ajan kartları (durum, iş, koşu),
+Veri odasının alt masaları, terminal oturumları ve bugünkü koşu/maliyet/token aynı veriden çizilir; karta basınca
+ajan paneli açılır. 2D açıkken 3D döngüsü (`requestAnimationFrame`, render, ışık ve zarf animasyonları) tamamen durur,
+3D'ye dönünce kamera ve sahne kaldığı yerden sürer. Seçim `localStorage['ofis-boyut']` (`2d`/`3d`) içinde kalır.
+Kayıtlı seçim yoksa WebGL alınamayan, en çok 2 çekirdekli ya da en çok 2 GB bellekli, ya da 600 px'ten dar cihazda
+ofis 2D açılır; 3D'nin ilk 5 saniyesi 20 FPS'in altındaysa bir kez "2D'ye geç" önerisi çıkar. WebGL yoksa 3D
+düğmesi devre dışıdır. Konsolda `ofisOlcum` 3D kare ve render sayısını gösterir (2D'de artmaz).
+
 ## Kendi ajanını nasıl bağlarsın
 
 1. **Yapılandırmayı kopyala.**
@@ -296,7 +304,7 @@ Yeni model gelince satırı ekle, sunucuyu yeniden başlat; geçmiş günler de 
 | `ortak.py` | yollar, ajan tablosu, olay günlüğü |
 | `ajanlar.example.json`, `kopru.example.json` | boş şablonlar |
 | `CLAUDE.md` | CEO anayasası şablonu |
-| `on-yuz/` | `index.html` (sahne + paneller), `kedi.js` (prosedürel kedi), `meme.js` (meme pozları), `portre.js` (panel avatarları), `dekor.js` (oda eşyaları), `demo-veri.json` |
+| `on-yuz/` | `index.html` (sahne + paneller), `kedi.js` (prosedürel kedi), `meme.js` (meme pozları), `portre.js` (panel avatarları), `dekor.js` (oda eşyaları), `ofis2d.js` (hafif 2D görünüm), `demo-veri.json` |
 
 ## Lisans
 [PolyForm Noncommercial 1.0.0](LICENSE). Kısaca:

@@ -482,6 +482,43 @@ td.sayi,th.sayi{text-align:right}
 .dugme.gorunum[aria-pressed="true"]{background:#3b342c;color:#fff;border-color:#3b342c}
 .dugme.gorunum[aria-pressed="true"] .yazi{font-weight:500;color:rgba(255,255,255,.6)}
 .dugme.gorunum[aria-pressed="true"] .yazi b{font-weight:600;opacity:1;color:#fff}
+/* 2D / 3D geçişi ve hafif 2D görünüm (WebGL yok, sürekli çizim yok) */
+.dugme.boyut{font-family:"Space Grotesk",sans-serif;font-weight:600;min-width:44px}
+.dugme.boyut[aria-pressed="true"]{background:#3b342c;color:#fff;border-color:#3b342c}
+.dugme.boyut:disabled{cursor:not-allowed;opacity:.85}
+.ofis2d{position:fixed;top:76px;left:22px;right:calc(var(--sag) + 32px);bottom:92px;overflow:auto;overscroll-behavior:contain;z-index:2;display:none;padding:0 2px 16px}
+body.boyut-2d .ofis2d{display:block}
+body.boyut-2d #sahne,body.boyut-2d .vinyet,body.boyut-2d #etiketler,body.boyut-2d .selam,body.boyut-2d #gorunumDugme{display:none}
+.o2-ozet{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.o2-ozet div{display:flex;flex-direction:column;padding:8px 12px;border-radius:12px;background:#fffaf3;border:1px solid rgba(59,52,44,.1);font-size:12px;color:var(--soluk)}
+.o2-ozet b{font-family:"Space Grotesk",sans-serif;font-size:18px;font-weight:600;color:var(--murekkep);font-variant-numeric:tabular-nums}
+.o2-odalar{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;align-items:start}
+.o2-oda{display:flex;flex-direction:column;gap:8px;min-width:0;padding:12px;border-radius:14px;background:#fffaf3;border:1px solid rgba(59,52,44,.1);border-top:4px solid var(--oda,#b9ad9e)}
+.o2-oda-ad{font-family:"Space Grotesk",sans-serif;font-size:15px;font-weight:600;text-align:left;min-height:32px;padding:0 4px;border-radius:8px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.o2-oda-ad:hover{background:rgba(59,52,44,.06)}
+.o2-kartlar{display:flex;flex-direction:column;gap:6px}
+.o2-ajan{display:grid;grid-template-columns:32px minmax(0,1fr);gap:2px 10px;align-items:center;width:100%;min-height:44px;padding:8px;text-align:left;border-radius:10px;background:rgba(255,255,255,.72);border:1px solid rgba(59,52,44,.08)}
+.o2-ajan:hover{background:#fff;border-color:rgba(59,52,44,.2)}
+.o2-harf{grid-row:span 3;align-self:start;width:32px;height:32px;border-radius:9px;display:grid;place-items:center;font-size:14px;font-weight:700;color:var(--murekkep);background:var(--renk,#e8dccb)}
+.o2-ad,.o2-alt,.o2-durum>span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.o2-ad{font-size:13.5px;font-weight:600}
+.o2-durum{display:flex;align-items:center;gap:6px;min-width:0;font-size:12px;color:var(--soluk)}
+.o2-nokta{width:8px;height:8px;border-radius:50%;flex:none;background:#b9ad9e}
+.o2-ajan[data-durum="calisiyor"] .o2-nokta,.o2-ajan[data-durum="dusunuyor"] .o2-nokta,.o2-ajan[data-durum="bekliyor"] .o2-nokta{background:var(--mercan)}
+.o2-ajan[data-durum="calisiyor"] .o2-durum,.o2-ajan[data-durum="dusunuyor"] .o2-durum{color:var(--mercan-kk);font-weight:500}
+.o2-ajan[data-durum="bitti"] .o2-nokta{background:#3f9a62}
+.o2-ajan[data-durum="hata"] .o2-nokta{background:var(--mercan-kk);border-radius:2px}
+.o2-alt{font-size:12px;color:#4d453c}
+.o2-masalar:empty{display:none}
+.o2-masalar{display:flex;flex-direction:column;gap:4px}
+.o2-masa{font-size:12px;color:var(--soluk);padding:6px 8px;border-radius:8px;border:1px dashed rgba(59,52,44,.2)}
+.o2-bos{font-size:12px;color:var(--soluk)}
+.o2-blok{margin-top:16px;padding:12px;border-radius:14px;background:#fffaf3;border:1px solid rgba(59,52,44,.1)}
+.o2-baslik{font-family:"Space Grotesk",sans-serif;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--soluk);margin-bottom:8px}
+.o2-terminal{list-style:none;display:flex;flex-direction:column;gap:6px}
+.o2-terminal li{display:flex;flex-direction:column;gap:2px;min-width:0;padding:6px 8px;border-radius:8px;background:rgba(255,255,255,.72);font-size:12px;color:var(--soluk)}
+.o2-terminal li b{font-size:13px;color:var(--murekkep);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.o2-terminal li span{overflow-wrap:anywhere}
 @media (max-width:768px){
   :root{--sag:auto}
   .yaz input,.yaz textarea{font-size:16px}.yaz textarea{max-height:40dvh}.yaz .gonder,.komut .gonder{min-height:44px;min-width:44px}.yaz .ata{min-height:44px;min-width:44px}.ekler button{min-height:36px}
@@ -515,6 +552,10 @@ td.sayi,th.sayi{text-align:right}
   .tost{left:50%;bottom:calc(80px + env(safe-area-inset-bottom));max-width:calc(100% - 24px)}
   .mod{display:none}
   body.sahne-modu .sag{display:none}
+  .dugme.boyut{flex:0 0 auto;width:44px;height:44px;padding:0}
+  .ofis2d{top:60px;left:8px;right:8px;bottom:calc(76px + env(safe-area-inset-bottom))}
+  body.boyut-2d:not(.sahne-modu) .ofis2d{display:none}
+  .o2-odalar{grid-template-columns:minmax(0,1fr)}
 }
 </style>
 <script type="importmap">
@@ -525,6 +566,7 @@ td.sayi,th.sayi{text-align:right}
 <canvas id="sahne"></canvas>
 <div class="vinyet"></div>
 <div id="etiketler"></div>
+<main class="ofis2d" id="ofis2d" aria-label="Ofis, 2D görünüm"></main>
 
 <header class="ustbar">
   <div class="marka"><div class="logo" aria-hidden="true"><i></i></div><b id="marka">Ajan Ofisi</b></div>
@@ -541,6 +583,7 @@ td.sayi,th.sayi{text-align:right}
   <div class="hap"><span class="nokta" id="aktifNokta"></span><b id="aktif">0</b><span class="yazi"> ajan çalışıyor</span></div>
   <button class="takili-rozet" id="takiliRozet" type="button" hidden></button>
   <span class="saat" id="saat"></span>
+  <button class="dugme boyut" id="boyutDugme" type="button" aria-pressed="false" aria-label="2D görünüm">2D</button>
   <button class="dugme gorunum" id="gorunumDugme" type="button" aria-pressed="false" aria-label="Duygu karakterleri görünümü"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0"/><path d="M9 9.5v.5M15 9.5v.5"/></svg><span class="yazi">Kediler / <b>Duygular</b></span></button>
   <button class="dugme" id="genel" type="button">Genel bakış</button>
   <a class="dugme cikis" href="/cikis" title="Oturumu kapat">Çıkış</a>
@@ -614,6 +657,7 @@ import { memeKur, memeBul } from './meme.js';
 import { portreleriUret } from './portre.js';
 import { dekorKur, masaLambasi } from './dekor.js';
 import { createDuygu, ajanDuygusu, duyguSirayla, kontrolOdasiKur, parlamaAyarla } from './duygu.js';
+import { ofis2dKur } from './ofis2d.js';
 // model kısa adları: modelAdi() sahne kurulurken de çağrılıyor (YKB tabelası), bu yüzden en üstte tanımlı
 const MODEL_ADI = { haiku:'Haiku 5.5', sonnet:'Sonnet 5.5', opus:'Opus 5.5', fable:'Fable 5.2' };
 
@@ -627,6 +671,22 @@ const GORUNUM_K = 'ofis-gorunum';
 let GORUNUM = (() => { try { return localStorage.getItem(GORUNUM_K) === 'duygu' ? 'duygu' : 'kedi'; } catch { return 'kedi'; } })();
 const ANILAR = [];   // biten koşular (anı küreleri): {ajan, hata}
 let kontrolOdasi = null;   // duygu görünümünün dekoru (kedi görünümünde yok)
+/* ofis boyutu: '3d' (sahne) ya da '2d' (hafif DOM görünümü); seçim cihazda saklanır. Kayıt yoksa WebGL'siz,
+   yavaş (≤2 çekirdek ya da ≤2 GB) ya da dar (<600 px) cihazda 2D açılır. 2D'de 3D döngüsü durur, sahne verisi güncellenmeye devam eder. */
+const BOYUT_K = 'ofis-boyut';
+const WEBGL_VAR = (() => {
+  try {
+    const c = document.createElement('canvas'), g = c.getContext('webgl2') || c.getContext('webgl');
+    g?.getExtension('WEBGL_lose_context')?.loseContext();
+    return !!g;
+  } catch { return false; }
+})();
+const BOYUT_KAYITLI = (() => { try { const v = localStorage.getItem(BOYUT_K); return v === '2d' || v === '3d' ? v : null; } catch { return null; } })();
+const YAVAS_CIHAZ = (navigator.hardwareConcurrency || 8) <= 2 || (navigator.deviceMemory || 8) <= 2;
+let BOYUT = !WEBGL_VAR ? '2d' : BOYUT_KAYITLI || (YAVAS_CIHAZ || matchMedia('(max-width:599px)').matches ? '2d' : '3d');
+let ofis2d = null, ofis2dZaman = 0, ofis2dIstek = 0;
+document.body.classList.toggle('boyut-2d', BOYUT === '2d');
+function ofis2dIste() { if (BOYUT === '2d' && ofis2d && !ofis2dIstek) ofis2dIstek = setTimeout(() => { ofis2dIstek = 0; ofis2d.ciz(); }, 60); }
 function aniKaydet(ajan, hata) {
   ANILAR.push({ ajan, hata }); if (ANILAR.length > 400) ANILAR.shift();
   kontrolOdasi?.aniEkle(ajan, hata);
@@ -762,7 +822,13 @@ async function postJSON(yol, govde) {
 const tuval = $('sahne');
 // Ekran kaydı gibi bellek baskısı olan durumlar için: varsayılan 1,5x; ?hafif=1 → 1x, küçük gölge, antialias yok.
 const HAFIF = new URLSearchParams(location.search).has('hafif');
-const renderer = new THREE.WebGLRenderer({ canvas:tuval, antialias:!HAFIF, powerPreference:'high-performance' });
+// WebGL yoksa sahne yine kurulur (veri ve paneller ona bağlı) ama çizilmez: boş renderer, ofis 2D'de kalır
+const renderer = (() => {
+  try { if (WEBGL_VAR) return new THREE.WebGLRenderer({ canvas:tuval, antialias:!HAFIF, powerPreference:'high-performance' }); }
+  catch (e) { console.warn('WebGL açılamadı, 2D görünüm kullanılıyor:', e); }
+  return { bos:true, domElement:tuval, shadowMap:{}, info:{ memory:{} }, setPixelRatio() {}, setSize() {}, render() {} };
+})();
+if (renderer.bos && BOYUT === '3d') { BOYUT = '2d'; document.body.classList.add('boyut-2d'); }
 renderer.setPixelRatio(Math.min(devicePixelRatio, HAFIF ? 1 : 1.5));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
@@ -1188,6 +1254,7 @@ ODALAR.filter(o => o.id !== 'ceo').forEach(o => {
   hatlar.set(o.id, { egri, cizgi, sonAkis:0 });
 });
 function isikAkit(odaId, ters = false, renk = '#ff7a59') {
+  if (BOYUT === '2d') return;   // 2D'de sahne çizilmez; ışık birikmesin
   const h = hatlar.get(odaId); if (!h) return;
   const s = new THREE.Sprite(new THREE.SpriteMaterial({ map:isikDoku, color:renk, transparent:true, depthWrite:false }));
   s.scale.setScalar(.9); scene.add(s);
@@ -1874,6 +1941,7 @@ function ustGuncelle() {
   Object.assign(panoVeri, { kosu, calisan:n, uyuyan });
   panoCiz();
   ODALAR.forEach(zeminCiz);
+  ofis2dIste();
 }
 function selamla() {
   const s = new Date().getHours();
@@ -2188,7 +2256,7 @@ const zarflar = [];
 const zarfGeo = yuvarlak(.5, .1, .34, .03);
 function zarfGonder(hedef, bitince = () => {}) {
   const ceo = ajanBul('ceo');
-  if (!ceo || hedef.id === 'ceo') { bitince(); return; }
+  if (!ceo || hedef.id === 'ceo' || BOYUT === '2d') { bitince(); return; }   // 2D'de zarf uçmaz, iş hemen devam eder
   const bas = new THREE.Vector3(ceo.grup.position.x, 2.4, ceo.grup.position.z + .4);
   const son = new THREE.Vector3(hedef.grup.position.x, 2.3, hedef.grup.position.z + .2);
   const orta = bas.clone().lerp(son, .5); orta.y = 7 + bas.distanceTo(son) * .12;
@@ -3160,6 +3228,7 @@ function odaPaneli(oda) {
   panel.classList.add('acik');
 }
 function panelYenile() {
+  ofis2dIste();   // ajan durumu değişti: 2D açıksa ilgili kart da güncellenir
   if (!panel.classList.contains('acik')) return;
   if (panelAjan) {
     const a = ajanBul(panelAjan); if (!a) return;
@@ -4488,7 +4557,14 @@ function animGuvenli(ad, fn, t, dt) {   // bir animasyonun hatası tüm döngüy
     if (!animHataZaman[ad] || simdi - animHataZaman[ad] > 10000) { animHataZaman[ad] = simdi; console.error(`${ad} animasyonu hatası:`, e); }
   }
 }
+let kare = 0;   // bekleyen rAF; 2D'de 0 kalır
+const OLCUM = { kare:0, render:0 };   // UAT için: konsolda ofisOlcum ile 2D'de rAF/render sayısının artmadığı görülür
+window.ofisOlcum = OLCUM;
+let yavasOlcum = null;   // 3D ilk 5 sn ortalama FPS (kayıtlı seçim yoksa bir kez)
 function dongu() {
+  kare = 0;
+  if (BOYUT === '2d') return;
+  OLCUM.kare++;
   const dt = Math.min(saat.getDelta(), .05), t = saat.elapsedTime;
   gecisGuncelle(dt);
   tumAjanlar().forEach(a => ajanAnimasyon(a, t, dt));
@@ -4505,12 +4581,21 @@ function dongu() {
   altMasalar.forEach(m => { if (t - m.zaman > .5) { m.zaman = t; altMasaCiz(m); m.ekran.t.needsUpdate = true; } });
   if (t - panelZaman > .5) { panelZaman = t; if (panelAjan && ajanBul(panelAjan)?.durum !== 'uyku') panelYenile(); }
   controls.update();
-  renderer.render(scene, camera);
+  renderer.render(scene, camera); OLCUM.render++;
   etiketGuncelle();
   odaAdGuncelle();
-  requestAnimationFrame(dongu);
+  if (yavasOlcum) yavasOlc();
+  kare = requestAnimationFrame(dongu);
 }
-addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); gorusKaydir(); });
+function yavasOlc() {
+  yavasOlcum.n++;
+  const gecen = performance.now() - yavasOlcum.bas;
+  if (gecen < 5000) return;
+  const fps = yavasOlcum.n * 1000 / gecen; yavasOlcum = null;
+  if (gecen < 8000 && fps < 20) tost('Ofis bu cihazda yavaş çiziliyor. Üst çubuktaki 2D düğmesiyle hafif görünüme geçebilirsin.');
+}
+let boyutBekliyor = false;   // 2D'de pencere boyutu değişti: renderer 3D'ye dönünce ayarlanır
+addEventListener('resize', () => { if (BOYUT === '2d') { boyutBekliyor = true; return; } renderer.setSize(innerWidth, innerHeight); gorusKaydir(); });
 
 /* ---------- görünüm seçici: Kediler / Duygular (sayfa yenilemeden figürler ve dekor yeniden kurulur) ---------- */
 function karakterDegistir(eski, yeni) {
@@ -4562,6 +4647,82 @@ function gorunumGuncelle(t) {
   if (parilti && fps < 28) parilti = false; else if (!parilti && fps > 45) parilti = true; else return;
   parlamaAyarla(parilti);
 }
+
+/* ---------- 2D / 3D: 2D aynı veri durumundan (AJANLAR, sayac, terminaller, altMasalar) çizer; 3D döngüsü durur ---------- */
+function ofis2dVeri() {
+  const harf = ad => (String(ad || '?').trim()[0] || '?').toLocaleUpperCase('tr-TR');
+  const ajanKarti = a => {
+    const durum = a.durum === 'bitti' && a.sonHata ? 'hata' : a.durum || 'uyku', b = a.bilgi || {};
+    const isde = durum === 'calisiyor' || durum === 'dusunuyor' || durum === 'bekliyor';
+    const alt = [isde ? a.is : (a.ornek ? b.etiket : a.sonOzet), isde && a.kosuId ? 'koşu ' + String(a.kosuId).slice(0, 8) : '',
+      a.ornek && b.model ? modelAdi(b.model) : '', a.terminalSay ? a.terminalSay + ' terminal' : ''].filter(Boolean).join(' · ');
+    return { anahtar:'a:' + a.id, ad:a.ad || a.id, harf:harf(a.ad || a.id), renk:ajanRenk(a.id), durum,
+      durumYazi:durum === 'hata' ? 'Hata · ' + (a.sonSure ?? '?') + ' sn' : durumMetni(a), alt, ac:{ tur:'ajan', id:a.id } };
+  };
+  const kurulDurum = { dinliyor:['calisiyor', 'dinliyor…'], tamam:['bitti', 'görüş verdi'], cevapsiz:['hata', 'cevap veremedi'] };
+  const veriAjan = ajanBul('veri'), veriIste = veriAjan && veriAjan.durum !== 'uyku';
+  const odalar = ODALAR.map(o => {
+    const kartlar = tumAjanlar().filter(a => a.oda === o.id && !a.gizli).map(ajanKarti);
+    if (o.id === 'kurul') KURUL.forEach(m => { const [d, y] = kurulDurum[m.durum] || ['uyku', 'boşta'];
+      kartlar.push({ anahtar:'k:' + m.id, ad:m.ad || m.id, harf:harf(m.ad || m.id), renk:o.duvar || '#e8dccb', durum:d, durumYazi:y, alt:kisa(m.ozet || m.uzmanlik || '', 80), ac:{ tur:'oda', id:o.id } }); });
+    if (o.id === 'ykb' && YKB && apiYkb) { const d = YKB.durum === 'bos' ? 'uyku' : YKB.durum;
+      kartlar.push({ anahtar:'ykb', ad:apiYkb.ad || 'Başkan', harf:harf(apiYkb.ad || 'B'), renk:o.duvar || '#e8dccb', durum:d, durumYazi:ykbDurumMetni(YKB.durum), alt:apiYkb.model ? modelAdi(apiYkb.model) : '', ac:{ tur:'oda', id:o.id } }); }
+    const masalar = o.id === 'veri' ? altMasalar.map(m => m.ad + ' · ' + (veriIste ? 'çalışıyor' : 'boşta')) : [];
+    return { id:o.id, ad:o.ad || o.id, renk:o.duvar || o.hali1 || '#b9ad9e', kartlar, masalar };
+  });
+  const termDurum = { calisiyor:'çalışıyor', bekliyor:'bekliyor' };
+  const terminal = [...terminaller.values()].map(t => ({ anahtar:t.oturum_adi, durum:t.durum || '',
+    ust:t.pencere_adi && t.pencere_adi !== 'claude.exe' ? t.pencere_adi : t.oturum_adi,
+    alt:[ajanBul(terminalSahibi(t))?.ad || t.ajan || 'sahipsiz', termDurum[t.durum] || t.durum || 'açık',
+      t.son_arac ? 'son araç: ' + terminalEylem(t) : '', modelAdi(t.model)].filter(Boolean).join(' · ') }));
+  return {
+    ozet:[[sayac.bugun_kosu ?? 0, 'bugünkü koşu'], [calisanlar().length, 'çalışan ajan'], ['$' + Number(sayac.toplam_maliyet_usd || 0).toFixed(2), 'ofis maliyeti'],
+      [kisaSayi(tokenGenel()), 'bugünkü token'], [terminaller.size, 'terminal oturumu']],
+    odalar, terminaller:terminal,
+  };
+}
+function ofis2dAc(h) {
+  SES.tik();
+  if (h.tur === 'ajan') { const a = ajanBul(h.id); if (a) ajanPaneli(a); }
+  else { const o = odaBul(h.id); if (o) odaPaneli(o); }
+}
+function ofis2dTik() {   // 2D'de sürekli çizim yok: saniyede bir süre yazıları ve açık panel tazelenir
+  // 3D döngüsündeki süreli durum dönüşleri (kurul ve Başkan dinlenmeye döner) 2D'de de işlesin
+  if (kurulBitis && Date.now() > kurulBitis) animGuvenli('kurul', kurulAnimasyon, saat.elapsedTime, 0);
+  if (YKB?.bitis && Date.now() > YKB.bitis) ykbDurumAyarla('bos');
+  ofis2d.ciz();
+  if (panelAjan && ajanBul(panelAjan)?.durum !== 'uyku') panelYenile();
+}
+let durduT = null;   // 3D durduğunda saat (THREE.Clock) değeri; dönüşte t kaldığı yerden sürer
+function boyutUygula(yeni, kaydet = true) {
+  if (yeni !== '2d' && !renderer.bos) yeni = '3d'; else yeni = '2d';
+  BOYUT = yeni;
+  if (kaydet) { try { localStorage.setItem(BOYUT_K, yeni); } catch { /* seçim yalnız bu oturumda kalır */ } yavasOlcum = null; }
+  document.body.classList.toggle('boyut-2d', yeni === '2d');
+  boyutDugmeCiz();
+  if (yeni === '2d') {
+    if (kare) { cancelAnimationFrame(kare); kare = 0; }
+    if (durduT === null) durduT = saat.elapsedTime;
+    if (meme.aktif()) meme.kapat();
+    if (!ofis2d) ofis2d = ofis2dKur($('ofis2d'), { veri:ofis2dVeri, ac:ofis2dAc });
+    ofis2d.ciz();
+    if (!ofis2dZaman) ofis2dZaman = setInterval(ofis2dTik, 1000);
+    return;
+  }
+  clearInterval(ofis2dZaman); ofis2dZaman = 0; clearTimeout(ofis2dIstek); ofis2dIstek = 0;
+  if (boyutBekliyor) { boyutBekliyor = false; renderer.setSize(innerWidth, innerHeight); gorusKaydir(); }
+  if (durduT !== null) { saat.getDelta(); saat.elapsedTime = durduT; durduT = null; }   // aradaki süre dt'ye girmez
+  if (!kare) dongu();
+}
+const boyutDugme = $('boyutDugme');
+function boyutDugmeCiz() {
+  const iki = BOYUT === '2d';
+  boyutDugme.setAttribute('aria-pressed', String(iki));
+  boyutDugme.disabled = !!renderer.bos;
+  boyutDugme.setAttribute('aria-label', renderer.bos ? '2D görünüm (WebGL yok, 3D kullanılamıyor)' : '2D görünüm');
+  boyutDugme.title = renderer.bos ? 'Bu tarayıcıda WebGL yok: 3D açılamıyor, ofis 2D görünümde' : iki ? 'Görünüm: 2D · 3D sahneye dön' : 'Görünüm: 3D · hafif 2D görünüme geç';
+}
+boyutDugme.addEventListener('click', () => { SES.tik(); boyutUygula(BOYUT === '2d' ? '3d' : '2d'); });
 
 /* ---------- nöbetçi: kritik alarm bandı + takılı görev rozeti (her sekmede) ---------- */
 let nobetci = { alarmlar:[], takilanlar:[] }, bildirilenAlarm = null, demoAlarmGordu = false;
@@ -4616,11 +4777,12 @@ if (hAjan) { odayaGit(odaBul(hAjan.oda), true); ajanPaneli(hAjan); odaVurgu(hAja
 else if (hOda) { odayaGit(hOda, true); odaPaneli(hOda); odaVurgu(hOda.id); }
 if (hash.get('sekme')) sekmeAc(hash.get('sekme'));
 const hMeme = ajanBul(hash.get('meme') || '');
-if (hMeme) setTimeout(() => meme.oynat(hMeme, { tut:true, aninda:true }), 900);
+if (hMeme && BOYUT === '3d') setTimeout(() => meme.oynat(hMeme, { tut:true, aninda:true }), 900);
 if (hash.get('gorev') && DEMO) setTimeout(() => ceoyaSor(hash.get('gorev')), 600);
 ustGuncelle();
 controls.update();
-dongu();
+if (!BOYUT_KAYITLI && BOYUT === '3d') yavasOlcum = { n:0, bas:performance.now() };
+boyutUygula(BOYUT, false);   // 3D ise döngü başlar; 2D ise döngü hiç başlamaz
 </script>
 </body>
 </html>
