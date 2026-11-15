@@ -2296,7 +2296,7 @@ class Isleyici(SimpleHTTPRequestHandler):
         if yol.path == "/api/model-kullanim":
             _, tablo = ortak.ajanlari_yukle()
             return self._json(200, model_kullanim.ozet(
-                olaylari_oku(eski=True, turler=("kosu_bitti", "ceo_bitti", "ykb_bitti")), tablo))
+                olaylari_oku(eski=True, turler=("kosu_bitti", "ceo_bitti", "ykb_bitti")), tablo, kurul=kurul_yukle()))
         if yol.path == "/api/son-is":
             try:
                 q = parse_qs(yol.query)

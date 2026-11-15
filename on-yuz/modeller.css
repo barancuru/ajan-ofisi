@@ -23,3 +23,5 @@ h3.mk-b{font-family:"Space Grotesk",sans-serif;font-size:16px;margin:22px 0 8px}
 .mk-tam:hover{background:#fff}
 .mk-alt-toplam th{border-bottom:none;border-top:1px solid rgba(59,52,44,.16);color:var(--murekkep);font-size:12px}
 .mk-tablo td.sayi,.mk-tablo th.sayi{white-space:nowrap}
+.mk-grup{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--soluk);margin:14px 0 6px}
+.mk-roller small.mk-rol-kul{margin-top:8px;color:var(--murekkep);font-variant-numeric:tabular-nums}

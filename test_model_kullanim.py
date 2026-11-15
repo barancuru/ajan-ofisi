@@ -154,5 +154,26 @@ class TumZamanlarTest(unittest.TestCase):
                 mk._durum.update(zaman=0.0, dosyalar=None)
 
 
+class RollerTest(unittest.TestCase):
+    def test_tum_roller_ve_rol_kullanimi(self):
+        ev = os.path.expanduser("~")
+        kok = "/x/.claude/projects/"
+        ana = kok + mk.re.sub(r"[^A-Za-z0-9]", "-", ev) + "/s.jsonl"
+        hat = kok + mk.re.sub(r"[^A-Za-z0-9]", "-", os.path.join(ev, "beyin-is/wt")) + "-homeos-1114-x/s.jsonl"
+        dos = {ana: {"kayit": {"a": ["2026-11-15", "claude-opus-5-5", 5, 5, 0, 0]}},
+               hat: {"kayit": {"h": ["2026-11-15", "claude-sonnet-5-5", 3, 3, 0, 0]}}}
+        olay = {"tur": "kosu_bitti", "kosu_id": "k", "zaman": "2026-11-15T09:00:00", "ajan": "veri",
+                "kullanim": {"input_tokens": 7}}
+        tablo = {"veri": {"id": "veri", "ad": "Veri", "model": "haiku"}}
+        kurul = [{"id": "finans", "ad": "Ayla · Finans", "uzmanlik": "bütçe", "model": "sonnet"}]
+        o = mk.ozet([olay], tablo, bugun="2026-11-15", dosya_ozeti=dos, kurul=kurul)
+        r = {x["id"]: x for x in o["roller"]}
+        self.assertEqual(set(r), {"veri", "ykb", "kurul-finans", "ana-ajan", "gelistirme-hatti", "cayci-kedi"})
+        self.assertEqual((r["veri"]["token_30"], r["ana-ajan"]["token_30"], r["gelistirme-hatti"]["token_30"]), (7, 10, 6))
+        self.assertEqual(r["ana-ajan"]["model_ad"], "Opus 5.5")
+        self.assertEqual(r["ykb"]["model_ad"], "Fable 5.2")
+        self.assertEqual((r["cayci-kedi"]["model_ad"], r["cayci-kedi"]["grup"]), ("model yok", "Ofis maskotu"))
+
+
 if __name__ == "__main__":
     unittest.main()

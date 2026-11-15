@@ -311,7 +311,7 @@ def ofis_arsivle(satirlar):
     with _kilit:
         arsiv = _onbellek_ham().get("ofis")
         arsiv = dict(arsiv) if isinstance(arsiv, dict) else {}
-        yeni = {k: v for k, v in satirlar.items() if k not in arsiv}
+        yeni = {k: v for k, v in satirlar.items() if k not in arsiv or len(arsiv[k]) < len(v)}  # eski biçim: ajan yok
         if yeni:
             arsiv.update(yeni)
             _onbellek_yaz(ofis=arsiv)
@@ -356,8 +356,90 @@ def ofis_kayitlari(olaylar, tablo):
         model = o.get("model") or (tablo.get(ajan) or {}).get("model") or ""
         olcum = o.get("maliyet_usd") if isinstance(o.get("maliyet_usd"), (int, float)) else None
         anahtar = f'{o["tur"]}:{o.get("kosu_id") or o.get("zaman")}'
-        satirlar[anahtar] = [gun, model_normal(model)] + _u4(o["kullanim"]) + [olcum]
+        satirlar[anahtar] = [gun, model_normal(model)] + _u4(o["kullanim"]) + [olcum, ajan or ""]
     return satirlar
+
+
+# ---------- roller ----------
+def rol_bulucu():
+    """Transkript yolu → 'ana-ajan' | 'gelistirme-hatti' | None (kopru.json ana_ajan_cwd / hat_cwd ile)."""
+    try:
+        import kopru
+        esleme = {}
+        try:
+            with open(os.path.join(ortak.KOK, "kopru.json"), encoding="utf-8") as f:
+                esleme = json.load(f) or {}
+        except (OSError, ValueError):
+            pass
+        ana = {kopru.proje_klasoru(y) for y in kopru.yol_listesi(esleme.get("ana_ajan_cwd"), kopru.ANA_AJAN_CWD)}
+        hat = [kopru.proje_klasoru(y) for y in kopru.yol_listesi(esleme.get("hat_cwd"), kopru.HAT_CWD)]
+    except Exception:
+        return lambda yol: None
+
+    def bul(yol):
+        parca = yol.split("/projects/", 1)
+        if len(parca) < 2:
+            return None
+        klasor = parca[1].split("/", 1)[0]
+        if klasor in ana:
+            return "ana-ajan"
+        if any(klasor == h or klasor.startswith(h + "-") for h in hat):
+            return "gelistirme-hatti"
+        return None
+    return bul
+
+
+def _kisalt(metin, n=200):
+    metin = " ".join(str(metin or "").split())
+    return metin if len(metin) <= n else metin[:n].rsplit(" ", 1)[0].rstrip(",;:") + "…"
+
+
+def _rol(grup, rid, ad, model, effort="", aciklama="", kul=None, model_ad=None, not_=""):
+    kul = kul or {}
+    m = model_normal(model) if model else ""
+    return {"grup": grup, "id": rid, "ad": ad, "model": m,
+            "model_ad": model_ad or (model_adi(m) if m else "model yok"), "lab": lab_bul(m) if m else "",
+            "effort": effort or "", "aciklama": _kisalt(aciklama), "not": not_,
+            "token_30": sum(kul.values()), "modeller_30": [{"model": k, "ad": model_adi(k), "token": v}
+                                                          for k, v in sorted(kul.items(), key=lambda x: -x[1])][:3]}
+
+
+def _gercek_model_ad(kul, yedek):
+    if not kul:
+        return yedek
+    sirali = sorted(kul.items(), key=lambda x: -x[1])
+    return " · ".join(model_adi(k) for k, _ in sirali[:2]) + (" +" if len(sirali) > 2 else "")
+
+
+def roller_kur(tablo, rol_kul, kurul=None):
+    """Ofisteki herkes: ajanlar.json, Yönetim Kurulu Başkanı, Mentor Kurulu, sanal gözlem ajanları, çaycı kedi."""
+    roller = [_rol("Ofis ajanları", a["id"], a.get("ad") or a["id"], a.get("model"), a.get("effort"),
+                   a.get("aciklama") or a.get("uzmanlik"), rol_kul.get(a["id"]))
+              for a in tablo.values() if a.get("model") and not a.get("sanal") and a["id"] != "ykb"]
+    try:
+        import ykb
+        t = ykb.tanim(tablo)
+        roller.append(_rol("Yönetim", "ykb", t["ad"], t["model"], t["effort"],
+                           f"Yönetim kurulu planı çıkarır; koşu başına bütçe ${t['butce_usd']:g}, en fazla "
+                           f"{t['zaman_asimi_dk']} dk. Limitte Opus API yedeği.", rol_kul.get("ykb")))
+    except Exception:
+        pass
+    for u in kurul or []:
+        uzm = u.get("uzmanlik", "")
+        roller.append(_rol("Mentor Kurulu", "kurul-" + u["id"], u["ad"], u.get("model"), "",
+                           {"i": "İ", "ı": "I"}.get(uzm[:1], uzm[:1].upper()) + uzm[1:] + ".", not_="CEO danışınca görüş verir; token CEO kararına eklenir"))
+    for rid, ad, aciklama, yedek in (
+            ("ana-ajan", "Ana ajan", "Ev klasöründe açtığın Claude Code oturumu; ofis yalnız gözler. Model oturumdan okunur.",
+             "oturuma göre"),
+            ("gelistirme-hatti", "Geliştirme hattı", "bin/calistir'ın worktree koşuları. Şartname ve öneri Sonnet; "
+             "geliştirme görev kartındaki modelle (çoğu Sonnet, gerekirse Opus).", "göreve göre")):
+        kul = rol_kul.get(rid)
+        en = max(kul, key=kul.get) if kul else ""
+        roller.append(_rol("Gözlenenler", rid, ad, en, "", aciklama, kul, _gercek_model_ad(kul, yedek)))
+    roller.append(_rol("Ofis maskotu", "cayci-kedi", "Çaycı Kedi", "", "",
+                       "Odaları dolaşıp espri ve ajan yapılandırma ipucu verir. Sözler tarayıcıda hazır listeden "
+                       "seçilir; model çağrısı yok, 0 token."))
+    return roller
 
 
 # ---------- özet ----------
@@ -378,7 +460,7 @@ def model_adi(m):
     return m
 
 
-def ozet(olaylar, tablo, bugun=None, dosya_ozeti=None):
+def ozet(olaylar, tablo, bugun=None, dosya_ozeti=None, kurul=None):
     bugun = bugun or ortak.bugun()
     b = date.fromisoformat(bugun)
     gunler = [(b - timedelta(days=i)).isoformat() for i in range(GUN - 1, -1, -1)]
@@ -404,12 +486,29 @@ def ozet(olaylar, tablo, bugun=None, dosya_ozeti=None):
             onceki = birlesik.get(kimlik)
             birlesik[kimlik] = r if not onceki else onceki[:2] + [max(a, c) for a, c in zip(onceki[2:], r[2:])]
     son = None
+    rol_yolu = rol_bulucu()
+    kimlik_rol = {}
+    for yol, e in dos.items():
+        rol = rol_yolu(yol)
+        if rol:
+            for kimlik in (e.get("kayit") or {}):
+                kimlik_rol.setdefault(kimlik, rol)
+    son30 = set(gunler)
+    rol_kul = {}
+
+    def rol_ekle(rol, gun, model, toplam):
+        if rol and gun in son30 and toplam:
+            m = rol_kul.setdefault(rol, {})
+            m[model] = m.get(model, 0) + toplam
+
     for kimlik, r in birlesik.items():
+        rol_ekle(kimlik_rol.get(kimlik), r[0], r[1], sum(r[2:6]))
         kaynak = "codex" if kimlik.startswith("codex:") else "antigravity" if kimlik.startswith("ag:") else "terminal"
         ekle(r[0], r[1], kaynak, r[2:6])
     ofis = ofis_kayitlari(olaylar, tablo)
     for r in (ofis_arsivle(ofis) if dosya_ozeti is None else ofis.values()):
         ekle(r[0], r[1], "ofis", r[2:6], r[6])
+        rol_ekle(r[7] if len(r) > 7 else None, r[0], r[1], sum(r[2:6]))
     tum_gunler = sorted({g for g, _, _ in hucre})
 
     def donem(n):
@@ -455,10 +554,7 @@ def ozet(olaylar, tablo, bugun=None, dosya_ozeti=None):
         kayitlar = list((dos[yol].get("kayit") or {}).values())
         if kayitlar:
             son = kayitlar[-1][1]
-    roller = [{"id": a["id"], "ad": a.get("ad") or a["id"], "model": model_normal(a.get("model")),
-               "model_ad": model_adi(model_normal(a.get("model"))), "lab": lab_bul(model_normal(a.get("model"))),
-               "effort": a.get("effort") or "", "aciklama": str(a.get("aciklama") or a.get("uzmanlik") or "")[:140]}
-              for a in tablo.values() if a.get("model")]
+    roller = roller_kur(tablo, rol_kul, kurul)
     return {"tarih": bugun, "guncelleme": datetime.fromtimestamp(_durum["zaman"] or time.time()).isoformat(timespec="minutes"),
             "su_an": {"model": son, "ad": model_adi(son)} if son else None,
             "donemler": {"bugun": donem(1), "7": donem(7), "30": donem(GUN), "tum": donem(0)},

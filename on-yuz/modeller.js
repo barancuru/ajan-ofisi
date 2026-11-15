@@ -109,11 +109,26 @@
       secim.append(b); });
     ciz();
 
-    const roller = el('div', 'mk-roller');
-    v.roller.forEach(r => { const k = el('div'); k.append(el('b', null, r.ad), el('small', null, [r.model_ad, r.effort, r.lab].filter(Boolean).join(' · ')));
-      if (r.aciklama) k.append(el('p', null, r.aciklama)); roller.append(k); });
+    // ofis rolleri: gruplu kartlar; son 30 günün token'ı varsa kartın altında
+    const rolBolum = [];
+    const gruplar = [];
+    v.roller.forEach(r => { const g = r.grup || 'Ofis'; if (!gruplar.includes(g)) gruplar.push(g); });
+    gruplar.forEach(g => {
+      const izgara = el('div', 'mk-roller');
+      v.roller.filter(r => (r.grup || 'Ofis') === g).forEach(r => {
+        const k = el('div');
+        k.append(el('b', null, r.ad), el('small', null, [r.model_ad, r.effort, r.lab].filter(Boolean).join(' · ')));
+        if (r.aciklama) k.append(el('p', null, r.aciklama));
+        if (r.token_30) k.append(el('small', 'mk-rol-kul', '30 gün: ' + sayi(r.token_30) + ' token' +
+          (r.modeller_30 && r.modeller_30.length > 1 ? ' (' + r.modeller_30.map(m => m.ad + ' ' + sayi(m.token)).join(', ') + ')' : '')));
+        else if (r.not) k.append(el('small', 'mk-rol-kul', r.not));
+        else if (!r.model) k.append(el('small', 'mk-rol-kul', '0 token'));
+        izgara.append(k);
+      });
+      rolBolum.push(el('h4', 'mk-grup', g), izgara);
+    });
     return [baslik, ust, ozet, graf, el('h3', 'mk-b', 'Modeller'), secim, tabloKap,
-      ...(v.roller.length ? [el('h3', 'mk-b', 'Ofis rolleri'), roller] : []),
+      ...(v.roller.length ? [el('h3', 'mk-b', 'Ofis rolleri'), ...rolBolum] : []),
       el('p', 'alt', v.not + ' "Tümü" diskte kalan ve önceden okunmuş kayıtları kapsar; Claude Code transkriptleri 30 günde silse de toplam korunur.')];
   }
 

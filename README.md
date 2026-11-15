@@ -271,6 +271,9 @@ Codex oturumları (`~/.codex/sessions`, `token_usage_record` `response_id` ile t
 özeti ve olaylar.jsonl döndürülünce düşen ofis koşuları önbellekte kalır, toplam küçülmez. **Tam sayfa ↗** düğmesi
 `modeller.html`'yi yeni sekmede açar (3D sahne yok, 5 dakikada bir yenilenir); kod `on-yuz/modeller.js` +
 `modeller.css`, ofis sekmesiyle ortaktır.
+"Ofis rolleri" herkesi gruplu gösterir: ajanlar.json ajanları, Yönetim Kurulu Başkanı (`ykb.tanim`), Mentor Kurulu
+(`kurul_yukle`; token'ı CEO kararına eklenir, ayrı sayılmaz), Ana ajan ve Geliştirme hattı (modeli ve 30 günlük token'ı
+`kopru.json` `ana_ajan_cwd` / `hat_cwd` klasörlerindeki transkriptlerden okunur) ve Çaycı Kedi (model çağırmaz, 0 token).
 
 ### API
 | Uç | Ne |
