@@ -437,7 +437,10 @@ td.sayi,th.sayi{text-align:right}
 .kod-grafi-ust select{font:inherit;font-size:13.5px;padding:8px 10px;border-radius:10px;border:1px solid rgba(59,52,44,.18);background:#fffdf9;color:var(--murekkep)}
 .kod-grafi-ac{font-size:13px;font-weight:600;color:var(--mercan-k);margin-left:auto}
 .kod-grafi-cerceve{width:100%;height:calc(100vh - 290px);min-height:360px;border:1px solid rgba(59,52,44,.14);border-radius:12px;background:#fff;display:block}
-@media (max-width:768px){.kod-grafi-ust select{font-size:16px}.kod-grafi-cerceve{height:calc(100vh - 330px)}}
+@media (max-width:768px){.kod-grafi-ust select{font-size:16px}.kod-grafi-cerceve{height:calc(100vh - 330px)}
+  .diyagram-ust{flex-direction:column;align-items:stretch}.diyagram-ust select{width:100%;min-width:0;min-height:44px}
+  .diyagram-ust .kod-grafi-ac{margin-left:0;min-height:44px;display:inline-flex;align-items:center}
+  .diyagram-cerceve{height:calc(100vh - 300px)}}
 .not-grafi-ust{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 8px}
 .not-grafi-ust input{flex:1 1 220px;min-width:0;max-width:420px;box-sizing:border-box;padding:9px 12px;min-height:40px;font:inherit;font-size:14px;border-radius:10px;border:1px solid rgba(59,52,44,.18);background:#fffdf9;color:var(--murekkep)}
 .not-grafi-ust button{min-width:40px;min-height:40px;touch-action:manipulation}
@@ -536,6 +539,7 @@ td.sayi,th.sayi{text-align:right}
 <div class="arac-menu" id="aracMenu" role="menu" aria-label="Araçlar" hidden>
   <button type="button" role="menuitem" data-sekme="dizin">Dizin</button>
   <button type="button" role="menuitem" data-sekme="kodgrafi">Kod Grafı</button>
+  <button type="button" role="menuitem" data-sekme="diyagram">Diyagramlar</button>
   <button type="button" role="menuitem" data-sekme="notgrafi">Not Grafı</button>
   <button type="button" role="menuitem" data-sekme="ongorulebilirlik">Öngörülebilirlik</button>
 </div>
@@ -3070,7 +3074,7 @@ async function sekmeAc(ad) {
   sekmeAdres(ad);
   if (ad === 'ofis') { sayfa.classList.remove('acik'); return; }
   panelKapat();
-  const icerik = ad === 'kodgrafi' ? await kodGrafiSayfasi() : ad === 'notgrafi' ? await notGrafiSayfasi() : ad === 'odalar' ? odalarSayfasi() : ad === 'hafiza' ? await hafizaSayfasi() : ad === 'gelistirme' ? await gelistirmeSayfasi() : ad === 'dizin' ? await dizinSayfasi() : ad === 'ongorulebilirlik' ? await ongorulebilirlikSayfasi() : ad === 'operator' ? await operatorSayfasi() : maliyetSayfasi();
+  const icerik = ad === 'kodgrafi' ? await kodGrafiSayfasi() : ad === 'diyagram' ? await diyagramSayfasi() : ad === 'notgrafi' ? await notGrafiSayfasi() : ad === 'odalar' ? odalarSayfasi() : ad === 'hafiza' ? await hafizaSayfasi() : ad === 'gelistirme' ? await gelistirmeSayfasi() : ad === 'dizin' ? await dizinSayfasi() : ad === 'ongorulebilirlik' ? await ongorulebilirlikSayfasi() : ad === 'operator' ? await operatorSayfasi() : maliyetSayfasi();
   if (aktifSekme !== ad) return;
   sayfa.replaceChildren(...icerik); sayfa.classList.add('acik');
 }
@@ -3476,6 +3480,57 @@ async function kodGrafiSayfasi() {
   sec.onchange = goster; goster();
   const ust = el('div', 'kod-grafi-ust'); ust.append(sec, bilgi, ac);
   return [...bas, ust, cerceve];
+}
+let diyagramProje = '', diyagramAd = '';
+async function diyagramSayfasi() {
+  const bas = [el('h2', null, 'Diyagramlar'), el('p', 'alt', 'Projelerin SeeCode diyagramları. Öğeye tıkla, iz animasyonunu izle; salt okunurdur.')];
+  let liste;
+  try {
+    liste = DEMO ? ['ajan-ofisi', 'homeos', 'turnusol'].map(proje => ({ proje, diyagramlar: [] })) : (await getJSON('/api/diyagramlar')).projeler;
+    if (!Array.isArray(liste)) throw new Error('biçim');
+  } catch {
+    const yeniden = el('button', 'koyu-dugme', 'Yeniden dene');
+    yeniden.onclick = () => { SES.tik(); sekmeAc('diyagram'); };
+    return [...bas, el('p', 'alt', 'Diyagramlar yüklenemedi.'), yeniden];
+  }
+  if (!liste.length) return [...bas, el('p', 'bos', 'Henüz diyagram yok.')];
+  if (!liste.some(p => p.proje === diyagramProje)) diyagramProje = (liste.find(p => (p.diyagramlar || []).length) || liste[0]).proje;
+  const etiket = { 'ajan-ofisi':'Ajan Ofisi', homeos:'HomeOS', turnusol:'Turnusol' };
+  const projeSec = el('select'); projeSec.setAttribute('aria-label', 'Proje');
+  liste.forEach(p => { const o = el('option', null, etiket[p.proje] || p.proje); o.value = p.proje; projeSec.append(o); });
+  projeSec.value = diyagramProje;
+  const diyagramSec = el('select'); diyagramSec.setAttribute('aria-label', 'Diyagram');
+  const bilgi = el('small', 'alt');
+  const ac = el('a', 'kod-grafi-ac', 'Tam ekran ↗'); ac.target = '_blank'; ac.rel = 'noopener noreferrer';
+  const cerceve = el('iframe', 'kod-grafi-cerceve diyagram-cerceve'); cerceve.title = 'Diyagram';
+  cerceve.setAttribute('sandbox', 'allow-scripts'); cerceve.setAttribute('referrerpolicy', 'no-referrer');
+  const bos = el('p', 'bos');
+  const gorunur = (v) => [diyagramSec, bilgi, ac, cerceve].forEach(x => { x.style.display = v ? '' : 'none'; });
+  const proje = () => liste.find(x => x.proje === projeSec.value) || liste[0];
+  const goster = () => {
+    const p = proje(), d = (p.diyagramlar || []).find(x => x.ad === diyagramSec.value);
+    if (!d) return;
+    diyagramAd = d.ad;
+    const url = '/api/diyagramlar/goster?proje=' + encodeURIComponent(p.proje) + '&ad=' + encodeURIComponent(d.ad);
+    cerceve.src = url; ac.href = url;
+    bilgi.textContent = [d.tur, String(d.guncelleme || '').replace('T', ' ')].filter(Boolean).join(' · ');
+  };
+  const doldur = () => {
+    const p = proje(), ds = p.diyagramlar || [];
+    diyagramProje = p.proje;
+    diyagramSec.replaceChildren(...ds.map(d => { const o = el('option', null, d.baslik || d.ad); o.value = d.ad; return o; }));
+    if (!ds.length) {
+      gorunur(false); cerceve.removeAttribute('src'); bos.style.display = '';
+      bos.textContent = "Bu proje için henüz diyagram yok. Terminalde Claude'a 'SeeCode ile " + p.proje + " için … diyagramı çiz' de; çıktı ~/.local/share/diyagram/" + p.proje + '/ altına yazılır.';
+      return;
+    }
+    gorunur(true); bos.style.display = 'none';
+    diyagramSec.value = ds.some(d => d.ad === diyagramAd) ? diyagramAd : ds[0].ad;
+    goster();
+  };
+  projeSec.onchange = doldur; diyagramSec.onchange = goster; doldur();
+  const ust = el('div', 'kod-grafi-ust diyagram-ust'); ust.append(projeSec, diyagramSec, bilgi, ac);
+  return [...bas, ust, bos, cerceve];
 }
 const NOT_GRAFI_DEMO = {
   dugumler: ['Haftalık plan', 'Okuma listesi', 'Toplantı notları', 'Fikirler', 'Ajan Ofisi', 'HomeOS', 'Turnusol', 'Yol haritası', 'Sunucu envanteri'].map((baslik, id) => {

@@ -1906,6 +1906,66 @@ def kod_grafi_yaniti():
     return {"projeler": liste}
 
 
+# ---------- diagrams tab (SeeCode output, written by Claude with the seecode skill) ----------
+DIYAGRAM_KOK = os.environ.get("OFIS_DIYAGRAM") or os.path.expanduser("~/.local/share/diyagram")
+DIYAGRAM_AD = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
+DIYAGRAM_MAKS = 5 * 1024 * 1024
+DIYAGRAM_CSP = ("sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+                "img-src data: blob:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'")
+
+
+def _diyagram_yolu(proje, ad, uzanti):
+    """Safe path of <root>/<proje>/<ad><uzanti>, or None. proje is from the fixed list; no symlink, no escape, size cap."""
+    if proje not in GRAF_PROJELER or not isinstance(ad, str) or not DIYAGRAM_AD.fullmatch(ad):
+        return None
+    beklenen = os.path.join(os.path.realpath(DIYAGRAM_KOK), proje, ad + uzanti)
+    yol = os.path.join(DIYAGRAM_KOK, proje, ad + uzanti)
+    try:
+        st = os.lstat(yol)
+    except OSError:
+        return None
+    if os.path.islink(yol) or not os.path.isfile(yol) or st.st_size > DIYAGRAM_MAKS:
+        return None
+    if os.path.realpath(yol) != beklenen:  # no symlinked project folder, nothing resolves outside the root
+        return None
+    return yol
+
+
+def diyagramlar_yaniti():
+    try:
+        maske = ortak.maske_yollari(ortak.ajanlari_yukle()[0])
+    except (ortak.YapilandirmaHatasi, OSError, ValueError, KeyError, TypeError):
+        maske = []
+    liste = []
+    for proje in GRAF_PROJELER:
+        try:
+            adlar = sorted(n[:-5] for n in os.listdir(os.path.join(DIYAGRAM_KOK, proje)) if n.endswith(".html"))
+        except OSError:
+            adlar = []
+        diyagramlar = []
+        for ad in adlar:
+            yol = _diyagram_yolu(proje, ad, ".html")
+            if not yol:
+                continue
+            baslik, tur = ad, ""
+            spec = _diyagram_yolu(proje, ad, ".json")
+            if spec:
+                try:
+                    with open(spec, encoding="utf-8") as f:
+                        s = json.load(f)
+                    if isinstance(s, dict):
+                        if isinstance(s.get("title"), str) and s["title"].strip():
+                            baslik = s["title"].strip()[:200]
+                        if isinstance(s.get("type"), str):
+                            tur = s["type"].strip()[:64]
+                except (OSError, ValueError):
+                    pass
+            diyagramlar.append({"ad": ad, "baslik": ortak.maskele(baslik, maske), "tur": ortak.maskele(tur, maske),
+                                "guncelleme": datetime.fromtimestamp(os.path.getmtime(yol)).isoformat(timespec="minutes")})
+        liste.append({"proje": proje, "diyagramlar": diyagramlar})
+    return {"projeler": liste}
+
+
 # ---------- note graph tab: read-only [[wikilink]] graph of BEYIN/notlar + BEYIN/projeler ----------
 NOT_GRAFI_KOKLER = ("notlar", "projeler", "arastirma", "gunluk", "gorevler", "gelen")  # the vault as Obsidian shows it, minus sistem/; order matters: on duplicate names the earlier folder wins
 NOT_GRAFI_MAKS_DUGUM = 2000
@@ -2118,6 +2178,28 @@ class Isleyici(SimpleHTTPRequestHandler):
             self.send_header("Content-Length", str(len(govde)))
             self.send_header("Content-Security-Policy", GRAF_CSP)  # content comes from code text: isolated origin
             self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(govde)
+            return None
+        if yol.path == "/api/diyagramlar":
+            return self._json(200, diyagramlar_yaniti())
+        if yol.path == "/api/diyagramlar/goster":
+            q = parse_qs(yol.query)
+            dosya = _diyagram_yolu((q.get("proje") or [""])[0], (q.get("ad") or [""])[0], ".html")
+            if not dosya:
+                return self._json(404, {"hata": "diyagram bulunamadı"})
+            try:
+                with open(dosya, "rb") as f:
+                    govde = f.read(DIYAGRAM_MAKS + 1)
+            except OSError:
+                return self._json(404, {"hata": "diyagram bulunamadı"})
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(govde)))
+            self.send_header("Content-Security-Policy", DIYAGRAM_CSP)  # generated content: isolated origin
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "no-referrer")
             self.send_header("Cache-Control", "no-cache")
             self.end_headers()
             self.wfile.write(govde)
