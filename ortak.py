@@ -16,7 +16,7 @@ KOSU_DIZINI = os.path.join(KOK, "kosular")
 CIKTI_DIZINI = os.path.join(KOK, "cikti")
 HAFIZA_DIZINI = os.path.join(KOK, "hafiza")
 
-MAKS_GIRDI = 4000
+MAKS_GIRDI = 20_000
 MAKS_HAFIZA_EKI = 1200
 AJAN_ID_DESENI = re.compile(r"^[a-z0-9-]{1,40}$")
 # İş atanamayan/zamanlanamayan id'ler: CEO (/api/ceo) ve Yönetim Kurulu Başkanı (yalnız /api/ykb, kullanıcı tetikler)

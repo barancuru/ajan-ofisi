@@ -275,7 +275,7 @@ Yeni model gelince satırı ekle, sunucuyu yeniden başlat; geçmiş günler de 
   başka sitelerden istek atılmasına karşı). Sunucuyu `0.0.0.0`'a açma, ağa yayınlama.
 - **Prompt shell'e string olarak birleşmez.** Komutlar liste argümanıyla kurulur, prompt `claude`'a stdin'den gider.
   Ajan id'si beyaz liste + desenle (`^[a-z0-9-]{1,40}$`), oda id'si harf/rakam/`_`/`-` ve en çok 40 karakter,
-  girdi 4000 karakterle sınırlı, gövde 16 KB.
+  girdi 20.000 karakterle sınırlı (`ortak.MAKS_GIRDI`), gövde 16 KB; `/api/gelistirme` gövdesi 124 KB (`MAKS_GOVDE_GELISTIRME`, 20.000 karakterin en kötü durum baytı).
 - **Dış içerik = veri.** Görev şablonu ve CEO prompt'u kullanıcı isteğini ve dosya/web/mail içeriğini etiketli
   veri olarak verir; içindeki "şunu yap" cümleleri talimat sayılmaz. Bu tek başına koruma değildir: asıl sınır
   `izinli_araclar`'ı dar tutmaktır.

@@ -35,6 +35,8 @@ ON_YUZ = os.path.join(ortak.KOK, "on-yuz")
 IZINLI_ORIGIN = re.compile(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$")
 IZINLI_HOST = re.compile(r"^(localhost|127\.0\.0\.1)(:\d+)?$")
 MAKS_GOVDE = 16_000
+# /api/gelistirme: MAKS_GIRDI karakterin en kötü durum baytı (kontrol karakteri JSON'da \u00XX = 6 bayt) + başlık/alanlar payı
+MAKS_GOVDE_GELISTIRME = ortak.MAKS_GIRDI * 6 + 4_000
 MAKS_ATAMA = 3
 MAKS_GOVDE_DIZIN = 1_300_000   # /api/dizin/yaz: 400 KB metin, JSON kaçışlarıyla şişebilir
 MAKS_GOVDE_EKLI = 4_000_000  # /api/gorev, /api/ceo: ekli dosyalar için (görseller base64)
@@ -1462,7 +1464,7 @@ def gelistirme_yaniti():
                 if o:
                     gorevler.append(o)
     return {"projeler": gelistirme_projeleri(), "gorevler": gorevler, "oneri_taraniyor": oneri_taraniyor(), "oto_onay": oto_onay_durumu(),
-            "alarmlar": alarmlar_oku(), "takilanlar": takilanlari_oku()}
+            "alarmlar": alarmlar_oku(), "takilanlar": takilanlari_oku(), "girdi_maks": ortak.MAKS_GIRDI}
 
 
 # ---------- Nöbetçi: alarmlar ve takılan görevler (koşucu yazar, ofis yalnız okur; sabit yollar) ----------
@@ -2302,7 +2304,8 @@ class Isleyici(SimpleHTTPRequestHandler):
         try:
             veri = self._govde(MAKS_GOVDE_EKLI if yol == "/api/gorev" else
                                MAKS_GOVDE_DIZIN if yol == "/api/dizin/yaz" else
-                               MAKS_GOVDE_EKLI if yol == "/api/ceo" else MAKS_GOVDE)
+                               MAKS_GOVDE_EKLI if yol == "/api/ceo" else
+                               MAKS_GOVDE_GELISTIRME if yol == "/api/gelistirme" else MAKS_GOVDE)
             if yol == "/api/dizin/yaz":
                 return self._json(200, dizin_yaz(veri))
             if yol == "/api/gorev":

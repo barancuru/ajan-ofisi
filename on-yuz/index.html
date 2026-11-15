@@ -27,7 +27,7 @@ h3.kucuk{font-family:"Space Grotesk",sans-serif;font-size:11px;font-weight:600;l
 /* ortak: odak, hareket azaltma, araç menüsü */
 :focus-visible{outline:2px solid var(--mercan-k);outline-offset:2px}
 .komut:focus-within{box-shadow:0 0 0 2px rgba(194,72,42,.35),0 10px 40px rgba(90,70,50,.12)}
-.komut input:focus-visible{outline:none}
+.komut input:focus-visible,.komut textarea:focus-visible{outline:none}
 .sayfa,.panel,.sag .kutu{backdrop-filter:none;-webkit-backdrop-filter:none}
 .sag .kutu{background:rgba(255,250,243,.97)}
 .araclar{position:relative;display:flex}
@@ -194,8 +194,18 @@ h3.kucuk{font-family:"Space Grotesk",sans-serif;font-size:11px;font-weight:600;l
 /* komut */
 .komut{position:fixed;bottom:22px;left:calc((100% - var(--sag) - 16px) / 2);transform:translateX(-50%);width:min(600px,calc(100% - 460px));display:flex;align-items:center;gap:10px;padding:8px 8px 8px 14px;border-radius:20px;z-index:3}
 .komut .ceo-ikon{font-family:"Space Grotesk",sans-serif;font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--mercan-k);background:rgba(255,122,89,.12);padding:6px 8px;border-radius:8px}
-.komut input{flex:1;border:none;outline:none;background:transparent;font:inherit;font-size:15px;color:var(--murekkep);padding:10px 4px;min-width:0}
-.komut input::placeholder{color:var(--soluk)}
+.komut input,.komut textarea{flex:1;border:none;outline:none;background:transparent;font:inherit;font-size:15px;color:var(--murekkep);padding:10px 4px;min-width:0}
+.komut textarea{resize:none;line-height:1.4;max-height:calc(1.4em * 8 + 20px);overflow-y:auto;field-sizing:content;display:block}
+.komut input::placeholder,.komut textarea::placeholder{color:var(--soluk)}
+.girdi-sayac{font-size:12px;color:var(--soluk);min-height:0}
+.girdi-sayac:empty{display:none}
+.girdi-sayac[data-durum="uyari"]{color:#8a5a00}
+.girdi-sayac[data-durum="sinir"]{color:var(--mercan-k);font-weight:700}
+.girdi-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.komut #komutSayac{position:absolute;right:16px;bottom:calc(100% + 4px)}
+.komut #komutSayac:not([data-durum]){display:none}
+.komut #komutSayac[data-durum=""]{display:none}
+.yaz textarea,.gelistirme-form textarea{field-sizing:content}
 .komut .ata{display:grid;place-items:center;color:#6d6357;flex:0 0 auto;padding:0 10px;border-radius:12px;background:rgba(255,255,255,.7);border:1px solid rgba(59,52,44,.12);font-size:15px;min-width:42px;min-height:40px}
 .komut-ek{position:absolute;left:0;right:0;bottom:calc(100% + 6px);margin:0}
 .komut-ek:empty{display:none}
@@ -230,9 +240,9 @@ h3.kucuk{font-family:"Space Grotesk",sans-serif;font-size:11px;font-weight:600;l
 .hazir button{text-align:left;font-size:12.5px;font-weight:500;line-height:1.3;padding:11px 12px;border-radius:12px;background:rgba(255,255,255,.7);border:1px solid rgba(255,255,255,.95);transition:background .15s,transform .15s,border-color .15s}
 .hazir button:hover{background:#fff;border-color:rgba(255,122,89,.45)}
 .hazir button:active{transform:scale(.97)}
-.yaz{display:flex;gap:8px}
-.yaz input{flex:1;min-width:0;border:1px solid rgba(59,52,44,.12);background:rgba(255,255,255,.75);border-radius:12px;padding:11px 12px;font:inherit;font-size:13px;outline:none;color:var(--murekkep)}
-.yaz input:focus-visible{border-color:var(--mercan-k);box-shadow:0 0 0 2px rgba(194,72,42,.25)}
+.yaz{display:flex;gap:8px;align-items:flex-end}
+.yaz input,.yaz textarea{flex:1;min-width:0;resize:none;line-height:1.4;max-height:calc(1.4em * 8 + 22px);overflow-y:auto;border:1px solid rgba(59,52,44,.12);background:rgba(255,255,255,.75);border-radius:12px;padding:11px 12px;font:inherit;font-size:13px;outline:none;color:var(--murekkep)}
+.yaz input:focus-visible,.yaz textarea:focus-visible{border-color:var(--mercan-k);box-shadow:0 0 0 2px rgba(194,72,42,.25)}
 .yaz .gonder{padding:10px 14px;font-size:13px}
 .yaz .ata{display:grid;place-items:center;color:#6d6357;flex:0 0 auto;padding:0 12px;border-radius:12px;background:rgba(255,255,255,.7);border:1px solid rgba(59,52,44,.12);font-size:15px;min-width:42px}
 .ekler{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
@@ -474,7 +484,7 @@ td.sayi,th.sayi{text-align:right}
 .dugme.gorunum[aria-pressed="true"] .yazi b{font-weight:600;opacity:1;color:#fff}
 @media (max-width:768px){
   :root{--sag:auto}
-  .yaz input{font-size:16px}.yaz .ata{min-height:44px;min-width:44px}.ekler button{min-height:36px}
+  .yaz input,.yaz textarea{font-size:16px}.yaz textarea{max-height:40dvh}.yaz .gonder,.komut .gonder{min-height:44px;min-width:44px}.yaz .ata{min-height:44px;min-width:44px}.ekler button{min-height:36px}
   .ustbar{height:52px;gap:8px;padding:0 10px;padding-top:env(safe-area-inset-top)}
   .marka b,.marka small,.saat,#genel,.hap .yazi{display:none}
   .ustbar .cikis{flex:0 0 auto;min-height:36px;padding:0 10px;display:inline-flex;align-items:center}
@@ -499,7 +509,8 @@ td.sayi,th.sayi{text-align:right}
   .sayfa{padding:16px}
   .panel{padding:16px}
   .komut{left:8px;right:8px;bottom:calc(10px + env(safe-area-inset-bottom));width:auto;transform:none}
-  .komut input{font-size:16px;min-width:0}
+  .komut input,.komut textarea{font-size:16px;min-width:0}
+  .komut textarea{max-height:40dvh}
   .komut .ata{min-height:44px;min-width:44px}
   .tost{left:50%;bottom:calc(80px + env(safe-area-inset-bottom));max-width:calc(100% - 24px)}
   .mod{display:none}
@@ -568,10 +579,11 @@ td.sayi,th.sayi{text-align:right}
 <form class="komut cam" id="komut" autocomplete="off">
   <span class="ceo-ikon">CEO</span>
   <div class="ekler komut-ek" id="komutEk"></div>
-  <input id="komutGir" maxlength="600" placeholder="CEO’ya derdini anlat…" aria-label="CEO’ya mesaj" autocomplete="off">
+  <textarea id="komutGir" rows="1" maxlength="20000" placeholder="CEO’ya derdini anlat…" aria-label="CEO’ya mesaj" autocomplete="off"></textarea>
+  <div id="komutSayac"></div>
   <input id="komutDosya" type="file" multiple hidden>
   <button class="ata" id="komutAta" type="button" title="Dosya ekle" aria-label="Dosya ekle"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9"/></svg></button>
-  <button class="gonder" id="komutGonder" type="submit">Gönder</button>
+  <button class="gonder" id="komutGonder" type="submit" data-ceo-gonder>Gönder</button>
 </form>
 <div class="tost cam" id="tost"></div>
 <div class="mod" id="mod"><span class="nokta"></span><span id="modYazi">Canlı</span></div>
@@ -2549,9 +2561,9 @@ function ilkDurum() {
   });
 }
 async function gorevVer(ajanId, govde) {
-  const a = ajanBul(ajanId); if (!a) return;
+  const a = ajanBul(ajanId); if (!a) return false;
   SES.gonder();
-  if (DEMO) { demo.gorev(ajanId, govde); return; }
+  if (DEMO) { demo.gorev(ajanId, govde); return true; }
   try {
     const { durum, veri } = await postJSON('/api/gorev', { ajan:ajanId, ...govde });
     if (durum === 202) {
@@ -2560,9 +2572,80 @@ async function gorevVer(ajanId, govde) {
       else if (veri.alt) tost(a.ad + ' meşgul; iş alt ajanla başladı.');
       if (a.durum === 'uyku' || a.durum === 'bitti') { a.durum = 'bekliyor'; a.eylem = 'iş yolda…'; ustGuncelle(); }
       zarfGonder(a);
+      return true;
     } else if (durum === 409) tost(a.ad + ' zaten çalışıyor; bitince tekrar dene.');
     else tost('Görev başlatılamadı: ' + (veri.hata || durum));
   } catch { tost('Sunucuya ulaşılamadı.'); }
+  return false;
+}
+/* ---------- metin girdileri: tek sınır, büyüyen alan, taslak ---------- */
+let GIRDI_MAKS = 20000;            // sunucudaki ortak.MAKS_GIRDI ile aynı; /api/gelistirme yanıtındaki girdi_maks ile düzelir
+const GIRDI_UYARI = 0.8;           // sayaç sınırın %80'inden sonra görünür
+const TASLAK_CEO = 'ofis-taslak-ceo';
+const sayiYaz = n => n.toLocaleString('tr-TR');
+const taslakBellek = {};
+const taslakGirdileri = new Set();
+function taslakOku(k) { try { return localStorage.getItem(k) || ''; } catch { return taslakBellek[k] || ''; } }
+function taslakYaz(k, v) { taslakBellek[k] = v; try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch { /* depolama kapalı: taslak yalnız bu sayfada */ } }
+/* aynı anahtarlı tüm kutuları ve depoyu değere eşitle (CEO alt çubuğu ile paneli ortak taslak kullanır) */
+function taslakAyarla(k, v, kaynak) {
+  taslakYaz(k, v);
+  for (const g of taslakGirdileri) {
+    if (!g.ta.isConnected) { taslakGirdileri.delete(g); continue; }
+    if (g.anahtar === k && g.ta !== kaynak) { g.ta.value = v; g.guncelle(true); }
+  }
+}
+const ALAN_BUYUR_DESTEKLI = typeof CSS !== 'undefined' && CSS.supports && CSS.supports('field-sizing', 'content');
+function girdiKur(ta, { anahtar, sayac }) {
+  ta.maxLength = GIRDI_MAKS;
+  let durum = '', zamanlayici = null;
+  const canli = el('span', 'girdi-sr'); canli.setAttribute('aria-live', 'polite');
+  const gorunen = el('span'); gorunen.setAttribute('aria-hidden', 'true');
+  if (sayac) { sayac.classList.add('girdi-sayac'); sayac.replaceChildren(gorunen, canli); }
+  const buyut = () => { if (ALAN_BUYUR_DESTEKLI) return; ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; };
+  const guncelle = (kullanici) => {
+    buyut();
+    const n = ta.value.length;
+    const yeni = n >= GIRDI_MAKS ? 'sinir' : n >= GIRDI_MAKS * GIRDI_UYARI ? 'uyari' : '';
+    if (sayac) {
+      if (yeni) { gorunen.textContent = sayiYaz(n) + ' / ' + sayiYaz(GIRDI_MAKS); sayac.dataset.durum = yeni; }
+      else if (!kullanici && n && sayac.dataset.not) { gorunen.textContent = sayac.dataset.not; sayac.dataset.durum = 'not'; }
+      else { gorunen.textContent = ''; sayac.dataset.durum = ''; }
+    }
+    if (yeni !== durum) { durum = yeni; canli.textContent = yeni === 'sinir' ? 'Karakter sınırına ulaşıldı: ' + sayiYaz(GIRDI_MAKS) : yeni === 'uyari' ? 'Karakter sınırına yaklaşıldı: ' + sayiYaz(ta.value.length) + ' / ' + sayiYaz(GIRDI_MAKS) : ''; }
+  };
+  const kayit = { ta, anahtar, guncelle };
+  taslakGirdileri.add(kayit);
+  ta.addEventListener('input', () => {
+    guncelle(true);
+    clearTimeout(zamanlayici);
+    zamanlayici = setTimeout(() => taslakAyarla(anahtar, ta.value, ta), 300);
+  });
+  ta.addEventListener('paste', e => {
+    const t = (e.clipboardData && e.clipboardData.getData('text')) || '';
+    if (ta.value.length - (ta.selectionEnd - ta.selectionStart) + t.length > GIRDI_MAKS) tost(sayiYaz(GIRDI_MAKS) + ' karaktere kısaltıldı.');
+  });
+  ta.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey) || e.isComposing || e.keyCode === 229) return;
+    e.preventDefault(); if (ta.form) ta.form.requestSubmit();
+  });
+  const taslak = taslakOku(anahtar).slice(0, GIRDI_MAKS);
+  if (taslak && !ta.value) {
+    ta.value = taslak;
+    if (sayac) sayac.dataset.not = 'Taslak geri yüklendi';
+  }
+  guncelle(false);
+  /* yerleşince yükseklik (alan henüz sayfada değilken scrollHeight 0 verir) */
+  requestAnimationFrame(buyut);
+  return kayit;
+}
+function girdiTemizle(anahtar) { taslakAyarla(anahtar, '', null); }
+/* gönder düğmesini kilitle / aç (etiketi geri koyar) */
+function gonderDurum(dugmeler, bekle) {
+  dugmeler.forEach(b => {
+    if (bekle) { if (!b.disabled) { b.dataset.etiket = b.textContent; b.textContent = 'Gönderiliyor…'; b.disabled = true; } }
+    else { if (b.dataset.etiket) { b.textContent = b.dataset.etiket; delete b.dataset.etiket; } b.disabled = false; }
+  });
 }
 let ceoBekliyor = false;
 /* CEO dosya eki: metin dosyaları okunur, görseller base64 gider (en fazla 3; metin 40.000 karakter, görsel 2 MB) */
@@ -2604,20 +2687,29 @@ $('komutDosya').onchange = async function () {
   this.value = ''; ceoEkCiz();
 };
 async function ceoyaSor(metin) {
-  const temiz = metin.trim().slice(0, 600); if (!temiz || ceoBekliyor) return;
-  const ekler = ceoEkler; ceoEkler = []; ceoEkCiz();
+  const temiz = metin.trim().slice(0, GIRDI_MAKS); if (!temiz || ceoBekliyor) return false;
+  const ekler = ceoEkler.slice();
   SES.tik(); akisEkle('ceo', SEN + ' → CEO: ' + kisa(temiz, 120));
-  ceoBekliyor = true; $('komutGonder').disabled = true;
+  let tamam = false;
+  ceoBekliyor = true; gonderDurum(document.querySelectorAll('[data-ceo-gonder]'), true);
   const ceo = ajanBul('ceo');
   if (ceo) { Object.assign(ceo, { durum:'dusunuyor', is:'seni dinliyor', eylem:'düşünüyor…', t0:Date.now(), balon:null }); ceo.yuzMat.map = YUZ.acik; cekirdek.dusun = true; ekranYenile(ceo); ustGuncelle(); }
   try {
-    if (DEMO) await demo.ceo(temiz);
+    if (DEMO) { await demo.ceo(temiz); tamam = true; }
     else {
       const { durum, veri } = await postJSON('/api/ceo', ekler.length ? { metin:temiz, ekler } : { metin:temiz });
       if (durum !== 200) { tost('CEO: ' + (veri.hata || 'hata ' + durum)); if (ceo) { cekirdek.dusun = false; ajanUyut(ceo); } }
+      else tamam = true;
     }
   } catch { tost('CEO’ya ulaşılamadı.'); if (ceo) { cekirdek.dusun = false; ajanUyut(ceo); } }
-  ceoBekliyor = false; $('komutGonder').disabled = false;
+  finally { ceoBekliyor = false; gonderDurum(document.querySelectorAll('[data-ceo-gonder]'), false); }
+  if (tamam) {
+    /* yalnız başarıda: gönderilen ekleri düş; kutudaki metin hâlâ gönderilenle aynıysa taslakla birlikte temizle */
+    ceoEkler = ceoEkler.filter(x => !ekler.includes(x)); ceoEkCiz();
+    const kutu = [...taslakGirdileri].find(g => g.anahtar === TASLAK_CEO && g.ta.isConnected);
+    if ((kutu ? kutu.ta.value : taslakOku(TASLAK_CEO)).trim().slice(0, GIRDI_MAKS) === temiz) girdiTemizle(TASLAK_CEO);
+  }
+  return tamam;
 }
 let tostZaman = null;
 function tost(metin) { const t = $('tost'); t.textContent = metin; t.classList.add('goster'); clearTimeout(tostZaman); tostZaman = setTimeout(() => t.classList.remove('goster'), 3600); }
@@ -2807,13 +2899,16 @@ function ajanPaneli(a) {
   }
   if (!DEMO) parcalar.push(el('h3', null, 'Geçmiş'), gecmisListesi(a));
   const form = el('form', 'yaz'); form.autocomplete = 'off';
-  const inp = el('input'); inp.maxLength = 600;
+  const inp = el('textarea'); inp.rows = 1;
   const gon = el('button', 'gonder', a.id === 'ceo' ? 'Sor' : 'Ver'); gon.type = 'submit';
+  const sayac = el('div');
   form.append(inp, gon);
   if (a.id === 'ceo') {
-    inp.placeholder = 'CEO’ya derdini anlat…';
-    form.onsubmit = e => { e.preventDefault(); ceoyaSor(inp.value); inp.value = ''; };
-    parcalar.push(el('h3', null, 'CEO’ya sor'), form);
+    inp.placeholder = TELEFON.matches ? 'CEO’ya yaz…' : 'CEO’ya derdini anlat… (Ctrl+Enter ile gönder)';
+    inp.setAttribute('aria-label', 'CEO’ya mesaj'); gon.dataset.ceoGonder = '';
+    girdiKur(inp, { anahtar:TASLAK_CEO, sayac });
+    form.onsubmit = e => { e.preventDefault(); ceoyaSor(inp.value); };
+    parcalar.push(el('h3', null, 'CEO’ya sor'), form, sayac);
   } else {
     const hazir = el('div', 'hazir');
     (a.hazir_gorevler || []).forEach(g => {
@@ -2822,7 +2917,10 @@ function ajanPaneli(a) {
       btn.onclick = () => gorevVer(a.id, { etiket:g.etiket });
       hazir.append(btn);
     });
-    inp.placeholder = 'Görev yaz…';
+    inp.placeholder = TELEFON.matches ? 'Görev yaz…' : 'Görev yaz… (Ctrl+Enter ile gönder)';
+    inp.setAttribute('aria-label', a.ad + ' için görev');
+    const gorevAnahtar = 'ofis-taslak-gorev-' + a.id;
+    girdiKur(inp, { anahtar:gorevAnahtar, sayac });
     /* dosya eki: metin dosyaları okunup göreve veri olarak eklenir (en fazla 3, her biri 40.000 karakter) */
     let ekler = [];
     const ekKutu = el('div', 'ekler');
@@ -2841,8 +2939,17 @@ function ajanPaneli(a) {
       dosya.value = ''; ekCiz();
     };
     form.insertBefore(ata, gon);
-    form.onsubmit = e => { e.preventDefault(); const v = inp.value.trim().slice(0, 600); if (v) { gorevVer(a.id, ekler.length ? { prompt:v, ekler } : { prompt:v }); inp.value = ''; ekler = []; ekCiz(); } };
-    parcalar.push(el('h3', null, 'Hazır görevler'), hazir, el('h3', null, 'Görev ver'), form, ekKutu, dosya);
+    let gorevBekliyor = false;
+    form.onsubmit = async e => {
+      e.preventDefault(); const v = inp.value.trim().slice(0, GIRDI_MAKS); if (!v || gorevBekliyor) return;
+      gorevBekliyor = true; gonderDurum([gon], true);
+      let tamam = false;
+      try { tamam = await gorevVer(a.id, ekler.length ? { prompt:v, ekler } : { prompt:v }); }
+      finally { gorevBekliyor = false; gonderDurum([gon], false); }
+      /* yalnız başarıda temizle (hatada metin ve ekler kalır); bu arada kutu değiştiyse dokunma */
+      if (tamam && inp.value.trim().slice(0, GIRDI_MAKS) === v) { girdiTemizle(gorevAnahtar); ekler = []; ekCiz(); }
+    };
+    parcalar.push(el('h3', null, 'Hazır görevler'), hazir, el('h3', null, 'Görev ver'), form, sayac, ekKutu, dosya);
   }
   panel.replaceChildren(...parcalar);
   panel.classList.add('acik');
@@ -3110,16 +3217,31 @@ async function gelistirmeSayfasi() {
   const proje = el('select'); veri.projeler.forEach(p => { const o = el('option', null, p === 'ajan-ofisi' ? 'Ajan Ofisi (bu arayüz)' : PROJE_AD[p] || p); o.value = p; proje.append(o); });
   const model = el('select'); [['sonnet','Sonnet (varsayılan)'],['haiku','Haiku (basit iş, ucuz)'],['opus','Opus (zor iş, limiti hızlı yer)']].forEach(([v,t]) => { const o = el('option', null, t); o.value = v; model.append(o); });
   const baslik = el('input'); baslik.placeholder = 'Başlık: ör. “Maliyet sayfasına haftalık grafik ekle”'; baslik.maxLength = 80; baslik.required = true;
-  const istek = el('textarea'); istek.placeholder = 'Ne istiyorsun? Ne olunca bitmiş sayılır? Telefonda nasıl görünmeli?'; istek.maxLength = 4000; istek.rows = 4; istek.required = true;
+  baslik.setAttribute('aria-label', 'Geliştirme başlığı');
+  if (Number.isInteger(veri.girdi_maks) && veri.girdi_maks > 0) GIRDI_MAKS = veri.girdi_maks;   // sunucu sınırı tek kaynak
+  const K_BASLIK = 'ofis-taslak-gelistirme-baslik', K_ISTEK = 'ofis-taslak-gelistirme-istek';
+  baslik.value = taslakOku(K_BASLIK).slice(0, 80);
+  let baslikZaman = null;
+  baslik.addEventListener('input', () => { clearTimeout(baslikZaman); baslikZaman = setTimeout(() => taslakYaz(K_BASLIK, baslik.value), 300); });
+  const istek = el('textarea'); istek.placeholder = TELEFON.matches ? 'Ne istiyorsun? Ne olunca bitmiş sayılır? Telefonda nasıl görünmeli?' : 'Ne istiyorsun? Ne olunca bitmiş sayılır? Telefonda nasıl görünmeli? (Ctrl+Enter ile gönder)'; istek.rows = 4; istek.required = true;
+  istek.setAttribute('aria-label', 'Geliştirme isteği');
+  const istekSayac = el('div');
+  girdiKur(istek, { anahtar:K_ISTEK, sayac:istekSayac });
   const gonder = el('button', 'koyu-dugme', 'Geliştirmeyi başlat'); gonder.type = 'submit';
   const satir = el('div', 'satir2'); satir.append(proje, model);
-  form.append(el('h4', null, 'Yeni geliştirme'), satir, baslik, istek, gonder);
+  form.append(el('h4', null, 'Yeni geliştirme'), satir, baslik, istek, istekSayac, gonder);
   form.onsubmit = async e => {
     e.preventDefault(); if (DEMO) return tost('Demo modunda görev açılamaz');
-    gonder.disabled = true;
-    const { durum, veri: v } = await postJSON('/api/gelistirme', { islem:'yeni', proje: proje.value, model: model.value, baslik: baslik.value, istek: istek.value });
-    gonder.disabled = false;
-    if (durum !== 200) return tost(v.hata || ('hata ' + durum));
+    if (gonder.disabled) return;
+    gonderDurum([gonder], true);
+    let tamam = false;
+    try {
+      const { durum, veri: v } = await postJSON('/api/gelistirme', { islem:'yeni', proje: proje.value, model: model.value, baslik: baslik.value, istek: istek.value });
+      if (durum !== 200) tost(v.hata || ('hata ' + durum)); else tamam = true;
+    } catch { tost('Sunucuya ulaşılamadı; metin korundu.'); }
+    finally { gonderDurum([gonder], false); }
+    if (!tamam) return;
+    clearTimeout(baslikZaman); taslakYaz(K_BASLIK, ''); girdiTemizle(K_ISTEK);
     tost('Görev açıldı; ajan birazdan başlar'); baslik.value = ''; istek.value = ''; sekmeAc('gelistirme');
   };
   const oneriler = veri.gorevler.filter(g => !g.bitti && g.durum === 'oneri');
@@ -4239,9 +4361,10 @@ tuval.addEventListener('pointerup', e => {
     if (!meme.oynat(a, { bitince:ac })) ac();
   } else { odayaGit(oda); odaPaneli(oda); }
 });
-const yerTutucu = () => { $('komutGir').placeholder = TELEFON.matches ? 'CEO’ya yaz…' : 'CEO’ya derdini anlat…'; };
+const yerTutucu = () => { $('komutGir').placeholder = TELEFON.matches ? 'CEO’ya yaz…' : 'CEO’ya derdini anlat… (Ctrl+Enter ile gönder)'; };
 yerTutucu(); TELEFON.addEventListener('change', yerTutucu);
-$('komut').addEventListener('submit', e => { e.preventDefault(); const i = $('komutGir'); ceoyaSor(i.value); i.value = ''; });
+girdiKur($('komutGir'), { anahtar:TASLAK_CEO, sayac:$('komutSayac') });
+$('komut').addEventListener('submit', e => { e.preventDefault(); ceoyaSor($('komutGir').value); });
 
 /* ---------- kalıcı ajan etiketleri (çakışmasız) ---------- */
 const etiketKok = $('etiketler');
