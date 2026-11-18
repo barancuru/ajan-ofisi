@@ -8,7 +8,7 @@ değiştirmeden üstüne kurulan, sıralı ve koşullu akış motoru. Yalnız Py
 | Dosya | Görev |
 |---|---|
 | `akislar/<id>.json` | Sürüm kontrollü workflow tanımları. API'den tanım gövdesi kabul edilmez; yalnız id ile başlatılır. |
-| `akis_tanim.py` | Şema doğrulaması (bilinmeyen alan reddi, tür/boyut, başvurular, erişilebilirlik, döngü kuralı). |
+| `akis_tanim.py` | (`OFIS_AKISLAR` ile ayrı tanım klasörü) Şema doğrulaması (bilinmeyen alan reddi, tür/boyut, başvurular, erişilebilirlik, döngü kuralı). |
 | `akis_db.py` | SQLite deposu: WAL, `PRAGMA user_version` migration, `BEGIN IMMEDIATE` işlemleri, UNIQUE kısıtları. |
 | `akis_motor.py` | Deterministik durum makinesi, atomik claim, retry/backoff, döngü/bütçe/süre sınırları, uzlaştırma, kurtarma. |
 | `akis_veri.py` | Adımlar arası veri: sınırlı çıktı alanları, sır taraması, güvenilmeyen veri sarmalama, alıntılama. |
@@ -44,13 +44,18 @@ akislar/*.json ──doğrula──▶ Motor (SQLite durum/akis.db)
 - **quality_gate**: en az bir gerçek kontrol komutu zorunlu. Komutlar argv listesi, shell yok. Çalıştırılabilirler
   `git`, `php`, `sha256sum`, `python3 {ofis}/akis_kapi.py`, `test` ile sınırlı. Yer tutucular yalnız `{worktree}`,
   `{taban}`, `{paket}`, `{paket_sha}`, `{yayin}`, `{ofis}`; değerler hattın yazdığı alanlardan desenle doğrulanır.
-  Worktree `realpath` ile `~/beyin-is/wt/` altında olmalı. Ortam sırsızdır. İsteğe bağlı `kosullar`
+  Worktree `realpath` ile `~/beyin-is/wt/` altında olmalı ve `.git` işaretçisi (symlink değil) hattın klonundaki
+  `~/beyin-is/<proje>/.git/worktrees/` kaydına göstermeli. Git `core.fsmonitor`, `core.hooksPath`, `diff.external`,
+  pager ve protokoller kapalı, sistem/global yapılandırma okunmadan koşar. Ortam sırsızdır. İsteğe bağlı `kosullar`
   önceki çıktılara bakar ama tek başına yetmez. Kapı geçmezse `basarisizsa` geçişi uygulanır.
 - **condition**: `kosullar` (eq, ne, in, not_in, lt, le, gt, ge, var) hepsi doğruysa `dogru`, değilse `yanlis`.
   Eksik değer yanlış sayılır.
 - **approval**: `kategori` genel | dagitim | yayin | odeme | posta | guvenlik. Genel onay localhost'tan verilebilir
   (kullanıcı kararı 2026-11-18). Hassas kategoriler her zaman ofis girişi (`X-Ofis-Kapi`) ister. `dagitim` onayı
-  `izle_adim` zorunlu: Geliştirme sekmesindeki UAT kartını izler, API'den verilemez.
+  `izle_adim` zorunlu: Geliştirme sekmesindeki UAT kartını izler, API'den verilemez. Kabul için görev dosyasındaki
+  `onay: evet` **yetmez** (kapısız yazılabilir): ofis girişinin mühürlü pakete bağlı canlı onay kaydı
+  (`~/.config/ofis-kapi/onaylar/<proje>-<sürüm>.onay` = paket SHA-256) ya da hattın o kayıtla yaptığı yayın
+  (`durum: bitti`) gerekir; yoksa `onay_kaydi_yok` olayı yazılır ve beklenir.
 - **end**: `sonuc: basarili | basarisiz`.
 
 Özel hedef `@inceleme`: koşu PAUSED / manual_review olur.
@@ -83,8 +88,12 @@ zincirinden (Pro hesapları → API → Codex) ayrıdır; zincir bir koşunun i�
 
 Hata sınıfları:
 - `baslamadi` (tmux açılmadı, kuyruk dolu, kilit alınamadı, gönderilmeden kesildi): koşu hiç başlamadı, en çok 5 kez güvenle tekrar edilir.
-- `gecici` (limit/aşırı yük) ve `bilinmeyen` (süreç sonuç yazmadan öldü, iz yok, zaman aşımı) ile `kalici`: tekrar yalnız
-  `yan_etkili: false` adımda. Yan etkili adımda koşu `inceleme`'ye alınır: **körlemesine tekrar yok**.
+- `gecici` (limit/aşırı yük; kosucu'nun `LIMIT_DESENI`) ve `bilinmeyen` (süreç sonuç yazmadan öldü, iz yok, zaman aşımı)
+  ile `kalici`: tekrar yalnız `yan_etkili: false` adımda **ve** ajanın yan etki üretebilen yetkisi yoksa. Ajanın
+  `izinli_araclar`'ında Read/Glob/Grep/WebSearch/WebFetch/TodoWrite dışında bir araç (Edit, Write, Bash, MCP, Skill…)
+  ya da `ssh` varsa tanım ne derse desin yan etkili sayılır (`yan_etki_varsayildi` olayı). Yan etkili adımda koşu
+  `inceleme`'ye alınır: **körlemesine tekrar yok**. `baslamadi` yalnız kosucu'nun kilit mesajıyla başlayan sonuçta
+  (ajan metni bu sınıfı üretemez). Terk edilen denemenin kuyruk/limit-bekleyen kaydı kaldırılır.
 - `sir`: çıktıda sır görünümü. Hiçbir şey aktarılmaz, `inceleme`.
 - `kaynak` (worktree/görev yok), `erken_onay` (görev kapıdan önce elle onaylandı): `inceleme`.
 - `yetkisiz`: koşu başarısız.
