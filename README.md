@@ -153,6 +153,22 @@ prompt + 5 alanlı cron; aç/kapa, sil). Kayıtlar `durum/tekrarlar.json`'da dur
 (bilinen, kurulu, CEO olmayan ajan; hazır görev ya da prompt'tan tam biri; sır kalıbı yok; en sık 15 dakikada bir;
 en fazla 50 iş). Bozuk dosya `.bozuk-<zaman>` olarak yana alınır.
 
+### Workflow & Loop Engine (V1)
+"Araçlar → Workflow" sekmesi `akislar/*.json` içindeki sürüm kontrollü akışları başlatır ve izler. Adımlar
+`agent_task` (mevcut `gorev_baslat()`/kuyruk/kosucu yolu), `gelistirme_gorevi` (beyin hattına `oto_onay: hayir`
+görev; hat UAT'ye getirince biter), `quality_gate` (gerçek komut, çıkış kodu; shell yok), `condition`, `approval` ve `end`.
+Geçişler tanımdan gelir, model yeniden planlama yapmaz. Durum `durum/akis.db`'de (SQLite, WAL) tutulur.
+Yeniden başlatmadan sonra aynı adım iki kez başlamaz; sonucu bilinmeyen yan etkili adım manual_review'a düşer.
+Döngüler sayaçlıdır (varsayılan 3 iterasyon). Ajan çağrısı, süre ve tahmini maliyet sınırı her başlatmadan önce
+kontrol edilir. Önceki adım çıktısı yalnız tanımlı, sınırlı alanlarla ve "güvenilmeyen veri" olarak aktarılır;
+sır görünen çıktı aktarılmaz. Dağıtım onayı Geliştirme sekmesindeki UAT kartında kalır, workflow onay vermez.
+Boştayken motor yalnız bir SQL sorgusu yapar, model çağırmaz. Ayrıntı: [docs/akis-motoru.md](docs/akis-motoru.md),
+sonraki sürümler: [docs/akis-backlog.md](docs/akis-backlog.md).
+
+Pilot `homeos-ozellik-gelistirme`: Planlama → Uygulama (hat) → Test kapısı → Güvenlik kontrolü → Kalite kapısı.
+Kapı geçmezse Düzeltme → Test (en çok 3 tur). Kapı geçince UAT/dağıtım onayı mevcut kart üzerinden verilir.
+Kaynak, yetki ya da güvenlik belirsizliğinde koşu manual_review'a alınır.
+
 ### Oto-onay anahtarı
 Geliştirme sekmesinde Turnusol, HomeOS ve Ajan Ofisi için süreli (30 gün) oto-onay anahtarı vardır; yalnız ofis girişinden (kapı imzası) açılıp kapanır, süre dolunca kapalı sayılır. Açıkken bütün kontrollerden geçen, uyarısı olmayan paket onaysız canlıya geçer. Ajan Ofisi için: onay, giriş kapısı, SSH geçidi ya da ajan izinlerine dokunan paketler anahtar açık olsa da yine sana gelir (koşucu `hassas_degisim()`); canlıya alınınca ofis yeniden başlar.
 
@@ -296,6 +312,11 @@ Codex oturumları (`~/.codex/sessions`, `token_usage_record` `response_id` ile t
 | `POST /api/dizin/yaz` | `{yol, metin}`: var olan bir `.md` dosyasının üzerine yazar (yeni dosya açmaz, en fazla 400 KB) |
 | `GET /api/not-grafi` | Not Grafı sekmesi: `~/beyin/notlar` ve `projeler` altındaki `.md` dosyalarının `[[wikilink]]` grafı (`{dugumler, kenarlar, okunamayan, kirik, kesildi, guncelleme}`, en çok 2000 düğüm); salt okuma, yalnız dosya adları döner. Gizli, symlink ve sır adlı (`env`, `secret`, `token`, `anahtar`…) dosyalar açılmaz |
 | `GET /api/ongorulebilirlik` | `{otomatik, isler (sonraki çalışmayla), ajanlar, simdi}`; prompt yalnız ilk 40 karakteriyle döner |
+| `GET /api/akis` | Workflow: geçerli/geçersiz tanımlar ve son 50 koşu (durum, ilerleme, çağrı, maliyet, döngü sayacı) |
+| `GET /api/akis/detay?id=r…` | bir koşunun adımları, denemeleri (süre, maliyet, sınıflama) ve olayları; istem ve ham çıktı yok |
+| `POST /api/akis/baslat` | `{akis, girdiler, idem_anahtari?}` → 202; aynı `idem_anahtari` aynı koşuyu döndürür |
+| `POST /api/akis/duraklat` · `/devam` · `/iptal` | `{run_id}`; `devam` incelemedeki koşu için `karar: yeniden_dene \| basarisiz_say` ister |
+| `POST /api/akis/onay` | `{run_id, adim, karar: evet\|hayir, not?}`; yayın/ödeme/posta/güvenlik kategorisi ofis girişi ister, dağıtım onayı burada verilmez |
 | `POST /api/ongorulebilirlik` | `{"islem": "ekle", ajan, etiket\|prompt, cron}`, `{"islem": "ac\|kapat\|sil", id}`, `{"islem": "onizle", cron}` (sonraki 3 çalışma); hatada 400 + Türkçe mesaj |
 
 ## Güvenlik notları
@@ -320,6 +341,8 @@ Codex oturumları (`~/.codex/sessions`, `token_usage_record` `response_id` ile t
 | `kosucu.py` | tek ajan koşusu (tmux penceresinde) |
 | `kopru.py` | terminal köprüsü (salt okuma) |
 | `token_sayac.py` | günlük token sayacı |
+| `akis_tanim.py`, `akis_db.py`, `akis_motor.py`, `akis_veri.py`, `akis_ofis.py`, `akis_kapi.py` | Workflow motoru: tanım doğrulama, SQLite deposu, durum makinesi, veri güvenliği, ofis adaptörü, kapı yardımcıları |
+| `akislar/` | sürüm kontrollü workflow tanımları (pilot: `homeos-ozellik-gelistirme.json`) |
 | `zamanlayici.py` | tekrar eden işler: cron, `durum/tekrarlar.json`, iş başına systemd timer (`--kur`, `--esle`, `--tetikle`) |
 | `ortak.py` | yollar, ajan tablosu, olay günlüğü |
 | `ajanlar.example.json`, `kopru.example.json` | boş şablonlar |

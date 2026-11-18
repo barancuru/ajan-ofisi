@@ -391,6 +391,34 @@ def limit_istemi(arg, log_yolu, deneme):
             f"### Önceki denemenin adımları\n{ozet}\n\n{ASIL_GOREV}\n{asil}")
 
 
+AKIS_REF_DESENI = re.compile(r"^ak-[0-9a-f]{12}$")
+
+
+def akis_isaret_yaz(arg, ad, veri):
+    """Workflow denemesi (arg.akis_ref) için durum/akis-sonuc/<ref>[.basladi].json. Diğer koşularda hiçbir şey yapmaz.
+    Sonuç yalnız kimlik, durum, süre, maliyet ve çıktı yolunu taşır; istem ve tam çıktı yazılmaz."""
+    ref = arg.get("akis_ref")
+    if not isinstance(ref, str) or not AKIS_REF_DESENI.match(ref):
+        return
+    dizin = os.path.join(ortak.DURUM_DIZINI, "akis-sonuc")
+    try:
+        os.makedirs(dizin, exist_ok=True)
+        yol = os.path.join(dizin, f"{ref}{ad}.json")
+        with open(yol + ".tmp", "w", encoding="utf-8") as f:
+            json.dump({"ref": ref, "kosu_id": arg.get("kosu_id"), "ts": time.time(), **veri}, f, ensure_ascii=False)
+        os.replace(yol + ".tmp", yol)
+    except OSError:
+        pass  # motor iz bulamazsa sonucu "bilinmeyen" sayar ve körlemesine tekrar etmez
+
+
+def akis_sonuc_yaz(arg, olay, son=True):
+    if not olay:
+        return
+    akis_isaret_yaz(arg, "", {"son": son, "durum": olay.get("durum"), "hata": olay.get("hata"),
+                              "sure_sn": olay.get("sure_sn"), "maliyet_usd": olay.get("maliyet_usd"),
+                              "cikti": olay.get("cikti")})
+
+
 def limit_bekleyen_yaz(arg, log_yolu=None):
     """Queues the run again for after the reset. Returns the reset epoch, or None (retry limit reached / write error)."""
     deneme = int(arg.get("limit_deneme") or 0) + 1
@@ -400,7 +428,7 @@ def limit_bekleyen_yaz(arg, log_yolu=None):
     istem = limit_istemi(arg, log_yolu, deneme) if log_yolu else arg["prompt"]
     kayit = {"ajan": arg["ajan"], "etiket": arg.get("etiket"), "prompt": istem, "kaynak": arg.get("kaynak"),
              "ust": arg.get("ust_kosu"), "model": arg.get("model"), "sonra": int(sonra), "limit_deneme": deneme,
-             "onceki_kosu": arg["kosu_id"]}
+             "onceki_kosu": arg["kosu_id"], **({"akis_ref": arg["akis_ref"]} if arg.get("akis_ref") else {})}
     try:
         os.makedirs(limit_bekleyen_dizini(), exist_ok=True)
         yol = os.path.join(limit_bekleyen_dizini(), f"{arg['kosu_id']}.json")
@@ -782,11 +810,12 @@ def kos(arg_dosyasi):
     # Kilit beklenirken de ajan (süreç yaşadığı sürece) meşgul sayılsın
     ortak.durum_yaz(durum_id, {"durum": "basliyor", "kosu_id": kosu_id, "pid": os.getpid(),
                                "baslangic_ts": time.time()})
+    akis_isaret_yaz(arg, ".basladi", {"pid": os.getpid()})
     kilit = kilit_al()
     if kilit is None:
         baglam = {"kosu_id": kosu_id, "ajan": ajan["id"], "oda": ajan["oda"]}
-        bitir(ajan, baglam, None, f"lock not acquired within {KILIT_BEKLE_SN} s (another beyin run is in progress)",
-              time.time(), log_yolu, cikti_dizini, durum_id)
+        akis_sonuc_yaz(arg, bitir(ajan, baglam, None, f"lock not acquired within {KILIT_BEKLE_SN} s (another beyin run is in progress)",
+                                  time.time(), log_yolu, cikti_dizini, durum_id))
         return
 
     baslangic = time.time()
@@ -824,6 +853,7 @@ def kos(arg_dosyasi):
     finally:
         os.close(kilit)
 
+    sonra = None
     if limit_dustu and (hata or not sonuc or sonuc.get("is_error")):
         hata = hata or maskele((sonuc or {}).get("result") or "Claude limitte")
         sonra = limit_bekleyen_yaz(arg, log_yolu)
@@ -839,7 +869,8 @@ def kos(arg_dosyasi):
         token_kesinle(baglam, sonuc, sayac)
     except (OSError, ValueError) as e:  # sayaç hatası koşuyu düşürmez
         print(f"(token sayacı yazılamadı: {type(e).__name__})", flush=True)
-    bitir(ajan, baglam, sonuc, hata, baslangic, log_yolu, cikti_dizini, durum_id)
+    # limit yüzünden yeniden kuyruğa girdiyse sonuç son değil: workflow aynı denemenin sonraki koşusunu bekler
+    akis_sonuc_yaz(arg, bitir(ajan, baglam, sonuc, hata, baslangic, log_yolu, cikti_dizini, durum_id), son=not sonra)
 
 
 def token_kesinle(baglam, sonuc, sayac):
@@ -898,6 +929,7 @@ def bitir(ajan, baglam, sonuc, hata, baslangic, log_yolu, cikti_dizini, durum_id
                            capture_output=True, timeout=10)
         except (OSError, subprocess.TimeoutExpired):
             pass
+    return olay
 
 
 if __name__ == "__main__":

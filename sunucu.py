@@ -28,6 +28,8 @@ import token_sayac  # noqa: E402
 import model_kullanim  # noqa: E402
 import zamanlayici  # noqa: E402
 import ykb  # noqa: E402
+import akis_motor  # noqa: E402
+import akis_ofis  # noqa: E402
 
 HOST = "127.0.0.1"
 ILK_PORT = int(os.environ.get("OFIS_PORT", "8796"))
@@ -204,7 +206,8 @@ def son_is_yaniti(ajan_id, kosu_id=None):
             "durum": d.get("durum")}
 
 
-def gorev_baslat(ajan_id, etiket=None, prompt=None, kaynak="buton", ekler=None, ust=None, havuz=False, model=None):
+def gorev_baslat(ajan_id, etiket=None, prompt=None, kaynak="buton", ekler=None, ust=None, havuz=False, model=None,
+                 akis_ref=None):
     _, tablo = ortak.ajanlari_yukle()
     ajan = tablo.get(ajan_id)
     if not ajan or ajan_id in ortak.ATANAMAZ:  # YKB yalnız /api/ykb'den; CEO/zamanlayıcı/kuyruk başlatamaz
@@ -221,20 +224,23 @@ def gorev_baslat(ajan_id, etiket=None, prompt=None, kaynak="buton", ekler=None, 
     if len(prompt) > ortak.MAKS_GIRDI:
         raise IstekHatasi(413, f"prompt en fazla {ortak.MAKS_GIRDI} karakter")
     with BASLATMA_KILIDI, ortak.baslatma_kilidi():
-        return _baslat_kilitli(ajan, etiket, prompt, kaynak, ekler, ust, havuz, model=model)
+        return _baslat_kilitli(ajan, etiket, prompt, kaynak, ekler, ust, havuz, model=model, akis_ref=akis_ref)
 
 
-def _baslat_kilitli(ajan, etiket, prompt, kaynak, ekler, ust, havuz, kuyruktan=False, model=None, limit_deneme=None):
+def _baslat_kilitli(ajan, etiket, prompt, kaynak, ekler, ust, havuz, kuyruktan=False, model=None, limit_deneme=None,
+                    akis_ref=None):
     """BASLATMA_KILIDI + baslatma_kilidi altında çağrılır. havuz=True: ajan meşgulse çift koşu açılmaz;
-    ALT_AJANLI ajanda boş alt yuvada (derinlik 1) koşar, yoksa kuyruğa alınır."""
+    ALT_AJANLI ajanda boş alt yuvada (derinlik 1) koşar, yoksa kuyruğa alınır.
+    akis_ref: workflow deneme anahtarı (akis_motor); kosucu buna başlangıç/sonuç işareti yazar."""
     ajan_id = ajan["id"]
+    akis_ref = akis_ref if isinstance(akis_ref, str) and akis_motor.REF_DESENI.match(akis_ref) else None
     durum_id = ajan_id
     if ortak.ajan_mesgul(ajan_id):
         durum_id = alt_yuva(ajan_id) if havuz else None
         if durum_id is None:
             if not havuz or kuyruktan:
                 raise IstekHatasi(409, "ajan zaten çalışıyor")
-            return kuyruga_ekle(ajan_id, etiket, prompt, kaynak, ekler, ust, model=model)
+            return kuyruga_ekle(ajan_id, etiket, prompt, kaynak, ekler, ust, model=model, akis_ref=akis_ref)
     kosu_id = f"{datetime.now():%Y-%m-%d-%H%M%S}-{durum_id}" + (f"-{secrets.token_hex(2)}" if durum_id != ajan_id else "")
     prompt = eklerle_prompt(prompt, gorselleri_kaydet(ekler, ajan_id, kosu_id))
     arg_yolu = os.path.join(ortak.KOSU_DIZINI, f"{kosu_id}.arg.json")
@@ -244,7 +250,8 @@ def _baslat_kilitli(ajan, etiket, prompt, kaynak, ekler, ust, havuz, kuyruktan=F
                    **({"model": model} if model is not None else {}),  # kosucu yalnız beyaz listeden kabul eder
                    **({"durum_id": durum_id} if durum_id != ajan_id else {}),
                    **({"ust_kosu": ust} if ust and KOSU_ID_DESENI.match(ust) else {}),
-                   **({"limit_deneme": limit_deneme} if limit_deneme else {})}, f, ensure_ascii=False)
+                   **({"limit_deneme": limit_deneme} if limit_deneme else {}),
+                   **({"akis_ref": akis_ref} if akis_ref else {})}, f, ensure_ascii=False)
     ortak.durum_yaz(durum_id, {"durum": "basliyor", "kosu_id": kosu_id, "pid": None,
                                "baslangic_ts": time.time()})
     try:
@@ -269,7 +276,7 @@ MAKS_ALT = 2
 MAKS_KUYRUK = 20
 MAKS_KUYRUK_PROMPT = (ortak.MAKS_GIRDI + MAKS_EK_KARAKTER * 2 + 4000  # ekler gömülü hâliyle
                       + kosucu.MAKS_ONCEKI_OZET + 2000)  # limit sonrası yeniden denemenin önceki-deneme başlığı
-KUYRUK_KAYNAKLARI = ("buton", "ceo", "tekrar")
+KUYRUK_KAYNAKLARI = ("buton", "ceo", "tekrar", "akis")
 KUYRUK_ID_DESENI = re.compile(r"^q[0-9a-f]{10}$")
 KUYRUK_UYANMA_SN = 20
 
@@ -315,7 +322,9 @@ def _kuyruk_dogrula(isler):
             and (k.get("ust") is None or (isinstance(k.get("ust"), str) and KOSU_ID_DESENI.match(k["ust"])))
             and (k.get("sonra") is None or (isinstance(k.get("sonra"), int) and not isinstance(k.get("sonra"), bool)))
             and (k.get("limit_deneme") is None
-                 or (isinstance(k.get("limit_deneme"), int) and 0 < k["limit_deneme"] <= kosucu.MAKS_LIMIT_DENEME))]
+                 or (isinstance(k.get("limit_deneme"), int) and 0 < k["limit_deneme"] <= kosucu.MAKS_LIMIT_DENEME))
+            and (k.get("akis_ref") is None
+                 or (isinstance(k.get("akis_ref"), str) and akis_motor.REF_DESENI.match(k["akis_ref"])))]
 
 
 def kuyruk_yaz(isler):
@@ -328,7 +337,7 @@ def kuyruk_yaz(isler):
     atomik_yaz(kuyruk_yolu(), json.dumps({"surum": 1, "isler": isler}, ensure_ascii=False, indent=1))
 
 
-def kuyruga_ekle(ajan_id, etiket, prompt, kaynak, ekler, ust, model=None):
+def kuyruga_ekle(ajan_id, etiket, prompt, kaynak, ekler, ust, model=None, akis_ref=None):
     kuyruk = kuyruk_oku()
     if len(kuyruk) >= MAKS_KUYRUK:
         raise IstekHatasi(429, f"ajan meşgul ve kuyruk dolu (en fazla {MAKS_KUYRUK} iş); biri bitince yeniden dene")
@@ -338,6 +347,7 @@ def kuyruga_ekle(ajan_id, etiket, prompt, kaynak, ekler, ust, model=None):
                    "kaynak": kaynak if kaynak in KUYRUK_KAYNAKLARI else "buton",
                    "ust": ust if isinstance(ust, str) and KOSU_ID_DESENI.match(ust) else None,
                    **({"model": model} if model in kosucu.ATAMA_MODELLERI else {}),
+                   **({"akis_ref": akis_ref} if akis_ref else {}),
                    "zaman": ortak.simdi_iso()})
     kuyruk_yaz(kuyruk)
     ortak.olay_yaz({"tur": "kuyruga_alindi", "ajan": ajan_id, "kuyruk_id": q_id, "kaynak": kuyruk[-1]["kaynak"],
@@ -370,7 +380,8 @@ def limit_bekleyenleri_al(kuyruk):
                      "kaynak": k.get("kaynak") if k.get("kaynak") in KUYRUK_KAYNAKLARI else "buton",
                      "ust": k.get("ust") if isinstance(k.get("ust"), str) and KOSU_ID_DESENI.match(k["ust"]) else None,
                      **({"model": k["model"]} if k.get("model") in kosucu.ATAMA_MODELLERI else {}),
-                     "sonra": k.get("sonra"), "limit_deneme": k.get("limit_deneme"), "zaman": ortak.simdi_iso()}
+                     "sonra": k.get("sonra"), "limit_deneme": k.get("limit_deneme"), "zaman": ortak.simdi_iso(),
+                     **({"akis_ref": k["akis_ref"]} if k.get("akis_ref") else {})}
             if _kuyruk_dogrula([kayit]):  # kuyruk_oku ile aynı doğrulama
                 kuyruk.append(kayit)
             else:
@@ -417,7 +428,7 @@ def kuyrugu_isle():
             try:
                 b = _baslat_kilitli(ajan, k["etiket"], k["prompt"], k["kaynak"], None, k["ust"], True, kuyruktan=True,
                                     model=k.get("model") if k.get("model") in kosucu.ATAMA_MODELLERI else None,
-                                    limit_deneme=k.get("limit_deneme"))
+                                    limit_deneme=k.get("limit_deneme"), akis_ref=k.get("akis_ref"))
             except IstekHatasi as e:
                 if e.kod == 409 and "çalışıyor" in str(e):
                     kalan.append(k)
@@ -1800,6 +1811,49 @@ def oto_onay_degistir(proje, acik, kapi_imzasi):
             pass
 
 
+def gelistirme_gorevi_yaz(proje, baslik, istek, model, ek_alanlar=None):
+    """Hat görevi dosyası (durum: hazir). Ofis 'yeni' düğmesi ve workflow adaptörü aynı yolu kullanır.
+    ek_alanlar yalnız workflow içindir (oto_onay: hayir, akis_adim, kaynak: akis). Dönen: dosya adı."""
+    baslik = " ".join(baslik.split())
+    ad = re.sub(r"[^\w\s.-]", "", baslik, flags=re.U).strip(" .") or "Geliştirme"
+    ek = dict(ek_alanlar or {})
+    kaynak = ek.pop("kaynak", "ofis")
+    ek_satir = "".join(f"{k}: {v}\n" for k, v in ek.items()
+                       if re.fullmatch(r"[a-z_]{1,30}", k) and re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", str(v)))
+    with GELISTIRME_KILIDI:
+        os.makedirs(GOREV_DIZINI, exist_ok=True)
+        yol, n = os.path.join(GOREV_DIZINI, ad + ".md"), 2
+        while os.path.exists(yol) or os.path.exists(os.path.join(GOREV_DIZINI, "bitti", os.path.basename(yol))):
+            yol, n = os.path.join(GOREV_DIZINI, f"{ad} {n}.md"), n + 1
+        atomik_yaz(yol, f"---\ndurum: hazir\ntur: gelistirme\nproje: {proje}\nmodel: {model}\n"
+                        f"olusturma: {datetime.now():%Y-%m-%d %H:%M}\nkaynak: {kaynak}\n{ek_satir}---\n"
+                        f"# {baslik}\n\n## İstek\n{istek.strip()}\n")
+    return os.path.basename(yol)
+
+
+def geri_bildirim_ekle(metin, not_, kimden="ofisten"):
+    return metin.rstrip("\n") + f"\n\n## Geri bildirim\n_{datetime.now():%Y-%m-%d %H:%M} · {kimden}_\n\n{not_.strip()}\n"
+
+
+def uat_reddet(dosya, not_, kimden="workflow"):
+    """UAT'deki hat görevini geri bildirimle reddeder (ofisteki 'reddet' ile aynı alanlar). Onay VERMEZ."""
+    if not isinstance(dosya, str) or not DOSYA_DESENI.match(dosya) or dosya.startswith("."):
+        raise IstekHatasi(400, "geçersiz dosya")
+    yol = os.path.join(GOREV_DIZINI, dosya)
+    if os.path.islink(yol) or not os.path.isfile(yol):
+        raise IstekHatasi(404, "görev yok")
+    with GELISTIRME_KILIDI:
+        with open(yol, encoding="utf-8", errors="replace") as f:
+            metin = f.read()
+        fm, _ = on_bilgi(metin)
+        if fm.get("durum") != "uat":
+            raise IstekHatasi(409, f"görev UAT'de değil (durum: {fm.get('durum') or '-'})")
+        if fm.get("onay") == "evet":
+            raise IstekHatasi(409, "görev onaylanmış")
+        atomik_yaz(yol, on_bilgi_yaz(geri_bildirim_ekle(metin, not_, kimden), "onay", "hayir"))
+    kosucuyu_durt()
+
+
 def gelistirme_degistir(veri, kapi_imzasi=""):
     islem = veri.get("islem")
     if islem == "oto-onay":
@@ -1822,16 +1876,7 @@ def gelistirme_degistir(veri, kapi_imzasi=""):
             raise IstekHatasi(400, "başlık 3–80 karakter olmalı")
         if not isinstance(istek, str) or not istek.strip() or len(istek) > ortak.MAKS_GIRDI:
             raise IstekHatasi(400, f"istek gerekli (en fazla {ortak.MAKS_GIRDI} karakter)")
-        baslik = " ".join(baslik.split())
-        ad = re.sub(r"[^\w\s.-]", "", baslik, flags=re.U).strip(" .") or "Geliştirme"
-        with GELISTIRME_KILIDI:
-            os.makedirs(GOREV_DIZINI, exist_ok=True)
-            yol, n = os.path.join(GOREV_DIZINI, ad + ".md"), 2
-            while os.path.exists(yol) or os.path.exists(os.path.join(GOREV_DIZINI, "bitti", os.path.basename(yol))):
-                yol, n = os.path.join(GOREV_DIZINI, f"{ad} {n}.md"), n + 1
-            atomik_yaz(yol, f"---\ndurum: hazir\ntur: gelistirme\nproje: {proje}\nmodel: {model}\n"
-                            f"olusturma: {datetime.now():%Y-%m-%d %H:%M}\nkaynak: ofis\n---\n"
-                            f"# {baslik}\n\n## İstek\n{istek.strip()}\n")
+        gelistirme_gorevi_yaz(proje, baslik, istek, model)
         kosucuyu_durt()
         return gelistirme_yaniti()
     if islem == "onay":
@@ -1852,7 +1897,7 @@ def gelistirme_degistir(veri, kapi_imzasi=""):
             if fm.get("durum") != "uat":
                 raise IstekHatasi(409, f"görev UAT'de değil (durum: {fm.get('durum') or '-'})")
             if karar == "hayir":
-                metin = metin.rstrip("\n") + f"\n\n## Geri bildirim\n_{datetime.now():%Y-%m-%d %H:%M} · ofisten_\n\n{not_.strip()}\n"
+                metin = geri_bildirim_ekle(metin, not_)
             if karar == "evet" and kapidan_geldi(kapi_imzasi):
                 canli_onayi_yaz(fm)
             atomik_yaz(yol, on_bilgi_yaz(metin, "onay", karar))
@@ -2166,6 +2211,57 @@ def not_grafi_yaniti():
 
 # ---------- HTTP ----------
 
+# ---------- Workflow & Loop Engine (V1) ----------
+
+_MOTOR = None
+_MOTOR_KILIDI = threading.Lock()
+
+
+def motor():
+    """Tek motor örneği (durum/akis.db). Testler akis_motor.Motor'u kendi ortamıyla kurar."""
+    global _MOTOR
+    with _MOTOR_KILIDI:
+        if _MOTOR is None:
+            _MOTOR = akis_ofis.motor_kur(sys.modules[__name__])
+        return _MOTOR
+
+
+def akis_listesi_yaniti():
+    m = motor()
+    tanimlar, hatalar = m.tanimlar()
+    return {"tanimlar": [{"id": t["id"], "surum": t["surum"], "ad": t["ad"], "aciklama": t["aciklama"],
+                          "girdiler": t["girdiler"], "sinirlar": t["sinirlar"],
+                          "adimlar": [{"id": a["id"], "ad": a["ad"], "tur": a["tur"]} for a in t["adimlar"]]}
+                         for t in tanimlar.values()],
+            "gecersiz": [{"dosya": d, "hata": h} for d, h in hatalar.items()],
+            "kosular": m.liste()}
+
+
+def akis_islemi(yol, veri, kapi_imzasi=""):
+    m = motor()
+    islem = yol.rsplit("/", 1)[-1]
+    try:
+        if islem == "baslat":
+            sonuc = m.baslat(veri.get("akis"), veri.get("girdiler"), veri.get("idem_anahtari"))
+            return 202, {**sonuc, **m.detay(sonuc["run_id"])}
+        kosu = veri.get("run_id")
+        if islem == "duraklat":
+            return 200, m.duraklat(kosu)
+        if islem == "devam":
+            karar = veri.get("karar")
+            if karar is not None and karar not in ("yeniden_dene", "basarisiz_say"):
+                raise akis_motor.AkisHatasi(400, "karar: yeniden_dene | basarisiz_say")
+            return 200, m.devam(kosu, karar)
+        if islem == "iptal":
+            return 200, m.iptal(kosu)
+        if islem == "onay":
+            return 200, m.onayla(kosu, veri.get("adim"), veri.get("karar"), veri.get("not"),
+                                 kapi_ok=kapidan_geldi(kapi_imzasi))
+    except akis_motor.AkisHatasi as e:
+        raise IstekHatasi(e.kod, str(e)) from e
+    raise IstekHatasi(404, "yok")
+
+
 class Isleyici(SimpleHTTPRequestHandler):
     server_version = "AjanOfisi/2"
     timeout = 30  # yarım gövdeli istek iş parçacığını kilitlemesin (canlı akış _sse'de kaldırır)
@@ -2370,6 +2466,13 @@ class Isleyici(SimpleHTTPRequestHandler):
             return self._json(200, {"terminaller": KOPRU.liste(), "sanal_ornekler": KOPRU.ornekler()})
         if yol.path == "/api/olaylar":
             return self._sse(parse_qs(yol.query))
+        if yol.path == "/api/akis":
+            return self._json(200, akis_listesi_yaniti())
+        if yol.path == "/api/akis/detay":
+            try:
+                return self._json(200, motor().detay((parse_qs(yol.query).get("id") or [""])[0]))
+            except akis_motor.AkisHatasi as e:
+                return self._json(e.kod, {"hata": str(e)})
         if yol.path.startswith("/api/"):
             return self._json(404, {"hata": "yok"})
         self._statik = True   # on-yuz/ dosyaları: her açılışta Last-Modified ile doğrula (eski kedi.js önbellekte kalmasın)
@@ -2388,7 +2491,7 @@ class Isleyici(SimpleHTTPRequestHandler):
             veri = self._govde(MAKS_GOVDE_EKLI if yol == "/api/gorev" else
                                MAKS_GOVDE_DIZIN if yol == "/api/dizin/yaz" else
                                MAKS_GOVDE_EKLI if yol == "/api/ceo" else
-                               MAKS_GOVDE_GELISTIRME if yol == "/api/gelistirme" else MAKS_GOVDE)
+                               MAKS_GOVDE_GELISTIRME if yol in ("/api/gelistirme", "/api/akis/baslat") else MAKS_GOVDE)
             if yol == "/api/dizin/yaz":
                 return self._json(200, dizin_yaz(veri))
             if yol == "/api/gorev":
@@ -2420,6 +2523,9 @@ class Isleyici(SimpleHTTPRequestHandler):
                 return self._json(200, ceo_calistir(metin, kuru=bool(veri.get("kuru")), ekler=ekler))
             if yol == "/api/ykb":
                 return self._json(202, ykb_istegi(veri))
+            if yol in ("/api/akis/baslat", "/api/akis/duraklat", "/api/akis/devam", "/api/akis/iptal", "/api/akis/onay"):
+                kod, yanit = akis_islemi(yol, veri, self.headers.get("X-Ofis-Kapi", ""))
+                return self._json(kod, yanit)
             if yol == "/api/ykb/dagit":
                 return self._json(200, ykb_dagit(veri.get("kosu_id"), veri.get("secilen")))
             raise IstekHatasi(404, "yok")
@@ -2513,6 +2619,7 @@ def main():
     print(f"Ajan Ofisi: http://{HOST}:{port}   (demo: http://{HOST}:{port}/?demo=1)", flush=True)
     KOPRU.baslat()
     kuyruk_izleyici_baslat()  # tekrar eden işler systemd timer'larıyla koşar; sunucu yalnız kuyruğu boşaltır
+    motor().baslat_thread()   # workflow motoru: etkin koşu yoksa yalnız SQL sorgusu, model çağrısı yok
     sunucu.serve_forever()
 
 

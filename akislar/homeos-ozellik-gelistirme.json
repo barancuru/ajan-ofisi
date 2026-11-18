@@ -1,0 +1,98 @@
+{
+  "sema_surumu": 1,
+  "id": "homeos-ozellik-gelistirme",
+  "surum": 1,
+  "ad": "HomeOS özellik geliştirme",
+  "aciklama": "Planlama → Uygulama (beyin hattı) → Test → Güvenlik kontrolü → Kalite kapısı. Kapı geçmezse düzeltme ve yeniden test, en çok 3 tur. Kapı geçince dağıtım onayı mevcut Geliştirme kartından verilir (workflow onay vermez, oto-onay kapalı). Belirsizlikte manual_review.",
+  "girdiler": {
+    "baslik": {"tur": "metin", "maks": 80, "aciklama": "Görev başlığı (3–80 karakter)"},
+    "istek": {"tur": "metin", "maks": 6000, "aciklama": "Ne isteniyor, kabul ölçütleri"}
+  },
+  "izinli_ajanlar": ["arastirmaci"],
+  "sinirlar": {"max_iterasyon": 3, "max_ajan_cagrisi": 12, "max_sure_sn": 259200, "max_maliyet_usd": 20},
+  "donguler": {"kalite": {"max_iterasyon": 3, "tukenince": "pause"}},
+  "baslangic": "planlama",
+  "adimlar": [
+    {
+      "id": "planlama", "tur": "agent_task", "ad": "Planlama", "ajan": "arastirmaci", "model": "sonnet",
+      "yan_etkili": false, "tahmini_usd": 1.5,
+      "gorev": "HomeOS için aşağıdaki özelliğin uygulama planını çıkar. Kod yazma, dosya değiştirme, not ekleme; yalnız oku (kod grafı ve git-oku ile homeos projesine bak).\n\nBaşlık: {{girdi.baslik}}\n\nİstek:\n{{girdi.istek}}\n\nPlan: değişecek dosyalar, migration gerekip gerekmediği (yalnız ekleme; silme/ad değiştirme yok), test yaklaşımı, riskler. Üretim sunucusu, sır, ödeme ya da yetki gerektiren bir adım varsa yetki_gerekli=true yaz. Emin değilsen risk=belirsiz.",
+      "cikti_alanlari": {
+        "plan": {"tur": "metin", "maks": 4000, "aciklama": "uygulama planı, madde madde"},
+        "risk": {"tur": "secim", "secenekler": ["dusuk", "orta", "yuksek", "belirsiz"]},
+        "yetki_gerekli": {"tur": "evet_hayir", "aciklama": "üretim/sır/ödeme/yetki gerekiyor mu"}
+      },
+      "hata": {"eylem": "retry", "max_deneme": 3, "geri_cekilme_sn": 60, "tukenince": "pause"},
+      "sonraki": "plan_kontrol"
+    },
+    {
+      "id": "plan_kontrol", "tur": "condition", "ad": "Kaynak/yetki belirsizliği yok mu",
+      "kosullar": [
+        {"alan": "adim.planlama.risk", "op": "in", "deger": ["dusuk", "orta", "yuksek"]},
+        {"alan": "adim.planlama.yetki_gerekli", "op": "eq", "deger": false}
+      ],
+      "dogru": "uygulama", "yanlis": "@inceleme"
+    },
+    {
+      "id": "uygulama", "tur": "gelistirme_gorevi", "ad": "Uygulama (beyin hattı)", "mod": "yeni",
+      "proje": "homeos", "model": "sonnet", "tahmini_usd": 6, "zaman_asimi_sn": 86400,
+      "baslik": "{{girdi.baslik}}",
+      "istek": "{{girdi.istek}}\n\n### Planlama adımının önerisi\n{{adim.planlama.plan}}",
+      "hata": {"eylem": "pause"},
+      "sonraki": "test"
+    },
+    {
+      "id": "test", "tur": "quality_gate", "ad": "Test", "kaynak_adim": "uygulama",
+      "kontroller": [
+        {"ad": "PHP sözdizimi (değişen dosyalar)", "komut": ["python3", "{ofis}/akis_kapi.py", "php-lint", "{worktree}", "{taban}"], "cwd": "{worktree}", "zaman_asimi_sn": 300},
+        {"ad": "Boşluk ve çakışma işaretleri", "komut": ["git", "diff", "--check", "{taban}...HEAD"], "cwd": "{worktree}", "zaman_asimi_sn": 60},
+        {"ad": "Paket mührü", "komut": ["python3", "{ofis}/akis_kapi.py", "sha256", "{paket}", "{paket_sha}"], "cwd": "{ofis}", "zaman_asimi_sn": 60}
+      ],
+      "sonraki": "guvenlik",
+      "basarisizsa": {"hedef": "duzeltme", "dongu": "kalite"}
+    },
+    {
+      "id": "guvenlik", "tur": "agent_task", "ad": "Güvenlik kontrolü", "ajan": "arastirmaci", "model": "sonnet",
+      "yan_etkili": false, "tahmini_usd": 1.5,
+      "gorev": "HomeOS'ta {{adim.uygulama.dal}} dalındaki değişikliği güvenlik açısından incele (git-oku homeos diff main...<dal>; kod grafı). Kod yazma, dosya değiştirme. Bak: yetki kontrolü, girdi doğrulama, SQL enjeksiyonu, XSS, CSRF, sır sızıntısı, yıkıcı migration, kişisel veri. Kanıtlı bulgu varsa karar=kaldi; değişikliği göremiyorsan ya da emin değilsen karar=belirsiz.",
+      "cikti_alanlari": {
+        "karar": {"tur": "secim", "secenekler": ["gecti", "kaldi", "belirsiz"]},
+        "bulgular": {"tur": "metin", "maks": 3000, "aciklama": "bulgular, dosya:satır ile"}
+      },
+      "hata": {"eylem": "retry", "max_deneme": 3, "geri_cekilme_sn": 60, "tukenince": "pause"},
+      "sonraki": "guvenlik_kontrol"
+    },
+    {
+      "id": "guvenlik_kontrol", "tur": "condition", "ad": "Güvenlik belirsizliği yok mu",
+      "kosullar": [{"alan": "adim.guvenlik.karar", "op": "ne", "deger": "belirsiz"}, {"alan": "adim.uygulama.uyari", "op": "eq", "deger": 0}],
+      "dogru": "kalite", "yanlis": "@inceleme"
+    },
+    {
+      "id": "kalite", "tur": "quality_gate", "ad": "Kalite kapısı", "kaynak_adim": "uygulama", "bagimli": ["test", "guvenlik"],
+      "kontroller": [
+        {"ad": "Paket mührü (yeniden)", "komut": ["python3", "{ofis}/akis_kapi.py", "sha256", "{paket}", "{paket_sha}"], "cwd": "{ofis}", "zaman_asimi_sn": 60},
+        {"ad": "Worktree temiz", "komut": ["git", "diff", "--quiet", "HEAD"], "cwd": "{worktree}", "zaman_asimi_sn": 60}
+      ],
+      "kosullar": [
+        {"alan": "adim.test.gecti", "op": "eq", "deger": true},
+        {"alan": "adim.guvenlik.karar", "op": "eq", "deger": "gecti"}
+      ],
+      "sonraki": "uat_onayi",
+      "basarisizsa": {"hedef": "duzeltme", "dongu": "kalite"}
+    },
+    {
+      "id": "duzeltme", "tur": "gelistirme_gorevi", "ad": "Düzeltme", "mod": "duzeltme", "hedef_adim": "uygulama",
+      "tahmini_usd": 6, "zaman_asimi_sn": 86400,
+      "geri_bildirim": "Workflow kalite kapısı geçmedi. Aşağıdaki bulguları aynı dalda düzelt; başka değişiklik yapma.\n\nTest kapısı:\n{{adim.test.rapor}}\n\nKalite kapısı:\n{{adim.kalite.rapor}}\n\nGüvenlik bulguları:\n{{adim.guvenlik.bulgular}}",
+      "hata": {"eylem": "pause"},
+      "sonraki": "test"
+    },
+    {
+      "id": "uat_onayi", "tur": "approval", "ad": "UAT / dağıtım onayı", "kategori": "dagitim", "izle_adim": "uygulama",
+      "mesaj": "Kalite kapısı geçti. Dağıtım onayı Geliştirme sekmesindeki UAT kartından verilir (ofis girişiyle). Workflow yalnız izler.",
+      "reddedilirse": "@inceleme",
+      "sonraki": "son"
+    },
+    {"id": "son", "tur": "end", "ad": "Bitti", "sonuc": "basarili"}
+  ]
+}
