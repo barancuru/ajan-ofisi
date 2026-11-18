@@ -15,19 +15,30 @@ def php_lint(wt, taban):
     if not re.fullmatch(r"[A-Za-z0-9_./-]{1,100}", taban) or taban.startswith("-"):
         print("geçersiz taban")
         return 2
-    def git(*a):
-        return subprocess.run(["git", "-C", wt, *a], capture_output=True, text=True, timeout=60)
+    def git(*a):   # ajanın yazabildiği worktree: yapılandırmadan komut çalıştırma yolları kapalı
+        guvenli = ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "core.pager=cat",
+                   "-c", "diff.external=true", "-c", "protocol.allow=never"]
+        ortam = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_OPTIONAL_LOCKS": "0"}
+        return subprocess.run(["git", *guvenli, "-C", wt, *a], capture_output=True, text=True, timeout=60, env=ortam)
     mb = git("merge-base", taban, "HEAD")
     if mb.returncode != 0:
         print("merge-base bulunamadı")
         return 2
-    degisen = git("diff", "--name-only", "--diff-filter=AMR", mb.stdout.strip(), "--", "*.php").stdout.split()
-    yeni = git("ls-files", "--others", "--exclude-standard", "--", "*.php").stdout.split()
-    dosyalar = sorted(set(degisen + yeni))
+    # -z: boşluklu ve Türkçe karakterli adlar bölünmez/tırnaklanmaz (yoksa bozuk dosya sessizce atlanırdı)
+    degisen = git("diff", "-z", "--name-only", "--diff-filter=AMR", mb.stdout.strip(), "--", "*.php")
+    yeni = git("ls-files", "-z", "--others", "--exclude-standard", "--", "*.php")
+    if degisen.returncode != 0 or yeni.returncode != 0:
+        print("değişen dosyalar listelenemedi")
+        return 2
+    dosyalar = sorted({d for d in (degisen.stdout + yeni.stdout).split("\0") if d})
     hata = 0
     for d in dosyalar:
         yol = os.path.realpath(os.path.join(wt, d))
-        if not yol.startswith(os.path.realpath(wt) + os.sep) or not os.path.isfile(yol):
+        if not yol.startswith(os.path.realpath(wt) + os.sep):
+            print(f"❌ {d}: worktree dışına işaret ediyor")
+            hata += 1
+            continue
+        if not os.path.isfile(yol):
             continue
         p = subprocess.run(["php", "-l", yol], capture_output=True, text=True, timeout=60)
         if p.returncode != 0:

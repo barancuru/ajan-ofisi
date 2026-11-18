@@ -197,9 +197,60 @@ class HatAdaptoruTest(OfisTabani):
         with self.assertRaises(akis_motor.BaslatmaHatasi):
             self.ortam.gelistirme_reddet(dosya, "x")                # onaylanmış görev reddedilmez
 
+    def hat_worktree(self, ad="1118-x"):
+        """Hattın düzeni: $IS/homeos (klon) + $IS/wt/homeos-<ad> (git worktree)."""
+        klon = os.path.join(self.d, "homeos")
+        if not os.path.isdir(klon):
+            os.makedirs(klon)
+            subprocess.run(["git", "-C", klon, "init", "-q", "-b", "main"], check=True)
+            subprocess.run(["git", "-C", klon, "-c", "user.name=t", "-c", "user.email=t@l", "commit", "-q",
+                            "--allow-empty", "-m", "taban"], check=True)
+        wt = os.path.join(self.d, "wt", f"homeos-{ad}")
+        subprocess.run(["git", "-C", klon, "worktree", "add", "-q", "-b", f"beyin/{ad}", wt], check=True)
+        return wt
+
+    def test_worktree_isaretcisi_dogrulanir(self):
+        with mock.patch.object(akis_ofis, "IS_DIZINI", self.d):
+            wt = self.hat_worktree()
+            self.assertEqual(self.ortam.worktree_coz("homeos", "beyin/1118-x"), os.path.realpath(wt))
+            sahte = os.path.join(wt, "sahte-git")             # ajan kendi gitdir'ini kurup işaretçiyi çevirdi
+            os.makedirs(sahte)
+            with open(os.path.join(wt, ".git"), "w") as f:
+                f.write(f"gitdir: {sahte}\n")
+            self.assertIsNone(self.ortam.worktree_coz("homeos", "beyin/1118-x"))
+            os.remove(os.path.join(wt, ".git"))
+            os.symlink(os.path.join(self.d, "homeos", ".git"), os.path.join(wt, ".git"))
+            self.assertIsNone(self.ortam.worktree_coz("homeos", "beyin/1118-x"))
+
+    def test_kapi_git_yapilandirmadan_komut_calistirmaz(self):
+        """Ajanın etkileyebildiği git yapılandırması (fsmonitor, hooks, external diff) kapıda komut çalıştıramaz."""
+        with mock.patch.object(akis_ofis, "IS_DIZINI", self.d):
+            wt = self.hat_worktree("1119-y")
+            iz = os.path.join(self.d, "calisti")
+            for ayar in (f"core.fsmonitor=touch {iz}", f"diff.external=touch {iz}"):
+                k, v = ayar.split("=", 1)
+                subprocess.run(["git", "-C", wt, "config", k, v], check=True)
+            with open(os.path.join(wt, "a.php"), "w") as f:
+                f.write("<?php echo 1;")
+            kod, _ = self.ortam.komut_calistir(["git", "diff", "--check", "main...HEAD"], wt, 30)
+            self.assertEqual(kod, 0)
+            self.ortam.komut_calistir(["git", "diff", "--quiet", "HEAD"], wt, 30)
+            self.assertEqual(self.ortam.komut_calistir(["git", "diff", "HEAD"], wt, 30)[0], 0)   # düz diff bozulmadı
+            import akis_kapi
+            akis_kapi.main(["php-lint", wt, "main"])
+            self.assertFalse(os.path.exists(iz), "git yapılandırmadaki komutu çalıştırdı")
+
+    def test_canli_onay_kaydi(self):
+        with mock.patch.object(sunucu, "CANLI_ONAY_DIZINI", self.d):
+            with open(os.path.join(self.d, "homeos-0.10.1.onay"), "w") as f:
+                f.write("a" * 64 + "\n")
+            self.assertTrue(self.ortam.canli_onay_var("homeos", "0.10.1", "a" * 64))
+            self.assertFalse(self.ortam.canli_onay_var("homeos", "0.10.1", "b" * 64))
+            self.assertFalse(self.ortam.canli_onay_var("homeos", "../x", "a" * 64))
+
     def test_worktree_kok_disina_cikamaz(self):
         with mock.patch.object(akis_ofis, "IS_DIZINI", self.d):
-            os.makedirs(os.path.join(self.d, "wt", "homeos-1118-x"))
+            self.hat_worktree()
             self.assertTrue(self.ortam.worktree_coz("homeos", "beyin/1118-x"))
             for dal in ("beyin/../../etc", "main", "beyin/1118-x/..", "beyin/YOK"):
                 self.assertIsNone(self.ortam.worktree_coz("homeos", dal), dal)

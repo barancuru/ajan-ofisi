@@ -69,11 +69,13 @@ def geri_cekilme(politika, deneme):
 
 
 def hata_sinifla(metin):
-    """kosucu bitiş hatası → baslamadi | gecici | kalici. Sağlayıcı yedek zinciri kosucu içinde zaten denendi."""
+    """kosucu bitiş hatası → baslamadi | gecici | kalici. Sağlayıcı yedek zinciri kosucu içinde zaten denendi.
+    Metin ajan çıktısından gelebilir: "başlamadı" yalnız kosucu'nun model çağırmadan yazdığı kilit mesajıyla başlıyorsa."""
+    import kosucu
     m = str(metin or "")
-    if "lock not acquired" in m or "tmux" in m:
+    if m.startswith("lock not acquired within "):
         return "baslamadi"
-    if re.search(r"limit|overloaded|quota|429|529|credit balance", m, re.I):
+    if kosucu.LIMIT_DESENI.search(m):
         return "gecici"
     return "kalici"
 
@@ -342,7 +344,7 @@ class Motor:
             tanim = self._tanim(kosu)
             for d in self._ucusta(b, kosu_id):
                 adim = akis_tanim.adim_bul(tanim, d["adim_id"])
-                if d["durum"] == "kuyrukta" and adim["tur"] == "agent_task" and self.ortam.kuyruktan_cikar(d["ref"]):
+                if adim["tur"] == "agent_task" and self._ajan_isini_kaldir(d["ref"]):
                     notlar.append(f"{d['adim_id']}: kuyruktan çıkarıldı")
                 elif adim["tur"] == "agent_task":
                     notlar.append(f"{d['adim_id']}: çalışan ajan koşusu durdurulmadı; bitince sonucu yok sayılır")
@@ -459,8 +461,19 @@ class Motor:
 
     def tur(self):
         """Bir tur: etkin her koşu için uzlaştır, sonra çalıştırılabilir adımları başlat."""
-        for k in self.depo.kosular(durumlar=akis_db.AKTIF_KOSU, sinir=MAKS_AKTIF_KOSU * 4):
-            self._kosu_isle(k["id"])
+        try:   # kuyruk + limit-bekleyen bir kez, işlem dışında okunur (her denemede ve kilit altında değil)
+            self._kuyruk_refleri = self.ortam.kuyruktaki_refler()
+        except Exception:  # noqa: BLE001
+            self._kuyruk_refleri = None
+        try:
+            for k in self.depo.kosular(durumlar=akis_db.AKTIF_KOSU, sinir=MAKS_AKTIF_KOSU * 4):
+                self._kosu_isle(k["id"])
+        finally:
+            self._kuyruk_refleri = None
+
+    def _kuyrukta(self, ref):
+        refler = getattr(self, "_kuyruk_refleri", None)
+        return ref in refler if refler is not None else self.ortam.kuyrukta_mi(ref)
 
     def _ucusta(self, b, kosu_id):
         soru = ",".join("?" * len(akis_db.UCUSTA))
@@ -501,7 +514,7 @@ class Motor:
     # ------------------------------------------------------------------ geçişler
     def _gecisler_uygula(self, b, kosu, tanim, gecisler, kaynak_adim):
         for g in gecisler:
-            if kosu["durum"] != "calisiyor" and kosu["durum"] != "duraklatildi":
+            if kosu["durum"] in akis_db.SON_KOSU:
                 return
             if g["hedef"] == INCELEME:
                 self._incelemeye_al(b, kosu, "tanim", f"{kaynak_adim} adımı manual_review'a yönlendirdi", kaynak_adim)
@@ -683,11 +696,15 @@ class Motor:
                 hazirlik = {"kaynak": self._son_basarili_cikti(b, kosu_id, adim["kaynak_adim"]) if adim["kaynak_adim"] else None,
                             "tutamac": self._son_tutamac(b, kosu_id, adim["kaynak_adim"]) if adim["kaynak_adim"] else None,
                             "proje": (akis_tanim.adim_bul(tanim, adim["kaynak_adim"]) or {}).get("proje") if adim["kaynak_adim"] else None}
-        # dış dünya: işlem dışında (uzun sürebilir); sonuç ayrı işlemle yazılır
-        if adim["tur"] == "agent_task":
-            self._ajan_gonder(kosu_id, adim, deneme_id, ref, baglam)
-        elif adim["tur"] == "gelistirme_gorevi":
-            self._gelistirme_gonder(kosu_id, adim, deneme_id, ref, baglam, hazirlik)
+        # dış dünya: DB işlemi dışında, ama motor kilidi altında: arada gelen iptal başlatmayı engeller
+        if adim["tur"] in ("agent_task", "gelistirme_gorevi"):
+            with self._kilit:
+                if not self._gonderilebilir(kosu_id, deneme_id):
+                    return True
+                if adim["tur"] == "agent_task":
+                    self._ajan_gonder(kosu_id, adim, deneme_id, ref, baglam)
+                else:
+                    self._gelistirme_gonder(kosu_id, adim, deneme_id, ref, baglam, hazirlik)
         elif adim["tur"] == "quality_gate":
             if self.kapi_senkron:
                 self._kapi_calistir(kosu_id, adim, deneme_id, ref, baglam, hazirlik)
@@ -697,6 +714,12 @@ class Motor:
                 self._kapi_isleri[ref] = t
                 t.start()
         return True
+
+    def _gonderilebilir(self, kosu_id, deneme_id):
+        with self._islem() as b:
+            k = self._kosu_al(b, kosu_id)
+            d = b.execute("SELECT durum FROM denemeler WHERE id=?", (deneme_id,)).fetchone()
+            return bool(k and k["durum"] == "calisiyor" and d and d["durum"] == "gonderiliyor")
 
     def _tahmin(self, adim):
         if adim.get("tahmini_usd") is not None:
@@ -801,28 +824,27 @@ class Motor:
         ref = d["ref"]
         simdi = self.saat()
         sonuc = _json_oku(os.path.join(sonuc_dizini(), f"{ref}.json"))
-        if sonuc and sonuc.get("ref") == ref and sonuc.get("son") is True:
+        if sonuc and sonuc.get("ref") != ref:
+            sonuc = None
+        if sonuc and sonuc.get("son") is True:
             return ("bitti", sonuc)
+        if self._kuyrukta(ref):
+            return ("kuyrukta", {"kuyruk_ts": simdi})
+        t = json.loads(d["tutamac_json"] or "{}")
+        kuyruk_ts = float(t.get("kuyruk_ts") or 0)
+        ara_ts = float(sonuc.get("ts") or 0) if sonuc else 0.0    # son:false = limit yüzünden yeniden kuyruğa giriyor
         isaret = _json_oku(os.path.join(sonuc_dizini(), f"{ref}.basladi.json"))
-        if self.ortam.kuyrukta_mi(ref):
-            return ("kuyrukta", {"goruldu_ts": simdi})
-        if sonuc and sonuc.get("ref") == ref and sonuc.get("son") is False:
-            # limit yüzünden yeniden kuyruğa giriyor (dosya → kuyruk arası): aynı deneme sürüyor
-            return ("kuyrukta", {"goruldu_ts": simdi})
-        # tolerans son görülme anından: kuyruktan çıkıp kosucu işaretini yazana dek geçen süre "bilinmeyen" değildir
-        son_gorulme = max(d["baslangic_ts"], float(json.loads(d["tutamac_json"] or "{}").get("goruldu_ts") or 0))
-        if isaret and isaret.get("ref") == ref and float(isaret.get("ts") or 0) >= son_gorulme - 1:
+        # işaret yalnız bu koşuya aitse geçerli: son kuyruk görülmesinden ve ara sonuçtan sonra yazılmış olmalı
+        if isaret and isaret.get("ref") == ref and float(isaret.get("ts") or 0) >= max(kuyruk_ts, ara_ts) - 1:
             if ortak.surec_yasiyor(isaret.get("pid")):
-                return ("calisiyor", {**isaret, "goruldu_ts": simdi})
-            # süreç öldü ama sonuç yok: bitiş dosyası yazılıyor olabilir; kısa tolerans
-            if simdi - float(isaret.get("ts") or 0) < 5:
+                return ("calisiyor", isaret)
+            if simdi - float(isaret.get("ts") or 0) < 5:   # bitiş dosyası yazılıyor olabilir
                 return ("calisiyor", isaret)
             return ("bilinmeyen", "ajan süreci sonuç yazmadan kapandı")
-        if simdi - son_gorulme < BASLAMA_TOLERANS_SN:
+        # kuyruktan/limit dosyasından çıktı ama kosucu henüz işaret yazmadı: tolerans son görülme anından
+        if simdi - max(d["baslangic_ts"], kuyruk_ts, ara_ts) < BASLAMA_TOLERANS_SN:
             return ("bekle", None)
-        if isaret and isaret.get("ref") == ref:
-            return ("bilinmeyen", "ajan süreci sonuç yazmadan kapandı")
-        return ("bilinmeyen", "koşu izi yok (başlamadı ya da işaret kayboldu)")
+        return ("bilinmeyen", "koşu izi yok (başlamadı, kuyruktan düştü ya da işaret kayboldu)")
 
     def _ajan_sonucunu_isle(self, b, kosu, tanim, adim, d, sonuc):
         maliyet = sonuc.get("maliyet_usd")
@@ -1004,11 +1026,19 @@ class Motor:
                 self._incelemeye_al(b, kosu, "kaynak", "izlenen hat görevi bulunamadı", adim["id"])
                 return
             durum, onay = fm.get("durum"), fm.get("onay") or ""
-            if onay == "evet" or durum == "bitti":
+            izlenen = akis_tanim.adim_bul(tanim, adim["izle_adim"])
+            paket = self._son_basarili_cikti(b, kosu["id"], adim["izle_adim"]) or {}
+            # görev dosyasındaki 'onay: evet' kapısız yazılabilir: kabul yalnız ofis girişinin yazdığı, mühürlü pakete
+            # bağlı canlı onay kaydıyla ya da hattın o kayıtla yaptığı yayın sonucuyla (durum: bitti)
+            kayitli = durum == "bitti" or self.ortam.canli_onay_var(izlenen["proje"], paket.get("surum"), paket.get("sha256"))
+            if kayitli:
                 self._adim_yaz(b, kosu["id"], adim["id"], durum="basarili",
-                               cikti_json=json.dumps({"karar": "evet", "not": "Geliştirme kartından onaylandı"}))
+                               cikti_json=json.dumps({"karar": "evet", "not": "Geliştirme kartından (ofis girişiyle) onaylandı"}))
                 self._olay(b, kosu, "onay_verildi", adim=adim["id"], durum="evet", iterasyon=r["iterasyon"], kaynak="kart")
                 self._gecisler_uygula(b, kosu, tanim, adim["sonraki"], adim["id"])
+            elif onay == "evet":
+                self._olay(b, kosu, "onay_kaydi_yok", adim=adim["id"], durum="bekliyor", iterasyon=r["iterasyon"],
+                           neden="görev dosyasında onay var ama ofis girişinin canlı onay kaydı yok; kabul edilmedi")
             elif onay == "hayir" or durum in ("hazir", "calisiyor", "takildi", "reddedildi"):
                 self._adim_yaz(b, kosu["id"], adim["id"], durum="basarisiz",
                                cikti_json=json.dumps({"karar": "hayir", "not": f"kart reddedildi (durum {durum})"}))
@@ -1050,8 +1080,8 @@ class Motor:
                     if isinstance(veri, dict):
                         if veri.get("kosu_id"):
                             t["kosu_id"] = str(veri["kosu_id"])[:120]
-                        if veri.get("goruldu_ts"):
-                            t["goruldu_ts"] = float(veri["goruldu_ts"])
+                        if veri.get("kuyruk_ts"):
+                            t["kuyruk_ts"] = float(veri["kuyruk_ts"])
                     if d["durum"] != durum or json.loads(d["tutamac_json"] or "{}") != t:
                         b.execute("UPDATE denemeler SET durum=?, tutamac_json=? WHERE id=?", (durum, json.dumps(t), deneme_id))
                     if d["durum"] != durum:
@@ -1092,11 +1122,20 @@ class Motor:
                 return
             # hata / bilinmeyen / kaynak / erken onay
             sinif = {"hata": "kalici"}.get(durum, durum)
+            if adim["tur"] == "agent_task" and sinif == "bilinmeyen":
+                self._ajan_isini_kaldir(d["ref"])
             if not self._deneme_bitir(b, deneme_id, "bilinmeyen" if sinif == "bilinmeyen" else "basarisiz",
                                       siniflama=sinif, hata=str(veri)[:300]):
                 return
             self._adim_hatasi(b, kosu, tanim, adim, sinif, veri)
         self._uyandir.set()
+
+    def _ajan_isini_kaldir(self, ref):
+        """Terk edilen denemenin kuyruk/limit-bekleyen kaydı kalırsa iş sonradan yeniden koşar: kaldır."""
+        try:
+            return self.ortam.kuyruktan_cikar(ref)
+        except Exception:  # noqa: BLE001
+            return False
 
     def baslangic_uzlastir(self):
         """Sunucu açılışında: yarım kalmış gönderimler. Kanıt yoksa yan etkili adım yeniden başlatılmaz → manual_review."""

@@ -28,6 +28,7 @@ class SahteOrtam:
         self.reddler = []
         self.komut_kodu = {}          # kontrol adı parçası → çıkış kodu
         self.komutlar = []
+        self.onaylar = set()          # (proje, sürüm, sha): ofis girişinin yazdığı canlı onay kayıtları
         self.ajanlar = {"arastirmaci": {"id": "arastirmaci", "kurulu": True, "butce_usd": 1.0},
                         "gunlukcu": {"id": "gunlukcu", "kurulu": True, "butce_usd": 0.5},
                         "gorevci": {"id": "gorevci", "kurulu": True, "ssh": {"host": "x"}}}
@@ -50,6 +51,12 @@ class SahteOrtam:
 
     def kuyrukta_mi(self, ref):
         return ref in self.kuyruk
+
+    def kuyruktaki_refler(self):
+        return set(self.kuyruk)
+
+    def canli_onay_var(self, proje, surum, sha):
+        return (proje, surum, sha) in self.onaylar
 
     def kuyruktan_cikar(self, ref):
         if ref in self.kuyruk:
@@ -281,6 +288,18 @@ class RetryTest(MotorTabani):
         self.assertEqual(self.detay(k)["durum"], "inceleme")
         self.assertEqual(len(self.ortam.baslatilan), 2)
 
+    def test_ajan_metnindeki_tmux_baslamadi_sayilmaz(self):
+        k = self.kur(yan_etkili=True)
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), durum="hata", hata="tmux kill-window denedim, sonra hata line 429")
+        self.m.tur()
+        self.assertEqual(self.detay(k)["durum"], "inceleme")   # yan etkili: elle karar, körlemesine tekrar yok
+        self.assertEqual(len(self.ortam.baslatilan), 1)
+        self.assertEqual(akis_motor.hata_sinifla("lock not acquired within 1800 s (another beyin run is in progress)"),
+                         "baslamadi")
+        self.assertEqual(akis_motor.hata_sinifla("You've hit your session limit · resets 5pm"), "gecici")
+        self.assertEqual(akis_motor.hata_sinifla("syntax error at line 429"), "kalici")
+
     def test_yan_etkili_adim_korlemesine_tekrarlanmaz(self):
         k = self.kur(yan_etkili=True)
         self.m.tur()
@@ -335,6 +354,57 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         self.assertEqual(len(self.ortam.baslatilan), 1)
         self.saat[0] += akis_motor.BASLAMA_TOLERANS_SN + 1
         self.m.tur()                                   # tolerans sonra da iz yoksa bilinmeyen
+        self.assertEqual(self.adim(k, "a")["denemeler"][0]["durum"], "bilinmeyen")
+
+    def isaret_yaz(self, ref, pid, ts):
+        os.makedirs(akis_motor.sonuc_dizini(), exist_ok=True)
+        with open(os.path.join(akis_motor.sonuc_dizini(), f"{ref}.basladi.json"), "w") as f:
+            json.dump({"ref": ref, "pid": pid, "ts": ts}, f)
+
+    def test_uzun_suren_canli_kosu_bilinmeyen_olmaz(self):
+        """İnceleme bulgusu: canlı pid'li işaret, 180 sn'den uzun koşuda da 'calisiyor' kalmalı."""
+        t = taban_tanim()
+        t["adimlar"][0]["yan_etkili"] = False
+        self.tanim(t)
+        k = self.m.baslat("deneme", {"konu": "x"})["run_id"]
+        self.m.tur()
+        ref = self.son_ref()
+        self.isaret_yaz(ref, os.getpid(), self.saat[0] + 1)
+        for _ in range(100):                          # 100 × 5 sn = 500 sn
+            self.saat[0] += 5
+            self.m.tur()
+        self.assertEqual(self.adim(k, "a")["denemeler"][0]["durum"], "calisiyor")
+        self.assertEqual(len(self.ortam.baslatilan), 1)
+
+    def test_zaman_asimi_kuyruk_kaydini_kaldirir(self):
+        t = taban_tanim()
+        t["adimlar"][0].update({"zaman_asimi_sn": 600, "yan_etkili": False,
+                                "hata": {"eylem": "retry", "max_deneme": 3, "geri_cekilme_sn": 1}})
+        self.tanim(t)
+        k = self.m.baslat("deneme", {"konu": "x"})["run_id"]
+        self.ortam.davranis = ["kuyruk"]
+        self.m.tur()
+        ref = self.son_ref()
+        self.saat[0] += 601
+        self.m.tur()
+        self.assertNotIn(ref, self.ortam.kuyruk)        # eski iş sonradan ikinci kez koşmaz
+        self.assertEqual(self.adim(k, "a")["denemeler"][0]["durum"], "bilinmeyen")
+
+    def test_eski_ara_sonuc_yeni_olu_kosuyu_gizlemez(self):
+        self.tanim(taban_tanim())
+        k = self.m.baslat("deneme", {"konu": "x"})["run_id"]
+        self.m.tur()
+        ref = self.son_ref()
+        self.ajan_bitir(ref, durum="hata", hata="limit", son=False)
+        with open(os.path.join(akis_motor.sonuc_dizini(), f"{ref}.json")) as f:
+            ara = json.load(f)
+        ara["ts"] = self.saat[0]
+        with open(os.path.join(akis_motor.sonuc_dizini(), f"{ref}.json"), "w") as f:
+            json.dump(ara, f)
+        self.saat[0] += 30
+        self.isaret_yaz(ref, 999999999, self.saat[0])   # limit sonrası yeniden koşu başladı, sonra öldü
+        self.saat[0] += 10
+        self.m.tur()
         self.assertEqual(self.adim(k, "a")["denemeler"][0]["durum"], "bilinmeyen")
 
     def test_eszamanli_baslatma_idempotent(self):
@@ -461,6 +531,54 @@ class IptalOnayTest(MotorTabani):
         self.assertEqual(self.detay(k)["durum"], "iptal")
         with self.assertRaises(akis_motor.AkisHatasi):
             self.m.iptal(k)
+
+    def test_iptal_calisiyor_gorunen_denemenin_kuyruk_kaydini_da_kaldirir(self):
+        self.tanim(taban_tanim())
+        k = self.m.baslat("deneme", {"konu": "x"})["run_id"]
+        self.m.tur()                                     # DB'de 'calisiyor'
+        ref = self.son_ref()
+        self.ortam.kuyruk.add(ref)                       # ama limit yüzünden yeniden kuyruğa girmiş
+        d = self.m.iptal(k)
+        self.assertNotIn(ref, self.ortam.kuyruk)
+        self.assertIn("kuyruktan çıkarıldı", " ".join(d["notlar"]))
+
+    def test_iptal_sahiplenme_ile_baslatma_arasinda(self):
+        self.tanim(taban_tanim())
+        k = self.m.baslat("deneme", {"konu": "x"})["run_id"]
+        asil = self.m._gonderilebilir
+
+        def araya_iptal(kosu_id, deneme_id):
+            self.m.iptal(k)
+            return asil(kosu_id, deneme_id)
+        self.m._gonderilebilir = araya_iptal
+        self.m.tur()
+        self.assertEqual(self.ortam.baslatilan, [])      # iptalden sonra dış çağrı yok
+        self.assertEqual(self.detay(k)["durum"], "iptal")
+
+    def test_inceleme_sirasinda_biten_dalin_ardili_acilir(self):
+        t = taban_tanim(izinli_ajanlar=["arastirmaci", "gunlukcu"])
+        t["adimlar"] = [
+            {"id": "bas", "tur": "agent_task", "ajan": "arastirmaci", "gorev": "B", "yan_etkili": False, "sonraki": ["a", "b"]},
+            {"id": "a", "tur": "agent_task", "ajan": "arastirmaci", "gorev": "A", "sonraki": "a2"},
+            {"id": "a2", "tur": "end"},
+            {"id": "b", "tur": "agent_task", "ajan": "gunlukcu", "gorev": "Bb", "yan_etkili": False, "sonraki": "b2"},
+            {"id": "b2", "tur": "agent_task", "ajan": "gunlukcu", "gorev": "B2", "yan_etkili": False, "sonraki": "son"},
+            {"id": "son", "tur": "end"}]
+        t["baslangic"] = "bas"
+        self.tanim(t)
+        k = self.m.baslat("deneme", {"konu": "x"})["run_id"]
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), "ok")
+        self.m.tur()
+        refs = {a: r for a, _, _, r in self.ortam.baslatilan[1:]}
+        self.ajan_bitir(refs["arastirmaci"], durum="hata", hata="bozuk")   # a (yan etkili) → inceleme
+        self.m.tur()
+        self.assertEqual(self.detay(k)["durum"], "inceleme")
+        self.ajan_bitir(refs["gunlukcu"], "ok")                            # b inceleme sırasında bitti
+        self.m.tur()
+        self.assertEqual(self.adim(k, "b2")["durum"], "hazir")             # ardılı açıldı (başlamadı)
+        self.assertEqual(len(self.ortam.baslatilan), 3)
+        self.m.devam(k, "basarisiz_say")
 
     def test_duraklat_devam(self):
         self.tanim(taban_tanim())
@@ -645,7 +763,11 @@ class PilotTest(MotorTabani):
         with self.assertRaises(akis_motor.AkisHatasi):              # dağıtım onayı API'den verilemez
             self.m.onayla(self.k, "uat_onayi", "evet", kapi_ok=True)
         self.assertNotIn("onay", {k for k, v in self.ortam.gorevler["G0.md"].items() if v == "evet"})
-        self.ortam.gorevler["G0.md"]["onay"] = "evet"               # insan Geliştirme kartından onayladı
+        self.ortam.gorevler["G0.md"]["onay"] = "evet"               # yalnız dosyada: kapısız yazılabilir
+        self.m.tur()
+        self.assertEqual(self.adim(self.k, "uat_onayi")["durum"], "onay_bekliyor")
+        self.assertIn("onay_kaydi_yok", [o["olay"] for o in self.ortam.olaylar])
+        self.ortam.onaylar.add(("homeos", "0.10.1", "a" * 64))       # ofis girişi canlı onay kaydını yazdı
         self.m.tur()
         self.assertEqual(self.detay(self.k)["durum"], "basarili")
 

@@ -4,7 +4,9 @@ import copy
 import hashlib
 import json
 import os
+import shutil
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 
@@ -221,6 +223,35 @@ class KapiTest(unittest.TestCase):
             self.assertEqual(akis_kapi.main(["sha256", f.name, "kotu"]), 2)
         finally:
             os.unlink(f.name)
+
+    @unittest.skipUnless(shutil.which("php") and shutil.which("git"), "php CLI yok")
+    def test_php_lint_gercek_php(self):
+        """Gerçek php -l: geçerli değişiklik geçer; yeni/değişen bozuk dosya (boşluklu ve Türkçe adlı dahil) kalır;
+        dalın dokunmadığı bozuk dosya sayılmaz."""
+        with tempfile.TemporaryDirectory() as d:
+            def git(*a):
+                subprocess.run(["git", "-C", d, "-c", "user.name=t", "-c", "user.email=t@l", *a], check=True,
+                               capture_output=True)
+            def yaz(ad, metin):
+                with open(os.path.join(d, ad), "w", encoding="utf-8") as f:
+                    f.write(metin)
+            git("init", "-q", "-b", "main")
+            yaz("eski_bozuk.php", "<?php syntax error")
+            git("add", ".")
+            git("commit", "-q", "-m", "taban")
+            git("checkout", "-q", "-b", "beyin/1119-x")
+            yaz("iyi.php", "<?php function f(int $a): int { return $a + 1; }")
+            git("add", ".")
+            git("commit", "-q", "-m", "iyi")
+            self.assertEqual(akis_kapi.main(["php-lint", d, "main"]), 0)
+            for ad in ("bozuk.php", "bozuk dosya.php", "çözüm ğ.php"):
+                yaz(ad, "<?php if ( {")
+                self.assertEqual(akis_kapi.main(["php-lint", d, "main"]), 1, ad)
+                os.remove(os.path.join(d, ad))
+            yaz("iyi.php", "<?php echo 1")
+            git("commit", "-q", "-am", "bozdu")
+            self.assertEqual(akis_kapi.main(["php-lint", d, "main"]), 1)
+            self.assertEqual(akis_kapi.main(["php-lint", d, "yok-dal"]), 2)
 
     def test_php_lint_gecersiz_taban(self):
         self.assertEqual(akis_kapi.main(["php-lint", "/tmp", "--output=/x"]), 2)

@@ -10,7 +10,7 @@ import re
 
 import ortak
 
-TANIM_DIZINI = os.path.join(ortak.KOK, "akislar")
+TANIM_DIZINI = os.environ.get("OFIS_AKISLAR") or os.path.join(ortak.KOK, "akislar")   # kabul testi: ayrı tanım klasörü
 SEMA_SURUMU = 1
 ID_DESENI = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
 ADIM_TURLERI = ("agent_task", "gelistirme_gorevi", "quality_gate", "condition", "approval", "end")

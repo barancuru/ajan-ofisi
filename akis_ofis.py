@@ -15,6 +15,14 @@ import ortak
 
 IS_DIZINI = os.path.expanduser(os.environ.get("OFIS_IS_DIZINI", "~/beyin-is"))   # bin/calistir IS_DIZIN
 KOMUT_CIKTI_MAKS = 4000
+# Kapı git'i ajanın yazabildiği worktree'de koşar: yapılandırmadan komut çalıştırma yolları kapatılır.
+GIT_GUVENLI = ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "core.pager=cat",
+               "-c", "diff.external=true", "-c", "core.sshCommand=false", "-c", "protocol.allow=never"]
+
+
+def guvenli_git_ortami(temel):
+    return {**temel, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_TERMINAL_PROMPT": "0",
+            "GIT_OPTIONAL_LOCKS": "0"}
 
 
 class OfisOrtami:
@@ -38,10 +46,25 @@ class OfisOrtami:
             if k:
                 yield yol, k
 
+    def kuyruktaki_refler(self):
+        """Kuyruk ve limit-bekleyen'deki bütün akis_ref'ler (motor turu başına bir kez)."""
+        refler = {k.get("akis_ref") for k in self.s.kuyruk_oku() if k.get("akis_ref")}
+        refler |= {k.get("akis_ref") for _, k in self._limit_bekleyenler() if k.get("akis_ref")}
+        return refler
+
     def kuyrukta_mi(self, ref):
-        if any(k.get("akis_ref") == ref for k in self.s.kuyruk_oku()):
-            return True
-        return any(k.get("akis_ref") == ref for _, k in self._limit_bekleyenler())
+        return ref in self.kuyruktaki_refler()
+
+    def canli_onay_var(self, proje, surum, sha):
+        """Ofis girişinin (kapı imzası) yazdığı, mühürlü pakete bağlı canlı onay kaydı (sunucu.canli_onayi_yaz)."""
+        if not (isinstance(proje, str) and re.fullmatch(r"[a-z-]{1,40}", proje) and isinstance(surum, str)
+                and re.fullmatch(r"[0-9.]{1,24}", surum) and isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{64}", sha)):
+            return False
+        try:
+            with open(os.path.join(self.s.CANLI_ONAY_DIZINI, f"{proje}-{surum}.onay"), encoding="utf-8") as f:
+                return f.read().strip() == sha
+        except OSError:
+            return False
 
     def kuyruktan_cikar(self, ref):
         cikti = False
@@ -155,12 +178,30 @@ class OfisOrtami:
         yol = os.path.realpath(os.path.join(kok, f"{proje}-{dal[len('beyin/'):]}"))
         if not yol.startswith(kok + os.sep) or not os.path.isdir(yol):
             return None
+        # .git işaretçisi ajanın yazabildiği yerde: yalnız hattın klonundaki worktree kaydına gösterebilir
+        # (kendi gitdir'ine çevrilmiş bir işaretçi, kapının git'ine ajan yapılandırması yükletirdi)
+        isaretci = os.path.join(yol, ".git")
+        if os.path.islink(isaretci) or not os.path.isfile(isaretci):
+            return None
+        try:
+            with open(isaretci, encoding="utf-8") as f:
+                satir = f.read(4096).strip()
+        except OSError:
+            return None
+        if not satir.startswith("gitdir: "):
+            return None
+        gitdir = os.path.realpath(satir[len("gitdir: "):])
+        beklenen = os.path.realpath(os.path.join(IS_DIZINI, proje, ".git", "worktrees"))
+        if not gitdir.startswith(beklenen + os.sep) or not os.path.isdir(gitdir):
+            return None
         return yol
 
     def komut_calistir(self, argv, cwd, zaman_asimi):
         """Shell yok, stdin yok, sırsız en dar ortam. Dönen: (çıkış kodu, çıktının son kısmı)."""
-        ortam = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": os.path.expanduser("~"), "LANG": "C.UTF-8",
-                 "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_NOSYSTEM": "1"}
+        ortam = guvenli_git_ortami({"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": os.path.expanduser("~"),
+                                    "LANG": "C.UTF-8"})
+        if argv and argv[0] == "git":
+            argv = ["git", *GIT_GUVENLI, *argv[1:]]
         try:
             p = subprocess.run(argv, cwd=cwd, stdin=subprocess.DEVNULL, capture_output=True, text=True,
                                errors="replace", timeout=zaman_asimi, env=ortam)
