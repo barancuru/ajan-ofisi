@@ -98,6 +98,12 @@ class SahteOrtam:
 
     def komut_calistir(self, argv, cwd, zaman):
         self.komutlar.append(argv)
+        if "sha256" in argv:   # gerçek akis_kapi.py sha256 gibi: argv'deki sha görevin güncel paketine uymalı
+            guncel = {fm.get("sha256") for fm in self.gorevler.values()}
+            if argv[-1] not in guncel:
+                return 1, "paket SHA-256 mühürle uyuşmuyor"
+        if callable(self.komut_kodu):
+            return self.komut_kodu(argv), "çıktı"
         for parca, kod in self.komut_kodu.items():
             if parca in " ".join(argv):
                 return kod, "çıktı"
@@ -311,6 +317,26 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         self.m.tur()
         self.assertEqual(self.detay(k)["durum"], "basarili")
 
+    def test_kuyruktan_cikis_ile_isaret_arasi_bilinmeyen_degil(self):
+        """Uzun kuyruk beklemesinden sonra kuyruktan çıkıp kosucu işaretini yazana dek geçen an 'bilinmeyen' sayılmaz."""
+        t = taban_tanim()
+        t["adimlar"][0]["yan_etkili"] = False
+        self.tanim(t)
+        k = self.m.baslat("deneme", {"konu": "x"})["run_id"]
+        self.ortam.davranis = ["kuyruk"]
+        self.m.tur()
+        ref = self.son_ref()
+        self.saat[0] += 1000
+        self.m.tur()                                   # hâlâ kuyrukta
+        self.ortam.kuyruk.discard(ref)                 # kuyrugu_isle tmux açtı, işaret henüz yok
+        self.saat[0] += 5
+        self.m.tur()
+        self.assertIn(self.adim(k, "a")["denemeler"][0]["durum"], ("kuyrukta", "calisiyor"))
+        self.assertEqual(len(self.ortam.baslatilan), 1)
+        self.saat[0] += akis_motor.BASLAMA_TOLERANS_SN + 1
+        self.m.tur()                                   # tolerans sonra da iz yoksa bilinmeyen
+        self.assertEqual(self.adim(k, "a")["denemeler"][0]["durum"], "bilinmeyen")
+
     def test_eszamanli_baslatma_idempotent(self):
         self.tanim(taban_tanim())
         sonuclar = []
@@ -395,7 +421,8 @@ class KurtarmaTest(MotorTabani):
         ref = self.son_ref()
         os.makedirs(akis_motor.sonuc_dizini(), exist_ok=True)
         with open(os.path.join(akis_motor.sonuc_dizini(), f"{ref}.basladi.json"), "w") as f:
-            json.dump({"ref": ref, "pid": 999999999, "ts": 900}, f)
+            json.dump({"ref": ref, "pid": 999999999, "ts": self.saat[0] + 1}, f)   # kosucu başladı, sonra öldü
+        self.saat[0] += 10
         self.m.tur()
         self.assertEqual(self.detay(k)["durum"], "inceleme")   # yan etkili (varsayılan): elle karar
         self.assertEqual(self.adim(k, "a")["denemeler"][0]["siniflama"], "bilinmeyen")
@@ -634,8 +661,9 @@ class PilotTest(MotorTabani):
             t["sinirlar"]["max_maliyet_usd"] = usd
             b.execute("UPDATE kosular SET tanim_json=? WHERE id=?", (json.dumps(t), self.k))
 
-    def test_pilot_butcesi_ucuncu_duzeltmeyi_durdurur(self):
+    def test_dusuk_butce_ucuncu_duzeltmeyi_durdurur(self):
         """20 $ tavan ve hat turu başına 6 $ en kötü tahminle: uygulama + 2 düzeltme; 3. tur bütçeden durur."""
+        self.butce_yukselt(20)
         self.planla()
         self.ortam.hat_uat("G0.md", sha="a" * 64)
         self.ortam.komut_kodu = {"php-lint": 1}
@@ -650,7 +678,7 @@ class PilotTest(MotorTabani):
         self.assertLessEqual(d["maliyet_usd"] + d["tahmini_usd"], 20)
 
     def test_kalite_kapisi_basarisiz_duzeltme_ve_uc_tur_siniri(self):
-        self.butce_yukselt(40)
+        """Pilotun kendi sınırlarıyla (30 $, 12 çağrı): 3 düzeltme turu sığar, 4. kapı hatasında döngü sınırı."""
         self.planla()
         self.ortam.hat_uat("G0.md", sha="a" * 64)
         self.ortam.komut_kodu = {"php-lint": 1}                      # test hep kalıyor
@@ -671,6 +699,66 @@ class PilotTest(MotorTabani):
         self.assertEqual(len(self.ortam.reddler), 3)                 # 3 düzeltme turundan fazlası yok
         with self.assertRaises(akis_motor.AkisHatasi):
             self.m.devam(self.k, "yeniden_dene")
+
+    def test_duzeltme_sonrasi_kapi_guncel_paketi_kullanir(self):
+        """Regresyon: düzeltme turu yeni paket üretir; kapılar ve koşullar eski sha/uyarıyı değil yenisini görmeli."""
+        self.planla()
+        self.ortam.hat_uat("G0.md", sha="a" * 64)
+        lint = iter([1])
+        self.ortam.komut_kodu = lambda argv: next(lint, 0) if "php-lint" in argv else 0
+        self.m.tur()                                   # test kaldı → düzeltme (ret)
+        self.assertEqual(len(self.ortam.reddler), 1)
+        self.ortam.hat_uat("G0.md", sha="b" * 64, uyari=0)
+        self.m.tur()                                   # yeni paket → test yeniden: geçmeli
+        self.assertTrue(self.adim(self.k, "test")["cikti"]["gecti"], self.adim(self.k, "test")["cikti"])
+        self.guvenlik("gecti")
+        self.m.tur()
+        self.assertTrue(self.adim(self.k, "kalite")["cikti"]["gecti"], self.adim(self.k, "kalite")["cikti"])
+        self.assertEqual(self.adim(self.k, "uat_onayi")["durum"], "onay_bekliyor")
+        self.assertEqual(self.adim(self.k, "uygulama")["cikti"]["sha256"], "b" * 64)
+
+    def test_eski_iterasyon_raporu_duzeltmeye_tasinmaz(self):
+        self.butce_yukselt(40)
+        self.planla()
+        self.ortam.hat_uat("G0.md", sha="a" * 64)
+        self.m.tur()
+        self.guvenlik("kaldi")                          # 1. tur: kalite kaldı (güvenlik)
+        self.m.tur()
+        self.assertEqual(len(self.ortam.reddler), 1)
+        self.ortam.komut_kodu = {"php-lint": 1}
+        self.ortam.hat_uat("G0.md", sha="b" * 64)
+        self.m.tur()                                   # 2. tur: test kaldı; eski kalite raporu gitmemeli
+        self.assertEqual(len(self.ortam.reddler), 2)
+        not_ = self.ortam.reddler[-1][1]
+        self.assertIn("❌ PHP sözdizimi", not_)
+        self.assertNotIn("koşullar", not_)
+
+    def test_kapi_is_parcacigi_ara_turda_yeniden_kosmaz(self):
+        """Üretim yolu (kapi_senkron=False): kapı komutu sürerken gelen tur, kapıyı yarıda kaldı sayıp yeniden koşmaz."""
+        self.m.kapi_senkron = False
+        self.planla()
+        self.ortam.hat_uat("G0.md")
+        bekle, girdi = threading.Event(), threading.Event()
+        gercek = self.ortam.komut_calistir
+
+        def yavas(argv, cwd, zaman):
+            if "php-lint" in argv:
+                girdi.set()
+                bekle.wait(5)
+            return gercek(argv, cwd, zaman)
+        self.ortam.komut_calistir = yavas
+        self.m.tur()
+        self.assertTrue(girdi.wait(5))
+        for _ in range(3):
+            self.m.tur()                                  # kapı sürüyor
+        self.assertEqual(self.adim(self.k, "test")["durum"], "calisiyor")
+        isler = list(self.m._kapi_isleri.values())
+        bekle.set()
+        [t.join(5) for t in isler]
+        self.m.tur()
+        test = self.adim(self.k, "test")
+        self.assertEqual((test["durum"], len(test["denemeler"])), ("basarili", 1))
+        self.assertEqual(sum(1 for c in self.ortam.komutlar if "php-lint" in c), 1)
 
     def test_model_testler_gecti_dese_de_komut_kalirsa_kapi_kalir(self):
         self.planla()

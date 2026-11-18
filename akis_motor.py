@@ -531,6 +531,21 @@ class Motor:
             # döngüde geri dönülen adımın ardılları da yeniden beklemeye alınır (eski başarı bağımlılığı sağlamasın)
             if g["dongu"]:
                 self._ardillari_sifirla(b, kosu, tanim, g["hedef"])
+                self._eski_ciktilari_sil(b, kosu, tanim, kaynak_adim)
+
+    def _eski_ciktilari_sil(self, b, kosu, tanim, kaynak):
+        """Döngüyü tetikleyen adımın ardıllarının çıktısı önceki iterasyondandır: düzeltme geri bildirimine taşınmasın.
+        Kaynağın kendisi ve öncülleri (bu iterasyonun gerçek sonuçları) korunur."""
+        gorulen, yigin = {kaynak}, [kaynak]
+        while yigin:
+            a = akis_tanim.adim_bul(tanim, yigin.pop())
+            for g in akis_tanim.gecisler(a):
+                h = g["hedef"]
+                if h != INCELEME and h not in gorulen and not g["dongu"]:
+                    gorulen.add(h)
+                    yigin.append(h)
+                    if akis_tanim.adim_bul(tanim, h)["tur"] in ("quality_gate", "agent_task", "approval", "condition"):
+                        self._adim_yaz(b, kosu["id"], h, cikti_json=None)
 
     def _ardillari_sifirla(self, b, kosu, tanim, baslangic):
         gorulen, yigin = {baslangic}, [baslangic]
@@ -784,21 +799,29 @@ class Motor:
 
     def _ajan_uzlastir(self, b, kosu, tanim, adim, d):
         ref = d["ref"]
+        simdi = self.saat()
         sonuc = _json_oku(os.path.join(sonuc_dizini(), f"{ref}.json"))
         if sonuc and sonuc.get("ref") == ref and sonuc.get("son") is True:
             return ("bitti", sonuc)
         isaret = _json_oku(os.path.join(sonuc_dizini(), f"{ref}.basladi.json"))
         if self.ortam.kuyrukta_mi(ref):
-            return ("kuyrukta", None)
-        if isaret and isaret.get("ref") == ref:
+            return ("kuyrukta", {"goruldu_ts": simdi})
+        if sonuc and sonuc.get("ref") == ref and sonuc.get("son") is False:
+            # limit yüzünden yeniden kuyruğa giriyor (dosya → kuyruk arası): aynı deneme sürüyor
+            return ("kuyrukta", {"goruldu_ts": simdi})
+        # tolerans son görülme anından: kuyruktan çıkıp kosucu işaretini yazana dek geçen süre "bilinmeyen" değildir
+        son_gorulme = max(d["baslangic_ts"], float(json.loads(d["tutamac_json"] or "{}").get("goruldu_ts") or 0))
+        if isaret and isaret.get("ref") == ref and float(isaret.get("ts") or 0) >= son_gorulme - 1:
             if ortak.surec_yasiyor(isaret.get("pid")):
-                return ("calisiyor", isaret)
+                return ("calisiyor", {**isaret, "goruldu_ts": simdi})
             # süreç öldü ama sonuç yok: bitiş dosyası yazılıyor olabilir; kısa tolerans
-            if self.saat() - float(isaret.get("ts") or 0) < 5:
+            if simdi - float(isaret.get("ts") or 0) < 5:
                 return ("calisiyor", isaret)
             return ("bilinmeyen", "ajan süreci sonuç yazmadan kapandı")
-        if self.saat() - d["baslangic_ts"] < BASLAMA_TOLERANS_SN:
+        if simdi - son_gorulme < BASLAMA_TOLERANS_SN:
             return ("bekle", None)
+        if isaret and isaret.get("ref") == ref:
+            return ("bilinmeyen", "ajan süreci sonuç yazmadan kapandı")
         return ("bilinmeyen", "koşu izi yok (başlamadı ya da işaret kayboldu)")
 
     def _ajan_sonucunu_isle(self, b, kosu, tanim, adim, d, sonuc):
@@ -906,6 +929,12 @@ class Motor:
         return deg
 
     def _kapi_calistir(self, kosu_id, adim, deneme_id, ref, baglam, hazirlik):
+        try:
+            self._kapi_calistir_ic(kosu_id, adim, deneme_id, ref, hazirlik)
+        finally:
+            self._kapi_isleri.pop(ref, None)   # sonuç işlendikten SONRA: arada tur kapıyı "yarıda kaldı" saymasın
+
+    def _kapi_calistir_ic(self, kosu_id, adim, deneme_id, ref, hazirlik):
         satirlar, gecti = [], True
         try:
             tut = (hazirlik or {}).get("tutamac")
@@ -933,8 +962,6 @@ class Motor:
             return self._baslatma_hatasi(kosu_id, adim, deneme_id, "erken_onay" if e.kod == 423 else "kaynak", str(e))
         except Exception as e:  # noqa: BLE001
             return self._baslatma_hatasi(kosu_id, adim, deneme_id, "kaynak", f"kontrol koşturulamadı: {type(e).__name__}")
-        finally:
-            self._kapi_isleri.pop(ref, None)
         with self._islem() as b:
             kosu = self._kosu_al(b, kosu_id)
             if adim.get("kosullar"):
@@ -1019,11 +1046,15 @@ class Motor:
                 if self.saat() - d["baslangic_ts"] > adim["zaman_asimi_sn"]:
                     durum, veri = "bilinmeyen", "adım zaman aşımı"
                 else:
-                    if d["durum"] != durum:
-                        t = json.loads(d["tutamac_json"] or "{}")
-                        if isinstance(veri, dict) and veri.get("kosu_id"):
+                    t = json.loads(d["tutamac_json"] or "{}")
+                    if isinstance(veri, dict):
+                        if veri.get("kosu_id"):
                             t["kosu_id"] = str(veri["kosu_id"])[:120]
+                        if veri.get("goruldu_ts"):
+                            t["goruldu_ts"] = float(veri["goruldu_ts"])
+                    if d["durum"] != durum or json.loads(d["tutamac_json"] or "{}") != t:
                         b.execute("UPDATE denemeler SET durum=?, tutamac_json=? WHERE id=?", (durum, json.dumps(t), deneme_id))
+                    if d["durum"] != durum:
                         self._olay(b, kosu, "adim_durumu", adim=d["adim_id"], deneme=d["deneme"], durum=durum,
                                    iterasyon=d["iterasyon"])
                     return
@@ -1052,6 +1083,9 @@ class Motor:
             if adim["tur"] == "gelistirme_gorevi" and durum == "bitti":
                 if not self._deneme_bitir(b, deneme_id, "basarili", siniflama="basarili"):
                     return
+                if adim["mod"] == "duzeltme":
+                    # yeni paket (sha, uyarı) hedef adımın çıktısı olur: {{adim.uygulama.*}} ve kapılar güncel paketi görür
+                    self._adim_yaz(b, kosu_id, adim["hedef_adim"], cikti_json=json.dumps(veri, ensure_ascii=False))
                 self._olay(b, kosu, "deneme_bitti", adim=d["adim_id"], deneme=d["deneme"], durum="basarili",
                            iterasyon=d["iterasyon"])
                 self._adim_basarili(b, kosu, tanim, adim, veri)

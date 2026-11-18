@@ -106,7 +106,7 @@ class TanimTest(unittest.TestCase):
         self.assertIn("homeos-ozellik-gelistirme", tanimlar)
         pilot = tanimlar["homeos-ozellik-gelistirme"]
         self.assertEqual(pilot["donguler"]["kalite"]["max_iterasyon"], 3)
-        self.assertEqual(pilot["sinirlar"]["max_maliyet_usd"], 20)
+        self.assertEqual(pilot["sinirlar"]["max_maliyet_usd"], 30)
         self.assertEqual(akis_tanim.adim_bul(pilot, "uat_onayi")["kategori"], "dagitim")
 
     def test_dosya_adi_id_uyusmazligi(self):

@@ -160,6 +160,7 @@ Test kapısı (değişen PHP'ye `php -l`, `git diff --check`, paket mührü) →
 belirsizlik/uyarı koşulu → Kalite kapısı (paket mührü, temiz worktree, test geçti, güvenlik `gecti`) → UAT/dağıtım onayı
 (kartı izler) → bitti. Kapı geçmezse Düzeltme (UAT reddi + bulgular) → Test, `kalite` döngüsü en çok 3.
 
-Sınırlar 12 ajan çağrısı, 72 saat, 20 $. Hat turu tahmini 6 $ olduğundan 20 $ ile uygulama + **2** düzeltme
-turu sığar; 3. tur bütçe nedeniyle manual_review'a düşer (`test_pilot_butcesi_ucuncu_duzeltmeyi_durdurur`).
-Bkz. README "Açık kararlar".
+Sınırlar: 12 ajan çağrısı, 72 saat, 30 $ (kullanıcı kararı 2026-11-18). Hat turu en kötü tahmini 6 $; 30 $ ile
+uygulama + 3 düzeltme turu sığar. Ajan adımlarının tahmini (1,5 $) bitince gerçekleşen maliyetle değişir. Her ajan
+koşusu tavanına (1,5 $) dayanırsa son güvenlik kontrolü bütçeden manual_review'a düşebilir. 20 $ ile 3. tur
+durur (`test_dusuk_butce_ucuncu_duzeltmeyi_durdurur`).

@@ -4,9 +4,8 @@
 > ajan-ofisi oto-onaylı olabilir. Bir kalem seçilince Geliştirme sekmesinden (ya da elle) görev açılır.
 
 ## V1 sonrası küçük işler (öncelikli)
-1. **Pilot bütçesi**: 20 $ tavanı ile 6 $ hat turu tahmini 3. düzeltme turunu durduruyor. Ya tavan ~27 $ olmalı, ya
-   hattın gerçek maliyeti (`sistem/kayit.md` / `.cache/kayit-tam.jsonl` maliyet sütunu) adaptöre okutulup tahmin
-   gerçekleşenle değiştirilmeli.
+1. **Hat maliyeti**: pilot tavanı 30 $ (6 $ en kötü hat turu tahminiyle 3 düzeltme turu). Hattın gerçek maliyeti
+   (`sistem/kayit.md` / `.cache/kayit-tam.jsonl` maliyet sütunu) adaptöre okutulup tahmin gerçekleşenle değiştirilmeli.
 2. **UAT kartında workflow uyarısı**: `kaynak: akis` görevlerinde Geliştirme kartı "kalite kapısı bekleniyor" göstersin.
    Şu an kapıdan önce elle onay yalnız sonradan `erken_onay` olarak işaretleniyor.
 3. **Çalışan koşuyu iptal**: iptal şimdilik çalışan ajanı durdurmuyor. tmux penceresini kapatmak + `kosucu` sinyal

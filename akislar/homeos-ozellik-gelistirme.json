@@ -9,7 +9,7 @@
     "istek": {"tur": "metin", "maks": 6000, "aciklama": "Ne isteniyor, kabul ölçütleri"}
   },
   "izinli_ajanlar": ["arastirmaci"],
-  "sinirlar": {"max_iterasyon": 3, "max_ajan_cagrisi": 12, "max_sure_sn": 259200, "max_maliyet_usd": 20},
+  "sinirlar": {"max_iterasyon": 3, "max_ajan_cagrisi": 12, "max_sure_sn": 259200, "max_maliyet_usd": 30},
   "donguler": {"kalite": {"max_iterasyon": 3, "tukenince": "pause"}},
   "baslangic": "planlama",
   "adimlar": [
