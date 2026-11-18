@@ -308,6 +308,24 @@ class RetryTest(MotorTabani):
         self.assertEqual(self.detay(k)["durum"], "inceleme")
         self.assertEqual(len(self.ortam.baslatilan), 1)
 
+    def test_yazabilen_ajan_tanim_yan_etkisiz_dese_de_tekrarlanmaz(self):
+        """Gerçek ajanlar.json biçimi: arastirmaci Write(~/beyin/**) taşır; yan_etkili:false körlemesine tekrar açmaz."""
+        self.ortam.ajanlar["arastirmaci"]["izinli_araclar"] = ["Read", "Glob", "Grep", "Edit(~/beyin/**)",
+                                                                "Write(~/beyin/**)", "WebSearch", "WebFetch", "Skill"]
+        k = self.kur(yan_etkili=False)
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), durum="hata", hata="API Error: 529 overloaded")
+        self.m.tur()
+        self.assertEqual(self.detay(k)["durum"], "inceleme")
+        self.assertEqual(len(self.ortam.baslatilan), 1)
+        olay = next(o for o in self.ortam.olaylar if o["olay"] == "yan_etki_varsayildi")
+        self.assertIn("Edit", olay["neden"])
+        for araclar, beklenen in ((["Read", "Grep", "WebFetch"], None), (["Read", "mcp__homeos__homeos_add_expense"], "mcp__"),
+                                  (["Bash(ls:*)"], "Bash"), (["Skill"], "Skill")):
+            self.ortam.ajanlar["arastirmaci"]["izinli_araclar"] = araclar
+            sonuc = self.m.ajan_yazabilir("arastirmaci")
+            self.assertTrue(sonuc is None if beklenen is None else beklenen in sonuc, (araclar, sonuc))
+
     def test_baslamadi_her_zaman_guvenli_tekrar(self):
         k = self.kur(yan_etkili=True, eylem="pause")
         self.ortam.davranis = [akis_motor.BaslatmaHatasi(429, "kuyruk dolu")]
@@ -525,6 +543,7 @@ class IptalOnayTest(MotorTabani):
         ref = self.son_ref()
         d = self.m.iptal(k)
         self.assertEqual(d["durum"], "iptal")
+        self.assertEqual(d["tahmini_usd"], 0)            # hiç koşmayan denemenin tahmini serbest
         self.assertNotIn(ref, self.ortam.kuyruk)
         self.ajan_bitir(ref, '<akis_cikti>{"sonuc": "iyi"}</akis_cikti>')
         self.m.tur()

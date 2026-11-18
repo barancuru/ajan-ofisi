@@ -346,6 +346,9 @@ class Motor:
                 adim = akis_tanim.adim_bul(tanim, d["adim_id"])
                 if adim["tur"] == "agent_task" and self._ajan_isini_kaldir(d["ref"]):
                     notlar.append(f"{d['adim_id']}: kuyruktan çıkarıldı")
+                    if d["durum"] == "kuyrukta":   # hiç koşmadı: tahmini maliyeti serbest bırak
+                        kosu["tahmini_usd"] = max(kosu["tahmini_usd"] - (d["tahmini_usd"] or 0), 0)
+                        self._kosu_yaz(b, kosu_id, tahmini_usd=kosu["tahmini_usd"])
                 elif adim["tur"] == "agent_task":
                     notlar.append(f"{d['adim_id']}: çalışan ajan koşusu durdurulmadı; bitince sonucu yok sayılır")
                 elif adim["tur"] == "gelistirme_gorevi":
@@ -614,6 +617,12 @@ class Motor:
                 return yeniden(sayac)
             return bekle(f"{adim['id']}: {sayac} kez başlatılamadı")
         tekrar_guvenli = not adim.get("yan_etkili", True)
+        if tekrar_guvenli and adim["tur"] == "agent_task":
+            yetki = self.ajan_yazabilir(adim["ajan"])
+            if yetki:   # tanım "yan etkisiz" dese de ajan yazabiliyorsa güvenli tarafta kal
+                tekrar_guvenli = False
+                self._olay(b, kosu, "yan_etki_varsayildi", adim=adim["id"], deneme=a["deneme"], durum="yan_etkili",
+                           iterasyon=a["iterasyon"], neden=f"ajan yetkisi: {yetki}")
         if p["eylem"] == "retry":
             if not tekrar_guvenli:
                 return bekle(f"{adim['id']}: yan etkili adım, sonuç {siniflama}; körlemesine tekrar yok, elle karar")
@@ -754,6 +763,26 @@ class Motor:
             self._adim_hatasi(b, kosu, self._tanim(kosu), adim, siniflama, metin)
 
     # ---- agent_task
+    SALT_OKUR_ARACLAR = ("Read", "Glob", "Grep", "WebSearch", "WebFetch", "TodoWrite")
+
+    def ajan_yazabilir(self, ajan_id):
+        """Ajanın yan etki üretebilen yetkisi (ilk eşleşen) ya da None. Bilinmeyen araç yan etkili sayılır (fail-closed).
+        Okuma geçitleri (git-oku, graf-oku, not-oku, tarayıcı) kosucu'nun eklediği salt okunur Bash kurallarıdır."""
+        try:
+            _, tablo = self.ortam.ajan_tablosu()
+        except Exception:  # noqa: BLE001
+            return "ajanlar.json okunamadı"
+        ajan = tablo.get(ajan_id)
+        if not ajan:
+            return "ajan yok"
+        if ajan.get("ssh"):
+            return "ssh"
+        for arac in ajan.get("izinli_araclar") or []:
+            ad = str(arac).split("(", 1)[0]
+            if ad not in self.SALT_OKUR_ARACLAR:
+                return str(arac)[:60]
+        return None
+
     def ajan_yetkili(self, tanim, ajan_id):
         """Çalışma anı yetki kontrolü: tanımın izin listesi + ajanlar.json. SSH'li ve atanamaz ajan workflow'a giremez."""
         if ajan_id not in tanim["izinli_ajanlar"]:
