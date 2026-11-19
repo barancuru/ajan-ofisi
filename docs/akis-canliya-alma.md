@@ -147,3 +147,22 @@ Kapsam: backlog #1, #6, #7, #8, #9, #10, #11 (#5 ertelendi). Aşama 1 sabitleri 
 
 Geri dönüş: Aşama 1 geri dönüşüyle aynı. Migration 4 sütunları eski kodda okunmaz (verilmiş ek bütçe yok sayılır =
 sınır daralır). `durum/akis-arsiv/` eski kodda kullanılmaz.
+
+## Aşama 2 — HomeOS geliştirme akışı (dal `akis-asama2`, 1.0.90, taslak PR; merge = pilotu açma kararı)
+Değişen yalnız üç sabit: `ETKIN_AKISLAR` += `homeos-ozellik-gelistirme`, `HAT_ADIMLARI_ACIK = True`,
+`DAGITIM_ONAYI_ACIK = True`. `YAZAN_AJAN_ACIK` kapalı kalır (akıştaki iki ajan adımı salt okunur `akis-okuyucu`).
+Kapı mekanizması testleri aşama 1 değerleriyle (`asama1()`) koşmaya devam eder.
+
+Durum (2026-11-19):
+- [x] Beyin hat koruması canlıda (`~/beyin` `adc0346`, `HAT_KORUMA_SURUMU=1`, işaret dosyası var).
+- [x] Pilot paketi oto-onaylanmaz: HomeOS oto-onayı kullanıcı kararıyla AÇIK (2026-11-19 22:39, 30 gün), ama workflow'un
+      açtığı her hat görevi `oto_onay: hayir` taşır (`akis_ofis.gelistirme_yaz`) ve canlı `bin/calistir oto_onay_dene` bunu
+      ilk satırda okuyup çıkar (gerçek `fm_get` ile doğrulandı). Dağıtım onayı yalnız Geliştirme UAT kartından (kapı).
+- [ ] **Yeni hatla bir HomeOS görevi UAT'ye gelip `sistem/yayin/homeos-<sürüm>.zip.kimlik` yazıldı** (henüz yok: 2026-11-16'dan
+      beri HomeOS görevi koşmadı). Bu görülmeden merge edilmemeli; motor kimliksiz paketi zaten kabul etmez (fail-closed),
+      ama ilk gerçek kimlik dosyasının biçimi canlıda bir kez gözle doğrulanmalı.
+- [ ] Merge + restart (Aşama 1 dağıtım penceresi ve adımlarıyla aynı; migration yok).
+
+İlk pilot koşusu (kullanıcı başlatır): Workflow sekmesinden `homeos-ozellik-gelistirme`, küçük ve geri alınabilir bir
+istek. Tavan 3 tur / 12 çağrı / 72 saat / 30 $. Dağıtım onayı yalnız Geliştirme UAT kartından (kapı imzalı).
+Geri dönüş: 1.0.89'a `git reset --hard` (Aşama 1 geri dönüşü); etkin HomeOS koşusu önce panelden iptal edilir.

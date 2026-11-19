@@ -33,9 +33,11 @@ MAKS_AKTIF_KOSU = 5
 # Aşama 1 (kullanıcı kararı 2026-11-19): yalnız salt okunur araştırma akışı. Hat görevi, kalite kapısı (yerel komut) ve
 # dağıtım/yayın onayı içeren hiçbir akış — id'si ne olursa olsun — başlatılamaz ve adımı gönderilmez. Aşama 2 için ön
 # koşullar docs/akis-canliya-alma.md'de: ortak görev dosyası kilidi, güvenli geçici dosya, onay/mühür kimlik bağı.
-ETKIN_AKISLAR = ("ornek-arastirma-ozeti",)
-HAT_ADIMLARI_ACIK = False        # gelistirme_gorevi, quality_gate (yerel komut)
-DAGITIM_ONAYI_ACIK = False       # dagitim/yayin onayı: ayrı karar (onay/mühür kimlik bağı canlıda olmalı)
+# Aşama 2 (bu dal; merge = HomeOS pilotunu açma kararı, kullanıcının): HomeOS geliştirme akışı, hat/kalite kapısı adımları
+# ve dağıtım onayı (yalnız Geliştirme UAT kartından, motor `onay: evet` yazmaz). Yazabilen ajan adımı hâlâ kapalı.
+ETKIN_AKISLAR = ("ornek-arastirma-ozeti", "homeos-ozellik-gelistirme")
+HAT_ADIMLARI_ACIK = True         # gelistirme_gorevi, quality_gate (yerel komut); HAT_KORUMA_SURUMU canlıda değilse yine kapalı
+DAGITIM_ONAYI_ACIK = True       # dagitim/yayin onayı: ayrı karar (onay/mühür kimlik bağı canlıda olmalı)
 YAZAN_AJAN_ACIK = False          # aşama 1 salt okunur: yan etki üretebilen ajan (ajan_yazabilir) adım olamaz
 KAPALI_ONAY_KATEGORILERI = ("dagitim", "yayin")
 DIS_ETKILI_ADIMLAR = ("agent_task", "gelistirme_gorevi", "quality_gate")

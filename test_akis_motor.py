@@ -233,12 +233,38 @@ class KademeliDevreyeAlmaTest(MotorTabani):
         tanimlar, _ = akis_tanim.tanimlari_yukle()
         self.tanimlar.update(tanimlar)
 
+    def asama1(self):
+        """Aşama 1 sabitleri: kapı mekanizması bayraklar kapalıyken sınanır (aşama 2 varsayılanından bağımsız)."""
+        for y in (mock.patch.object(akis_motor, "ETKIN_AKISLAR", ("ornek-arastirma-ozeti",)),
+                  mock.patch.object(akis_motor, "HAT_ADIMLARI_ACIK", False),
+                  mock.patch.object(akis_motor, "DAGITIM_ONAYI_ACIK", False)):
+            y.start()
+            self.addCleanup(y.stop)
+
+    def test_asama2_varsayilanlari(self):
+        """Aşama 2: HomeOS akışı + hat/kapı/dağıtım onayı açık; yazabilen ajan adımı hâlâ kapalı."""
+        self.assertEqual(akis_motor.ETKIN_AKISLAR, ("ornek-arastirma-ozeti", "homeos-ozellik-gelistirme"))
+        self.assertTrue(akis_motor.HAT_ADIMLARI_ACIK and akis_motor.DAGITIM_ONAYI_ACIK)
+        self.assertFalse(akis_motor.YAZAN_AJAN_ACIK)
+        for akis in akis_motor.ETKIN_AKISLAR:
+            self.assertIsNone(akis_motor.akis_engeli(self.tanimlar[akis]), akis)
+
+    def test_homeos_akisi_asama2de_baslar_hat_gorevi_yazar(self):
+        k = self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"})["run_id"]
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"plan": "p", "risk": "dusuk", "yetki_gerekli": False}) + '</akis_cikti>')
+        self.m.tur()
+        self.m.tur()
+        self.assertEqual(len(self.ortam.gorevler), 1)            # uygulama adımı hat görevi açtı
+        self.assertEqual(self.detay(k)["durum"], "calisiyor")
+
     def test_varsayilan_yalniz_arastirma_akisi(self):
-        self.assertEqual(akis_motor.ETKIN_AKISLAR, ("ornek-arastirma-ozeti",))
+        self.asama1()
         self.assertFalse(akis_motor.HAT_ADIMLARI_ACIK)
         self.assertIsNone(akis_motor.akis_engeli(self.tanimlar["ornek-arastirma-ozeti"]))
 
     def test_homeos_akisi_api_seviyesinde_reddedilir(self):
+        self.asama1()
         with self.assertRaises(akis_motor.AkisHatasi) as c:
             self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"})
         self.assertEqual(c.exception.kod, 403)
@@ -246,6 +272,7 @@ class KademeliDevreyeAlmaTest(MotorTabani):
         self.assertEqual(self.ortam.gorevler, {})
 
     def test_yeniden_adlandirilmis_hat_akisi_reddedilir(self):
+        self.asama1()
         import copy
         t = copy.deepcopy(self.tanimlar["homeos-ozellik-gelistirme"])
         t["id"] = "ornek-arastirma-ozeti"                       # izinli id'yi taşıyor ama hat adımı içeriyor
@@ -256,6 +283,7 @@ class KademeliDevreyeAlmaTest(MotorTabani):
         self.assertIn("gelistirme_gorevi", str(c.exception))
 
     def test_dbdeki_eski_kosu_kapali_adimi_gondermez(self):
+        self.asama1()
         with mock.patch.object(akis_motor, "ETKIN_AKISLAR", HerAkis()), mock.patch.object(akis_motor, "HAT_ADIMLARI_ACIK", True), \
                 mock.patch.object(akis_motor, "DAGITIM_ONAYI_ACIK", True):
             k = self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"})["run_id"]
@@ -317,6 +345,7 @@ class KademeliDevreyeAlmaTest(MotorTabani):
         self.assertEqual((r["run_id"], r["tekrar"]), (k, True))
 
     def test_dagitim_onayi_ayri_anahtar(self):
+        self.asama1()
         with mock.patch.object(akis_motor, "HAT_ADIMLARI_ACIK", True):
             self.assertIsNotNone(akis_motor.adim_kapali_mi({"tur": "approval", "kategori": "dagitim"}))
 
