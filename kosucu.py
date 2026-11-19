@@ -12,6 +12,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -394,6 +395,24 @@ def limit_istemi(arg, log_yolu, deneme):
 AKIS_REF_DESENI = re.compile(r"^ak-[0-9a-f]{12}$")
 
 
+class IptalIstegi(BaseException):
+    """Workflow iptali (V1.1 #7): ofis yalnız akis_ref'li koşuya SIGUSR1 yollar. BaseException: ara katmanlardaki
+    'except Exception' yedek zincirine (başka hesap/API) geçmesin."""
+
+
+_IPTAL = {"istendi": False, "yukselt": False}
+
+
+def _iptal_isleyici(signum, frame):
+    _IPTAL["istendi"] = True
+    if _IPTAL["yukselt"]:
+        _IPTAL["yukselt"] = False   # tek kez: temizlik kodunu ikinci sinyal bölmesin
+        raise IptalIstegi()
+
+
+IPTAL_HATASI = "workflow iptal edildi: operatör koşuyu durdurdu (yarım kalmış yan etki olabilir; kontrol et)"
+
+
 def akis_isaret_yaz(arg, ad, veri):
     """Workflow denemesi (arg.akis_ref) için durum/akis-sonuc/<ref>[.basladi].json. Diğer koşularda hiçbir şey yapmaz.
     Sonuç yalnız kimlik, durum, süre, maliyet ve çıktı yolunu taşır; istem ve tam çıktı yazılmaz."""
@@ -740,6 +759,8 @@ def claude_akis_kos(komut, calisma_dizini, tam_prompt, log, baglam, sayac, env=N
     zamanlayici = threading.Timer(ZAMAN_ASIMI_SN, surec.kill)
     zamanlayici.start()
     try:
+        if _IPTAL["istendi"]:   # sinyal süreç açılırken geldiyse
+            raise IptalIstegi()
         surec.stdin.write(tam_prompt)
         surec.stdin.close()
         for satir in surec.stdout:
@@ -756,6 +777,13 @@ def claude_akis_kos(komut, calisma_dizini, tam_prompt, log, baglam, sayac, env=N
             if isinstance(olay, dict):
                 sonuc = satiri_isle(olay, baglam, sayac) or sonuc
         kod = surec.wait()
+    except BaseException:   # iptal (ya da beklenmeyen hata): claude süreci yetim kalmasın
+        surec.kill()
+        try:
+            surec.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+        raise
     finally:
         zamanlayici.cancel()
     if kod != 0 and not sonuc:
@@ -810,6 +838,9 @@ def kos(arg_dosyasi):
         ortak.olay_yaz({**baglam, "tur": "model_reddedildi", "istenen": reddedilen_model, "model": model})
     komut = komut_kur(ajan, veri.get("varsayilan_yasak_araclar", []), cikti_dizini, butce)
 
+    if isinstance(arg.get("akis_ref"), str) and AKIS_REF_DESENI.match(arg["akis_ref"]):
+        _IPTAL.update(istendi=False, yukselt=False)
+        signal.signal(signal.SIGUSR1, _iptal_isleyici)   # önce yalnız işaret; koşu bloğunda istisnaya döner
     # Kilit beklenirken de ajan (süreç yaşadığı sürece) meşgul sayılsın
     ortak.durum_yaz(durum_id, {"durum": "basliyor", "kosu_id": kosu_id, "pid": os.getpid(),
                                "baslangic_ts": time.time()})
@@ -832,6 +863,10 @@ def kos(arg_dosyasi):
     sonuc, hata, limit_dustu = None, None, False
     sayac = {"tarih": ortak.bugun(), "tekil": token_sayac.MesajTekil()}
     try:
+        _IPTAL["yukselt"] = True
+        if _IPTAL["istendi"]:
+            _IPTAL["yukselt"] = False
+            raise IptalIstegi()
         with open(log_yolu, "w", encoding="utf-8") as log:
             calisma_dizini = YALIN_DIZIN if ajan.get("yalin") else ajan["cwd"]
             os.makedirs(calisma_dizini, exist_ok=True)
@@ -851,9 +886,14 @@ def kos(arg_dosyasi):
                     sonuc, hata, limit_dustu = yedek, None, False
                 else:
                     hata = yedek_hata
+    except IptalIstegi:
+        _IPTAL["yukselt"] = False
+        sonuc, hata, limit_dustu = None, IPTAL_HATASI, False   # iptal: limit kuyruğuna ya da yedeğe gitmez
     except Exception as e:  # koşu ne olursa olsun bitiş olayı yazılmalı
+        _IPTAL["yukselt"] = False
         hata = maskele(f"{type(e).__name__}: {e}")
     finally:
+        _IPTAL["yukselt"] = False
         os.close(kilit)
 
     sonra = None

@@ -93,6 +93,10 @@ class SahteOrtam:
     def arg_dosyasi_var(self, ref):
         return ref in self.arglar
 
+    def ajan_durdur(self, ref):
+        self.durdurulan = getattr(self, "durdurulan", []) + [ref]
+        return getattr(self, "durdur_sonucu", (False, "süreç yok"))
+
     def ajan_ciktisi_oku(self, yol):
         return self.ciktilar[yol]
 

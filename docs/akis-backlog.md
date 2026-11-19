@@ -21,7 +21,7 @@
    motor kilidini almaz). Daha dar çözüm: denemeyi DB'de "sahiplenildi" işaretle, çağrıdan sonra yeniden kontrol et.
 6. ~~**UAT kartında workflow uyarısı**~~ — V1.1: `Motor.hat_karti_durumu` + kart uyarısı (kapı bekleniyor / onay bekliyor / kapandı / okunamadı):: `kaynak: akis` görevlerinde Geliştirme kartı "kalite kapısı bekleniyor" göstersin.
    Şu an kapıdan önce elle onay yalnız sonradan `erken_onay` olarak işaretleniyor.
-7. **Çalışan koşuyu iptal**: iptal şimdilik çalışan ajanı durdurmuyor. tmux penceresini kapatmak + `kosucu` sinyal
+7. ~~**Çalışan koşuyu iptal**~~ — V1.1: doğrulanmış SIGUSR1 + kosucu iptal yolu (yedeğe/limite geçmez):: iptal şimdilik çalışan ajanı durdurmuyor. tmux penceresini kapatmak + `kosucu` sinyal
    yakalayıp bitiş yazmak (yarım yan etkiler için yine manual_review).
 8. ~~**Hat ara durumları**~~ — V1.1: deneme tutamacında `hat: {durum, deneme}`, değişince `hat_ilerledi` olayı; karar vermez:: hat `calisiyor`/`deneme` alanlarını motor adım ilerlemesine yansıtsın (şimdi yalnız son durum).
 9. ~~**Operatör kararları**~~ — V1.1: `basarili_say` (yalnız başarısız agent_task, kapı + gerekçe) ve `ek_butce` (migration 4, en çok 2×):: `inceleme`de "adımı başarılı say (gerekçe zorunlu, kapı imzalı)" ve "ek bütçe ver" eylemleri.

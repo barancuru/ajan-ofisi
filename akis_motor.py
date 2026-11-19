@@ -588,8 +588,17 @@ class Motor:
                     notlar.append(f"{d['adim_id']}: kuyruktan çıkarıldı")
                     if d["durum"] == "kuyrukta":   # hiç koşmadı: tahmini maliyeti serbest bırak
                         iade += d["tahmini_usd"] or 0
+                    continue
+                # V1.1 #7: çalışan koşuya doğrulanmış iptal sinyali; doğrulanamazsa dokunulmaz (fail-closed)
+                try:
+                    durdu, neden = self.ortam.ajan_durdur(d["ref"])
+                except Exception as e:  # noqa: BLE001 - iptal commit edildi
+                    durdu, neden = False, type(e).__name__
+                if durdu:
+                    notlar.append(f"{d['adim_id']}: çalışan ajan koşusuna durdurma sinyali gönderildi; "
+                                  "yarım kalmış yan etki olabilir, kontrol et")
                 else:
-                    notlar.append(f"{d['adim_id']}: çalışan ajan koşusu durdurulmadı; bitince sonucu yok sayılır")
+                    notlar.append(f"{d['adim_id']}: çalışan ajan koşusu durdurulamadı ({neden}); bitince sonucu yok sayılır")
         # iptal commit edildi: bundan sonraki hata yanıtı 500'e çevirmemeli (tekrar deneyen 409 alırdı)
         try:
             self._islem_iade(kosu_id, iade, "; ".join(notlar) or "operatör iptal etti")

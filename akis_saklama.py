@@ -5,7 +5,7 @@ ve zamanlanmış değildir (açılması kullanıcı kararı). Sıra her koşu i�
 tek işlemde koşulları yeniden kontrol edip DB satırlarını sil → sonuç dosyalarını sil. Arşiv yazılamazsa o koşu
 silinmez. Arşiv kalıcıdır; ayrıca silinmez.
 
-Kaldırılmayanlar: etkin koşular, uçuşta denemesi kalan bitmiş koşular (iptal edilmiş ama ajanı hâlâ koşan),
+Kaldırılmayanlar: etkin koşular, uçuşta (gonderiliyor|kuyrukta|calisiyor) denemesi kalan bitmiş koşular,
 bitiş zamanı olmayanlar. Sahipsiz sonuç dosyası (ref DB'de yok) yalnız N günden eskiyse ve adı ref desenine uyuyorsa.
 
     python3 akis_saklama.py [--gun 90]            # kuru koşu

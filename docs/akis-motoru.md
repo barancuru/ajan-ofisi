@@ -174,8 +174,12 @@ kosucu sonucu `son: false` yazar; motor aynı denemeyi beklemeyi sürdürür, ke
 - Sonuç işleme `UPDATE denemeler ... WHERE durum IN (uçuşta)` ile tek seferliktir. `olaylar.anahtar` UNIQUE olduğu
   için aynı olay iki kez yayınlanmaz.
 - Duraklatma yeni adım başlatmaz, uçuştaki sonuçları toplamayı sürdürür.
-- İptal kuyruktaki denemeyi kuyruktan ve limit-bekleyen'den çıkarır. Çalışan ajan koşusu **durdurulmaz**; sonucu
-  `yok_sayildi` olur. Hat görevi sürer ve Geliştirme sekmesinden yönetilir. Panel ve olaylar bunu açıkça söyler.
+- İptal kuyruktaki denemeyi kuyruktan ve limit-bekleyen'den çıkarır. Çalışan ajan koşusuna (V1.1) `SIGUSR1` gider:
+  süreç kosucu'nun `<ref>.basladi.json` işaretinden bulunur ve `/proc/<pid>/cmdline` ile doğrulanır (bu koşunun arg
+  dosyasıyla `kosucu.py`); doğrulanamazsa sinyal gönderilmez ve not "durdurulamadı" der, sonuç yok sayılır. kosucu
+  sinyali yalnız `akis_ref`'li koşuda dinler: claude sürecini öldürür, iptal hatasıyla bitiş yazar, ikinci hesaba,
+  API/Codex yedeğine ya da limit kuyruğuna geçmez. Yarım kalmış yan etki olabilir: not bunu söyler, operatör kontrol
+  eder (koşu zaten `iptal`). Hat görevi sürer ve Geliştirme sekmesinden yönetilir.
 
 ## Operatör kararları (V1.1)
 

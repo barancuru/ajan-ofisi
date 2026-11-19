@@ -214,6 +214,33 @@ class OfisOrtami:
                     pass
         return cikti
 
+    def ajan_durdur(self, ref):
+        """V1.1 #7: çalışan workflow ajan koşusuna iptal sinyali (SIGUSR1). Süreç kosucu'nun başlangıç işaretinden
+        bulunur ve /proc'tan doğrulanır: komut satırı bu koşunun arg dosyasıyla kosucu.py olmalı (PID yeniden
+        kullanımına ve sahte işarete karşı). Doğrulanamazsa sinyal YOK: dönen (False, neden)."""
+        import signal
+        if not isinstance(ref, str) or not akis_motor.REF_DESENI.match(ref):
+            return False, "geçersiz ref"
+        isaret = akis_motor._json_oku(os.path.join(akis_motor.sonuc_dizini(), f"{ref}.basladi.json")) or {}
+        pid, kosu_id = isaret.get("pid"), isaret.get("kosu_id")
+        if isaret.get("ref") != ref or not isinstance(pid, int) or isinstance(pid, bool) or pid <= 1 \
+                or not isinstance(kosu_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,120}", kosu_id):
+            return False, "başlangıç işareti yok ya da geçersiz"
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                argv = [a.decode("utf-8", "replace") for a in f.read().split(b"\0") if a]
+        except OSError:
+            return False, "süreç yok (bitmiş olabilir)"
+        arg_yolu = os.path.join(ortak.KOSU_DIZINI, f"{kosu_id}.arg.json")
+        if not (len(argv) >= 2 and os.path.basename(argv[-2]) == "kosucu.py"
+                and os.path.realpath(argv[-1]) == os.path.realpath(arg_yolu)):
+            return False, "süreç bu koşunun kosucu'su değil"
+        try:
+            os.kill(pid, signal.SIGUSR1)
+        except OSError as e:
+            return False, f"sinyal gönderilemedi ({type(e).__name__})"
+        return True, None
+
     def arg_dosyasi_var(self, ref):
         """tmux'a verilmiş ama iz bırakmamış koşu (yeniden başlatma kurtarması). Yalnız son 2 günün dosyaları."""
         import time

@@ -695,7 +695,7 @@ class KuyrukIptalSiralamaTest(OfisTabani):
         self.assertEqual(baslatma_anindaki_durum, ["calisiyor"])        # iptal commit'inden sonra başlatma yok
         d = self.m.detay(k)
         self.assertEqual(d["durum"], "iptal")
-        self.assertIn("çalışan ajan koşusu durdurulmadı", d["neden"]["metin"])   # dürüst not: koşu açılmıştı
+        self.assertIn("çalışan ajan koşusu durdurulamadı", d["neden"]["metin"])   # dürüst not: koşu açılmıştı
         self.assertEqual(sunucu.kuyruk_oku(), [])
 
 
