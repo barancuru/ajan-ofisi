@@ -4238,13 +4238,15 @@ async function akisSayfasi() {
   const form = el('form', 'kart gelistirme-form akis-form'); form.autocomplete = 'off';
   form.append(el('h4', null, 'Akış başlat'));
   const sec = el('select'); sec.setAttribute('aria-label', 'Akış');
-  d.tanimlar.forEach(t => { const o = el('option', null, t.ad + ' · v' + t.surum); o.value = t.id; sec.append(o); });
+  d.tanimlar.forEach(t => { const o = el('option', null, t.ad + ' · v' + t.surum + (t.etkin ? '' : ' (kapalı)')); o.value = t.id; o.disabled = !t.etkin; sec.append(o); });
+  const ilkEtkin = d.tanimlar.find(t => t.etkin); if (ilkEtkin) sec.value = ilkEtkin.id;
   const aciklama = el('small', 'alt'); const alanlar = el('div', 'gelistirme-form'); alanlar.style.margin = '0';
   const idem = 'ui-' + (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2));
   const ciz = () => {
     const t = d.tanimlar.find(x => x.id === sec.value); alanlar.replaceChildren();
     if (!t) return;
-    aciklama.textContent = t.aciklama + ' Sınırlar: ' + t.sinirlar.max_ajan_cagrisi + ' ajan çağrısı, ' + t.sinirlar.max_maliyet_usd + ' $, döngü ' + t.sinirlar.max_iterasyon + ' iterasyon.';
+    gonder.disabled = !t.etkin;
+    aciklama.textContent = (t.etkin ? '' : 'Kapalı: ' + t.engel + '. ') + t.aciklama + ' Sınırlar: ' + t.sinirlar.max_ajan_cagrisi + ' ajan çağrısı, ' + t.sinirlar.max_maliyet_usd + ' $, döngü ' + t.sinirlar.max_iterasyon + ' iterasyon.';
     Object.entries(t.girdiler).forEach(([ad, g]) => {
       const x = g.tur === 'metin' && (g.maks || 0) > 200 ? el('textarea') : el('input');
       x.name = ad; x.placeholder = (g.aciklama || ad) + (g.maks ? ' (en çok ' + g.maks + ')' : ''); x.setAttribute('aria-label', g.aciklama || ad);
@@ -4252,8 +4254,8 @@ async function akisSayfasi() {
       alanlar.append(x);
     });
   };
-  sec.onchange = ciz; ciz();
   const gonder = el('button', 'koyu', 'Başlat'); gonder.type = 'submit';
+  sec.onchange = ciz; ciz();
   form.append(sec, aciklama, alanlar, gonder);
   form.onsubmit = async e => {
     e.preventDefault(); gonder.disabled = true;

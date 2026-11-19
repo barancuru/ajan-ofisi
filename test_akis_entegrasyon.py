@@ -22,7 +22,12 @@ import sunucu
 
 
 class OfisTabani(unittest.TestCase):
+    KAPI_ACIK = True
+
     def setUp(self):
+        if self.KAPI_ACIK:
+            from test_akis_motor import kapiyi_ac
+            kapiyi_ac(self)
         self.d = tempfile.mkdtemp()
         self.addCleanup(__import__("shutil").rmtree, self.d, True)
         self.proje = os.path.join(self.d, "proje")
@@ -752,6 +757,20 @@ class ApiTest(OfisTabani):
         kod, v = self.iste("POST", "/api/akis/onay", {"run_id": run, "adim": "onay", "karar": "evet"},
                            basliklar={"X-Ofis-Kapi": "tahmin"})
         self.assertEqual(kod, 403)
+
+    def test_kapali_akis_api_403_ve_listede_neden(self):
+        with mock.patch.object(akis_motor, "ETKIN_AKISLAR", ("ornek-arastirma-ozeti",)), \
+                mock.patch.object(akis_motor, "HAT_ADIMLARI_ACIK", False):
+            kod, v = self.iste("GET", "/api/akis")
+            t = {x["id"]: x for x in v["tanimlar"]}
+            self.assertTrue(t["ornek-arastirma-ozeti"]["etkin"])
+            self.assertFalse(t["homeos-ozellik-gelistirme"]["etkin"])
+            self.assertIn("etkin değil", t["homeos-ozellik-gelistirme"]["engel"])
+            kod, v = self.iste("POST", "/api/akis/baslat", {"akis": "homeos-ozellik-gelistirme",
+                                                            "girdiler": {"baslik": "Rapor", "istek": "x"}})
+            self.assertEqual(kod, 403)
+            self.assertEqual(self.iste("POST", "/api/akis/baslat", {"akis": "ornek-arastirma-ozeti",
+                                                                    "girdiler": {"konu": "x"}})[0], 202)
 
     def test_eski_uclar_calisiyor(self):
         self.assertEqual(self.iste("GET", "/api/ajanlar")[0], 200)

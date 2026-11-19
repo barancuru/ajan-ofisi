@@ -2336,6 +2336,7 @@ def akis_listesi_yaniti():
     tanimlar, hatalar = m.tanimlar()
     return {"tanimlar": [{"id": t["id"], "surum": t["surum"], "ad": t["ad"], "aciklama": t["aciklama"],
                           "girdiler": t["girdiler"], "sinirlar": t["sinirlar"],
+                          "etkin": akis_motor.akis_engeli(t) is None, "engel": akis_motor.akis_engeli(t),
                           "adimlar": [{"id": a["id"], "ad": a["ad"], "tur": a["tur"]} for a in t["adimlar"]]}
                          for t in tanimlar.values()],
             "gecersiz": [{"dosya": d, "hata": h} for d, h in hatalar.items()],

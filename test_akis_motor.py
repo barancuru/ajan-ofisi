@@ -148,8 +148,25 @@ class SahteOrtam:
             self.muhurler.add(("homeos", "0.10.1", sha))
 
 
+class HerAkis(tuple):
+    """Testlerde kademeli devreye alma kapısını açar (her id etkin)."""
+    def __contains__(self, _):
+        return True
+
+
+def kapiyi_ac(test):
+    for y in (mock.patch.object(akis_motor, "ETKIN_AKISLAR", HerAkis()),
+              mock.patch.object(akis_motor, "HAT_ADIMLARI_ACIK", True)):
+        y.start()
+        test.addCleanup(y.stop)
+
+
 class MotorTabani(unittest.TestCase):
+    KAPI_ACIK = True   # mevcut senaryolar pilotu ve rastgele id'li tanımları sınar; kapalı kapı KademeliDevreyeAlmaTest'te
+
     def setUp(self):
+        if self.KAPI_ACIK:
+            kapiyi_ac(self)
         self.d = tempfile.TemporaryDirectory()
         self.yama = mock.patch.object(ortak, "DURUM_DIZINI", self.d.name)
         self.yama.start()
@@ -192,6 +209,65 @@ class MotorTabani(unittest.TestCase):
 
     def adim(self, kosu, adim_id):
         return next(a for a in self.detay(kosu)["adimlar"] if a["id"] == adim_id)
+
+
+class KademeliDevreyeAlmaTest(MotorTabani):
+    """Aşama 1 (fail-closed): yalnız ornek-arastirma-ozeti; hat/kapı/dağıtım adımı içeren akış id'si ne olursa olsun kapalı."""
+    KAPI_ACIK = False
+
+    def setUp(self):
+        super().setUp()
+        tanimlar, _ = akis_tanim.tanimlari_yukle()
+        self.tanimlar.update(tanimlar)
+
+    def test_varsayilan_yalniz_arastirma_akisi(self):
+        self.assertEqual(akis_motor.ETKIN_AKISLAR, ("ornek-arastirma-ozeti",))
+        self.assertFalse(akis_motor.HAT_ADIMLARI_ACIK)
+        self.assertIsNone(akis_motor.akis_engeli(self.tanimlar["ornek-arastirma-ozeti"]))
+
+    def test_homeos_akisi_api_seviyesinde_reddedilir(self):
+        with self.assertRaises(akis_motor.AkisHatasi) as c:
+            self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"})
+        self.assertEqual(c.exception.kod, 403)
+        self.assertEqual(self.depo.kosular(), [])
+        self.assertEqual(self.ortam.gorevler, {})
+
+    def test_yeniden_adlandirilmis_hat_akisi_reddedilir(self):
+        import copy
+        t = copy.deepcopy(self.tanimlar["homeos-ozellik-gelistirme"])
+        t["id"] = "ornek-arastirma-ozeti"                       # izinli id'yi taşıyor ama hat adımı içeriyor
+        self.tanimlar["ornek-arastirma-ozeti"] = t
+        with self.assertRaises(akis_motor.AkisHatasi) as c:
+            self.m.baslat("ornek-arastirma-ozeti", {"baslik": "Rapor", "istek": "x"})
+        self.assertEqual(c.exception.kod, 403)
+        self.assertIn("gelistirme_gorevi", str(c.exception))
+
+    def test_dbdeki_eski_kosu_kapali_adimi_gondermez(self):
+        with mock.patch.object(akis_motor, "ETKIN_AKISLAR", HerAkis()), mock.patch.object(akis_motor, "HAT_ADIMLARI_ACIK", True):
+            k = self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"})["run_id"]
+            self.m.tur()
+            self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"plan": "p", "risk": "dusuk", "yetki_gerekli": False}) + '</akis_cikti>')
+        self.m.tur()                                             # kapı kapalıyken hat adımına gelindi
+        d = self.detay(k)
+        self.assertEqual((d["durum"], d["neden"]["sebep"]), ("inceleme", "kapali"))
+        self.assertEqual(self.ortam.gorevler, {})                # hat görevi yazılmadı
+        with self.assertRaises(akis_motor.AkisHatasi):
+            self.m.devam(k, "yeniden_dene")
+
+    def test_izinsiz_id_ile_dbdeki_kosu_ajan_adimi_da_gondermez(self):
+        t = taban_tanim()
+        self.tanim(t)
+        with mock.patch.object(akis_motor, "ETKIN_AKISLAR", HerAkis()):
+            k = self.m.baslat("deneme", {"konu": "x"})["run_id"]
+        self.m.tur()
+        self.assertEqual(self.ortam.baslatilan, [])
+        self.assertEqual(self.detay(k)["neden"]["sebep"], "kapali")
+
+    def test_arastirma_akisi_calisir(self):
+        k = self.m.baslat("ornek-arastirma-ozeti", {"konu": "x"})["run_id"]
+        self.m.tur()
+        self.assertEqual(len(self.ortam.baslatilan), 1)
+        self.assertEqual(self.detay(k)["durum"], "calisiyor")
 
 
 class SiraliTest(MotorTabani):

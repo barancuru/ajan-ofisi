@@ -29,11 +29,40 @@ IDEM_DESENI = re.compile(r"^[A-Za-z0-9_.:-]{8,80}$")
 BASLAMA_TOLERANS_SN = 180      # başlatıldı ama kosucu henüz işaret yazmadı: bu süre içinde "bilinmeyen" sayılmaz
 BASLAMADI_MAKS = 5             # hiç başlamamış (tmux/kuyruk dolu/kilit) denemeler politikadan bağımsız en çok bu kadar
 MAKS_AKTIF_KOSU = 5
+# --- Kademeli devreye alma (fail-closed). Açmak gözden geçirilmiş bir KOD değişikliği ister; yapılandırma dosyası yok.
+# Aşama 1 (kullanıcı kararı 2026-11-19): yalnız salt okunur araştırma akışı. Hat görevi, kalite kapısı (yerel komut) ve
+# dağıtım/yayın onayı içeren hiçbir akış — id'si ne olursa olsun — başlatılamaz ve adımı gönderilmez. Aşama 2 için ön
+# koşullar docs/akis-canliya-alma.md'de: ortak görev dosyası kilidi, güvenli geçici dosya, onay/mühür kimlik bağı.
+ETKIN_AKISLAR = ("ornek-arastirma-ozeti",)
+HAT_ADIMLARI_ACIK = False
+KAPALI_ONAY_KATEGORILERI = ("dagitim", "yayin")
+
+
+def adim_kapali_mi(adim):
+    """Aşama 1'de kapalı adım türü: hat görevi, kalite kapısı (yerel komut), dağıtım/yayın onayı."""
+    if HAT_ADIMLARI_ACIK:
+        return None
+    if adim["tur"] in ("gelistirme_gorevi", "quality_gate"):
+        return f"{adim['tur']} adımları bu sürümde kapalı"
+    if adim["tur"] == "approval" and adim.get("kategori") in KAPALI_ONAY_KATEGORILERI:
+        return f"{adim['kategori']} onayı bu sürümde kapalı"
+    return None
+
+
+def akis_engeli(tanim):
+    """Başlatma engeli (metin) ya da None. Hem id izin listesi hem adım türü: yeniden adlandırılmış bir tanım geçemez."""
+    if tanim["id"] not in ETKIN_AKISLAR:
+        return "akış bu sürümde etkin değil (kademeli devreye alma)"
+    for a in tanim["adimlar"]:
+        neden = adim_kapali_mi(a)
+        if neden:
+            return f"{a['id']}: {neden}"
+    return None
 MAKS_ISTEM = ortak.MAKS_GIRDI
 UYANMA_AKTIF_SN = 5
 # Bu incelemelerde "yeniden dene" aynı sonucu verir ya da sınırı aşar. 'tanim' (tanım @inceleme'ye yönlendirdi) ayrıca
 # kaynak adıma göre karar verilir: yan etkisiz adım yeniden denenebilir, yan etkili adım (hat görevi, yazabilen ajan) değil.
-YENIDEN_DENENEMEZ = ("dongu_siniri", "butce", "sure", "erken_onay")   # yayin_takildi denenebilir: onay adımı yan etkisiz
+YENIDEN_DENENEMEZ = ("dongu_siniri", "butce", "sure", "erken_onay", "kapali")   # yayin_takildi denenebilir: onay adımı yan etkisiz
 UYANMA_BOS_SN = 30
 DEGER_DESENLERI = {"surum": re.compile(r"^[0-9.]{1,24}$"), "dal": re.compile(r"^beyin/[a-z0-9-]{1,80}$"),
                    "sha256": re.compile(r"^[0-9a-f]{64}$")}
@@ -273,6 +302,9 @@ class Motor:
         if not tanim:
             raise AkisHatasi(404 if f"{akis_id}.json" not in hatalar else 409,
                              "bilinmeyen akış" if f"{akis_id}.json" not in hatalar else "akış tanımı geçersiz")
+        engel = akis_engeli(tanim)
+        if engel:
+            raise AkisHatasi(403, engel)
         try:
             girdi = akis_tanim.girdileri_dogrula(tanim, girdiler)
         except akis_tanim.TanimHatasi as e:
@@ -812,6 +844,12 @@ class Motor:
             r = self._adim_al(b, kosu_id, adim_id)
             if r["durum"] != "hazir":
                 return False
+            # gönderim anında da (DB'deki eski koşu, yeniden dene, döngü): kapalı akış/adım dış dünyaya dokunmaz
+            kapali = ("akış bu sürümde etkin değil" if kosu["akis_id"] not in ETKIN_AKISLAR else adim_kapali_mi(adim))
+            if kapali:
+                self._adim_yaz(b, kosu_id, adim_id, durum="inceleme", hata=kapali)
+                self._incelemeye_al(b, kosu, "kapali", f"{adim_id}: {kapali}", adim_id)
+                return True
             if adim["tur"] == "condition":
                 sonuc = self.kosul_degerlendir(self._baglam(b, kosu), adim["kosullar"])
                 self._adim_basarili(b, kosu, tanim, adim, {"sonuc": sonuc}, adim["dogru"] if sonuc else adim["yanlis"])
