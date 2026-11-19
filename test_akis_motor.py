@@ -849,6 +849,22 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         self.assertEqual(c.exception.kod, 409)
         self.assertIn("iptal edilmiş", str(c.exception))
 
+    def test_kuyruktan_baslatilamayan_is_baslamadi_sayilir(self):
+        """Sunucu kuyruktaki işi başlatamazsa motora 'başlamadı' sonucu yazar: iade + güvenli yeniden deneme."""
+        self.tanim(taban_tanim())
+        k = self.m.baslat("deneme", {"konu": "x"})["run_id"]
+        self.ortam.davranis = ["kuyruk"]
+        self.m.tur()
+        ref = self.son_ref()
+        self.ortam.kuyruk.discard(ref)
+        os.makedirs(akis_motor.sonuc_dizini(), exist_ok=True)
+        with open(os.path.join(akis_motor.sonuc_dizini(), f"{ref}.json"), "w") as f:
+            json.dump({"ref": ref, "son": True, "durum": "hata", "baslamadi": True, "hata": "kuyruktan başlatılamadı (500)"}, f)
+        self.m.tur()
+        d = self.detay(k)
+        self.assertEqual(self.adim(k, "a")["denemeler"][0]["siniflama"], "baslamadi")
+        self.assertEqual((d["durum"], d["ajan_cagrisi"]), ("calisiyor", 0))   # yan etkili adım bile: başlamamış, iade
+
     def test_baslatma_on_kosul_hatasi_butce_harcamaz(self):
         """Hat adımı ön koşulda (kart UAT değil) başlamazsa ayrılan çağrı/tahmin iade edilir."""
         tanimlar, _ = akis_tanim.tanimlari_yukle()
@@ -870,6 +886,29 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         self.assertEqual((d["durum"], d["neden"]["sebep"]), ("inceleme", "kaynak"))
         self.assertEqual(d["ajan_cagrisi"], 2)             # planlama + uygulama; düzeltme sayılmadı
         self.assertAlmostEqual(d["tahmini_usd"], 6.0)      # yalnız uygulamanın hat tahmini
+
+    def test_duzeltme_kapinin_test_etmedigi_surumu_reddetmez(self):
+        """Kapı A sürümünü test edip kaldı; kart B sürümüyle UAT'ye döndü: düzeltme B'yi A'nın raporuyla reddetmez."""
+        tanimlar, _ = akis_tanim.tanimlari_yukle()
+        self.tanimlar.update(tanimlar)
+        k = self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"})["run_id"]
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"plan": "p", "risk": "dusuk", "yetki_gerekli": False}) + '</akis_cikti>')
+        self.m.tur()
+        self.ortam.hat_uat("G0.md", sha="a" * 64)
+
+        def kapi(argv):
+            if "php-lint" in argv:
+                self.ortam.gorevler["G0.md"]["durum"] = "calisiyor"
+                return 1
+            return 0
+        self.ortam.komut_kodu = kapi
+        self.m.tur()                                              # A kaldı, düzeltme ön koşulda kaldı
+        self.ortam.hat_uat("G0.md", sha="b" * 64)                 # kart B ile UAT'ye döndü
+        with self.assertRaises(akis_motor.AkisHatasi) as c:
+            self.m.devam(k, "yeniden_dene")
+        self.assertIn("test etmedi", str(c.exception))
+        self.assertEqual(self.ortam.reddler, [])
 
     def test_duzeltme_hedef_karti_uat_degilse_yeniden_dene_409(self):
         k = self.hat_incelemede()

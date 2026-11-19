@@ -374,12 +374,18 @@ class Motor:
                                                   "ya da iptal et")
                         tutamaci_yok = not self._onceki_hat_karti(b, kosu_id, adim_id,
                                                                   self._adim_al(b, kosu_id, adim_id)["iterasyon"])
-                        if kaynak_adim.get("mod") == "duzeltme" and tutamaci_yok and (
-                                fm.get("durum") != "uat" or fm.get("onay") == "evet"):
-                            # _gelistirme_gonder ön koşulları: yeniden deneme ancak kart UAT'de ve onaysızsa işe yarar
-                            raise AkisHatasi(409, f"düzeltilecek kart UAT'de değil ya da onaylı (durum "
-                                                  f"{fm.get('durum') or '-'}, onay {fm.get('onay') or '-'}): kart UAT'ye "
-                                                  "gelince yeniden dene")
+                        if kaynak_adim.get("mod") == "duzeltme" and tutamaci_yok:
+                            # _gelistirme_gonder ön koşulları: yeniden deneme ancak işe yarayabilecekse
+                            if fm.get("onay") == "evet" or fm.get("durum") == "bitti":
+                                raise AkisHatasi(409, "düzeltilecek kart onaylanmış ya da yayına çıkmış: düzeltme yapılamaz; "
+                                                      "başarısız say ya da iptal et")
+                            if fm.get("durum") != "uat":
+                                raise AkisHatasi(409, f"düzeltilecek kart UAT'de değil (durum {fm.get('durum') or '-'}): "
+                                                      "kart UAT'ye gelince yeniden dene")
+                            test_edilen = (self._son_basarili_cikti(b, kosu_id, kaynak_adim["hedef_adim"]) or {}).get("sha256")
+                            if test_edilen and fm.get("sha256") != test_edilen:
+                                raise AkisHatasi(409, "kart yeni bir sürümde: kalite kapısı bu sürümü test etmedi; eski "
+                                                      "rapora göre reddedilmez. Başarısız say/iptal et ya da yeni koşu başlat")
                 if neden.get("sebep") == "yayin_takildi":
                     izle = akis_tanim.adim_bul(self._tanim(kosu), adim_id).get("izle_adim")
                     t = self._son_tutamac(b, kosu_id, izle) if izle else None
@@ -880,6 +886,9 @@ class Motor:
             hazirlik = None
             if adim["tur"] == "gelistirme_gorevi" and adim["mod"] == "duzeltme":
                 hazirlik = self._son_tutamac(b, kosu_id, adim["hedef_adim"])
+                if hazirlik:   # kapının test ettiği paket: düzeltme yalnız onu reddeder
+                    hazirlik = {**hazirlik, "test_edilen_sha": (self._son_basarili_cikti(b, kosu_id, adim["hedef_adim"])
+                                                                or {}).get("sha256")}
             if adim["tur"] == "quality_gate":
                 hazirlik = {"kaynak": self._son_basarili_cikti(b, kosu_id, adim["kaynak_adim"]) if adim["kaynak_adim"] else None,
                             "tutamac": self._son_tutamac(b, kosu_id, adim["kaynak_adim"]) if adim["kaynak_adim"] else None,
@@ -1076,6 +1085,8 @@ class Motor:
                 return ("basarili", cikti, maliyet, None)
             except akis_veri.VeriHatasi as e:
                 return ("sir" if e.tur == "sir" else "kalici", None, maliyet, str(e))
+        if sonuc.get("baslamadi") is True:   # sunucu kuyruğu yazdı: koşu hiç başlamadı
+            return ("baslamadi", None, None, sonuc.get("hata") or "kuyruktan başlatılamadı")
         return (hata_sinifla(sonuc.get("hata")), None, maliyet, sonuc.get("hata") or "ajan hata ile bitti")
 
     # ---- gelistirme_gorevi (beyin hattı adaptörü)
@@ -1111,6 +1122,9 @@ class Motor:
                     raise BaslatmaHatasi(423, "görev elle onaylandı ya da yayına geçti; workflow reddetmez")
                 if fm.get("durum") != "uat":
                     raise BaslatmaHatasi(409, f"görev UAT'de değil (durum: {fm.get('durum') or '-'})")
+                if hedef_tutamac.get("test_edilen_sha") and fm.get("sha256") != hedef_tutamac["test_edilen_sha"]:
+                    raise BaslatmaHatasi(409, "kart yeni bir sürümde: kalite kapısı bu sürümü test etmedi, eski rapora göre "
+                                              "reddedilmez")
                 not_, _ = self._sablon(adim["geri_bildirim"], baglam, alinti=True)
                 self.ortam.gelistirme_reddet(dosya, f"(workflow {ref})\n\n{not_}"[:ortak.MAKS_GIRDI])
                 tutamac = {"dosya": dosya, "onceki_sha": fm.get("sha256"), "reddedildi": True}
@@ -1385,6 +1399,8 @@ class Motor:
                 if sinif == "basarili":
                     self._adim_basarili(b, kosu, tanim, adim, cikti)
                 else:
+                    if sinif == "baslamadi":
+                        kosu = self._baslamayan_cagriyi_dus(b, kosu, d)
                     self._adim_hatasi(b, kosu, tanim, adim, sinif, hata)
                 return
             if adim["tur"] == "gelistirme_gorevi" and durum == "bitti":

@@ -150,7 +150,10 @@ kosucu sonucu `son: false` yazar; motor aynı denemeyi beklemeyi sürdürür, ke
   okunamıyor ya da takılıysa, düzeltmede hedef kart iptal edilmişse "Yeniden dene" 409 verir (başarısız say/iptal ya
   da yeni koşu); düzeltme adımında hedef kart UAT'de değil ya da onaylıysa da 409. Devam ile tur arasında yeniden
   takılan/okunamayan kart için deneme harcanmadan `kaynak` incelemesi. Başlatma hatasında (ön koşul, yetki, tmux,
-  istem; dış işlem yapılmamış) ayrılan ajan çağrısı ve tahmin her zaman iade edilir.
+  istem; dış işlem yapılmamış) ayrılan ajan çağrısı ve tahmin her zaman iade edilir. Sunucu kuyruğu bir workflow
+  işini başlatamazsa (tmux, ajan yok) motora `baslamadi` sonucu yazar: iade ve güvenli yeniden deneme.
+- Düzeltme adımı yalnız kalite kapısının test ettiği paketi (sha) reddeder; kart bu arada yeni bir sürüme geçtiyse
+  reddetmez, `kaynak` incelemesi (yeniden dene 409: yeni sürüm kapıdan geçmedi).
 - Yayın kanıtı eksikse (`durum: bitti` ama mühür/etiket yok) `yayin_kaniti_yok` olayı bir kez yazılır, onay verilmez.
 - Güvenilen paket: motor UAT'de kartın (sürüm, sha) değerini hattın paket mührüyle doğrulayıp kaydeder (uyuşmazsa
   `kaynak` incelemesi). **Onay kaydı yalnız bu paketle aranır**: kayıtlar proje-sürüme bağlıdır, göreve değil; kart

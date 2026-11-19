@@ -471,6 +471,13 @@ def akis_ref_durumu(ref):
         return "bilinmiyor"
 
 
+def _akis_baslamadi(k, metin):
+    """Kuyruktan düşürülen workflow işi hiç başlamadı: motor 'bilinmeyen' saymasın, iade edip güvenle yeniden denesin."""
+    if k.get("akis_ref"):
+        kosucu.akis_isaret_yaz({"akis_ref": k["akis_ref"], "kosu_id": None}, "",
+                               {"son": True, "durum": "hata", "baslamadi": True, "hata": metin})
+
+
 def kuyrugu_isle():
     """Kuyruktaki işleri sırayla dener; ajan (ya da alt yuvası) boşsa başlatır. Model çağırmaz, yalnız koşu açar.
     Limit yüzünden yeniden kuyruğa giren iş (sonra) sıfırlanma saatine ve bir Pro hesabı açılana dek bekler."""
@@ -504,6 +511,7 @@ def kuyrugu_isle():
             if not ajan or k["ajan"] in ortak.ATANAMAZ or not ajan["kurulu"]:
                 ortak.olay_yaz({"tur": "hata", "ajan": k["ajan"], "kuyruk_id": k["id"],
                                 "detay": "kuyruktaki iş düşürüldü: ajan yok ya da kurulu değil"})
+                _akis_baslamadi(k, "kuyruktaki iş düşürüldü: ajan yok ya da kurulu değil")
                 continue
             try:
                 b = _baslat_kilitli(ajan, k["etiket"], k["prompt"], k["kaynak"], None, k["ust"], True, kuyruktan=True,
@@ -515,6 +523,7 @@ def kuyrugu_isle():
                 else:
                     ortak.olay_yaz({"tur": "hata", "ajan": k["ajan"], "kuyruk_id": k["id"],
                                     "detay": f"kuyruktan başlatılamadı ({e.kod})"})
+                    _akis_baslamadi(k, f"kuyruktan başlatılamadı ({e.kod})")
                 continue
             baslayan.append(b)
             ortak.olay_yaz({"tur": "kuyruktan_basladi", "ajan": k["ajan"], "kuyruk_id": k["id"],
@@ -1931,7 +1940,10 @@ def uat_reddet(dosya, not_, kimden="workflow"):
         if fm.get("onay") == "evet":
             raise IstekHatasi(409, "görev onaylanmış")
         atomik_yaz(yol, on_bilgi_yaz(geri_bildirim_ekle(metin, not_, kimden), "onay", "hayir"))
-    kosucuyu_durt()
+    try:   # ret yazıldı: tetik hatası (systemctl) reddi geri almaz, 5 dk zamanlayıcı yine alır
+        kosucuyu_durt()
+    except (OSError, subprocess.SubprocessError):
+        pass
 
 
 def gelistirme_degistir(veri, kapi_imzasi=""):
