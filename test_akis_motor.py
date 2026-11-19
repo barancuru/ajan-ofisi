@@ -626,21 +626,29 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         self.assertFalse(self.depo.aktif_var_mi())            # tek koşu iptal edildi: etkin koşu yok
         self.m.bekleyen_isler()                               # döngü etkin koşu yokken de bunu çağırır
         self.assertEqual(self.detay(k)["tahmini_usd"], 0)
+        self.assertNotIn("yazılamadı", self.detay(k)["neden"]["metin"])   # yeniden yazılan not hata metni taşımaz
 
     def test_bekleyen_iade_kosu_yoksa_birakilir(self):
         self.m.__dict__["_bekleyen_iadeler"] = {"r000000000000": (1.0, None)}
         self.m.bekleyen_isler()
         self.assertEqual(self.m._bekleyen_iadeler, {})
 
-    def test_motor_hatasi_iyilesince_yeni_hata_gorunur(self):
+    def test_motor_hatasi_degisen_mesaj_ve_gidip_gelen_hata_seyreltilir(self):
         self.tanim(taban_tanim())
         self.m.baslat("deneme", {"konu": "x"})
+        asil = self.m._kosu_isle
         with mock.patch.object(ortak, "olay_yaz") as yaz:
-            with mock.patch.object(self.m, "_kosu_isle", side_effect=KeyError("a")):
+            for i in range(6):
+                if i % 2:
+                    self.m._kosu_isle = asil                  # bir tur iyi, bir tur hata (gidip gelen)
+                else:
+                    self.m._kosu_isle = mock.Mock(side_effect=OSError(f"disk dolu: tmp{i}"))   # değişen mesaj
                 self.m.tur()
-            self.m.tur()                                      # iyileşti
-            with mock.patch.object(self.m, "_kosu_isle", side_effect=KeyError("b")):
-                self.m.tur()
+            self.m._kosu_isle = asil
+            self.assertEqual(sum(1 for c in yaz.call_args_list if c.args[0].get("olay") == "motor_hatasi"), 1)
+            self.saat[0] += 601
+            with mock.patch.object(self.m, "_kosu_isle", side_effect=KeyError("x")):
+                self.m.tur()                                  # başka tür: hemen görünür
             self.assertEqual(sum(1 for c in yaz.call_args_list if c.args[0].get("olay") == "motor_hatasi"), 2)
 
     def test_yayin_kaniti_eksikse_neden_gorunur(self):
@@ -669,10 +677,30 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         self.m.tur()
         self.assertEqual(self.adim(k, "uat_onayi")["durum"], "onay_bekliyor")   # reddedilmez, beklenir
         self.assertTrue(any(o["olay"] == "onay_kaydi_yok" for o in self.ortam.olaylar))
-        self.ortam.onaylar.add(("homeos", "0.10.1", "a" * 64))       # onay kaydı VAR ama yayın takıldı
-        self.ortam.gorevler["G0.md"].update({"durum": "takildi", "onay": "evet"})   # takıldı: kayıt olsa da ret
+        self.ortam.gorevler["G0.md"].update({"durum": "takildi", "onay": "evet"})   # kayıtsız 'evet' + takıldı: ret
         self.m.tur()
         self.assertEqual(self.adim(k, "uat_onayi")["durum"], "basarisiz")
+
+    def test_onayli_kart_yayinda_takilirsa_inceleme(self):
+        """Kapıdan onaylanmış (kayıt var) kart yayında takılırsa ret değil manual_review: 'yeniden dene' ile yayınlanabilir."""
+        tanimlar, _ = akis_tanim.tanimlari_yukle()
+        self.tanimlar.update(tanimlar)
+        k = self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"})["run_id"]
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"plan": "p", "risk": "dusuk", "yetki_gerekli": False}) + '</akis_cikti>')
+        self.m.tur()
+        self.ortam.hat_uat("G0.md")
+        self.m.tur()
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"karar": "gecti", "bulgular": "-"}) + '</akis_cikti>')
+        self.m.tur()
+        self.m.tur()
+        self.ortam.onaylar.add(("homeos", "0.10.1", "a" * 64))
+        self.ortam.gorevler["G0.md"].update({"durum": "takildi", "onay": "evet"})
+        self.m.tur()
+        d = self.detay(k)
+        self.assertEqual((d["durum"], d["neden"]["sebep"]), ("inceleme", "yayin_takildi"))
+        self.assertNotEqual(self.adim(k, "uat_onayi")["durum"], "basarisiz")
 
     def test_iptal_kuyruk_temizligi_db_commit_sonrasi(self):
         self.tanim(taban_tanim())

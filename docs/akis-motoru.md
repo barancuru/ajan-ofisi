@@ -136,7 +136,11 @@ kosucu sonucu `son: false` yazar; motor aynı denemeyi beklemeyi sürdürür, ke
   (`MAKS_KUYRUK`) sayılır; DB uzun süre okunamazsa yeni işler 429 alabilir. "Workflow DB okunamadı" alarmı süreç
   başına değil, sunucu ile systemd tekrar servisi arasında ortak olarak en çok 10 dakikada bir yazılır
   (`durum/akis-alarm.ts`: açılış kimliği + monotonik saat; dosya yazılamazsa süreç içi seyreltme).
-- Motor turunda bir koşunun uzlaştırması hata verirse `motor_hatasi` olayı yazılır, diğer koşular işlenmeye devam eder.
+- Motor turunda bir koşunun uzlaştırması hata verirse `motor_hatasi` olayı (koşu + hata türü başına 10 dakikada bir)
+  yazılır, diğer koşular işlenmeye devam eder. Aynı türden farklı bir hata o 10 dakika içinde ayrıca görünmez.
+- İzlenen dağıtım onayı karar sırası: `onay: hayir`/`reddedildi` → ret; kapıdan onaylı (canlı kayıt var) ama
+  `takildi` → manual_review (`yayin_takildi`, yeniden denenmez: kart Geliştirme sekmesinden yönetilir); kayıtsız
+  `takildi` → ret; kayıt ya da yayın kanıtı → onay; `evet` olmayan `hazir`/`calisiyor` → ret; aksi hâlde beklenir.
   SQLite COMMIT hata verirse işlem geri alınır (bağlantı açık işlemde kalmaz).
 - `POST /api/akis/iptal` iptal commit edildikten sonra hata vermez; ayrıntı okunamazsa yanıt kısmidir:
   `{run_id, durum: "iptal", notlar, adimlar: [], kismi: true}`.

@@ -152,7 +152,8 @@ class Depo:
                 b.close()
             except Exception:  # noqa: BLE001
                 pass
-            self._yerel.b = None
+            if getattr(self._yerel, "b", None) is b:   # gövde yeni bağlantı açtıysa ona dokunma
+                self._yerel.b = None
 
     def migrate(self):
         b = self.baglanti()

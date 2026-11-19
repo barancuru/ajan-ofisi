@@ -33,7 +33,7 @@ MAKS_ISTEM = ortak.MAKS_GIRDI
 UYANMA_AKTIF_SN = 5
 # Bu incelemelerde "yeniden dene" aynı sonucu verir ya da sınırı aşar. 'tanim' (tanım @inceleme'ye yönlendirdi) ayrıca
 # kaynak adıma göre karar verilir: yan etkisiz adım yeniden denenebilir, yan etkili adım (hat görevi, yazabilen ajan) değil.
-YENIDEN_DENENEMEZ = ("dongu_siniri", "butce", "sure", "erken_onay")
+YENIDEN_DENENEMEZ = ("dongu_siniri", "butce", "sure", "erken_onay", "yayin_takildi")
 UYANMA_BOS_SN = 30
 DEGER_DESENLERI = {"surum": re.compile(r"^[0-9.]{1,24}$"), "dal": re.compile(r"^beyin/[a-z0-9-]{1,80}$"),
                    "sha256": re.compile(r"^[0-9a-f]{64}$")}
@@ -375,10 +375,11 @@ class Motor:
         try:
             self._islem_iade(kosu_id, iade, "; ".join(notlar) or "operatör iptal etti")
         except Exception as e:  # noqa: BLE001
+            kaydedilecek = "; ".join(notlar) or "operatör iptal etti"
             notlar.append(f"not/iade yazılamadı ({type(e).__name__}); motor bunları yeniden yazmayı deneyecek")
             bekleyen = self.__dict__.setdefault("_bekleyen_iadeler", {})
             onceki = bekleyen.get(kosu_id, (0.0, None))[0]
-            bekleyen[kosu_id] = (onceki + iade, "; ".join(notlar))
+            bekleyen[kosu_id] = (onceki + iade, kaydedilecek)
             try:
                 ortak.olay_yaz({"tur": "hata", "ajan": "ofis", "detay": f"workflow iptali commit edildi ama not/iade "
                                 f"yazılamadı ({type(e).__name__}); koşu {kosu_id}"})
@@ -520,10 +521,6 @@ class Motor:
             for k in self.depo.kosular(durumlar=akis_db.AKTIF_KOSU, sinir=MAKS_AKTIF_KOSU * 4):
                 try:
                     self._kosu_isle(k["id"])
-                    son = self.__dict__.get("_motor_hatasi_son")
-                    if son:   # iyileşti: sonraki hata hemen görünsün
-                        for anahtar in [a for a in son if a[0] == k["id"]]:
-                            son.pop(anahtar, None)
                 except Exception as e:  # noqa: BLE001 - bir koşunun hatası diğerlerini durdurmasın
                     self._motor_hatasi(k["id"], e)
         finally:
@@ -534,8 +531,13 @@ class Motor:
     def _motor_hatasi(self, kosu_id, e):
         """Koşu+hata türü başına en çok 10 dakikada bir olay (sürekli bozuk koşu her 5 sn'de satır yazmasın).
         Olay yazılamazsa sessiz: yalıtım bozulmasın."""
-        anahtar = (kosu_id, type(e).__name__, str(e)[:80])
+        # anahtar (koşu, hata türü): mesaj değişse (geçici dosya adı, id) de seyreltilir; gidip gelen hata da.
+        # Bedeli: aynı türden farklı bir hata 10 dk içinde ayrıca görünmez (ilk olay türü ve koşuyu zaten söyler).
+        anahtar = (kosu_id, type(e).__name__)
         son = self.__dict__.setdefault("_motor_hatasi_son", {})
+        if len(son) > 200:
+            for a in [a for a, t in son.items() if not 0 <= self.saat() - t < self.MOTOR_HATASI_ARALIK_SN]:
+                son.pop(a, None)
         if anahtar in son and 0 <= self.saat() - son[anahtar] < self.MOTOR_HATASI_ARALIK_SN:
             return
         son[anahtar] = self.saat()
@@ -1165,10 +1167,18 @@ class Motor:
             # görev dosyasındaki 'onay: evet' kapısız yazılabilir: kabul yalnız ofis girişinin yazdığı, mühürlü pakete
             # bağlı canlı onay kaydıyla ya da hattın o kayıtla yaptığı yayın sonucuyla (durum: bitti)
             adaylar = {(paket.get("surum"), paket.get("sha256")), (fm.get("surum"), fm.get("sha256"))}  # yeniden temellendirme sürümü değiştirir
-            # ret önce: takılan/reddedilen ya da 'hayir' kart, eski bir canlı onay kaydı olsa da onay sayılmaz.
-            # 'onay: evet' + hazir/calisiyor (kayıt yok) ret değildir: aşağıda beklenir.
-            red = onay == "hayir" or durum in ("takildi", "reddedildi") or (onay != "evet" and durum in ("hazir", "calisiyor"))
-            kayitli = not red and (any(self.ortam.canli_onay_var(izlenen["proje"], s, h) for s, h in adaylar) or (
+            # Karar sırası: (1) 'hayir'/reddedildi her zaman ret; (2) kapıdan onaylı (kayıt var) ama yayında takıldı →
+            # manual_review (ret değil: 'yeniden dene' ile yayınlanabilir); kayıtsız takıldı → ret; (3) kayıt/yayın kanıtı
+            # → onay; (4) 'evet' olmayan hazir/calisiyor (kart geri döndü) → ret; (5) aksi hâlde beklenir.
+            kesin_red = onay == "hayir" or durum == "reddedildi"
+            kayit = not kesin_red and any(self.ortam.canli_onay_var(izlenen["proje"], s, h) for s, h in adaylar)
+            if durum == "takildi" and kayit:
+                self._incelemeye_al(b, kosu, "yayin_takildi", "kart kapıdan onaylandı ama yayın takıldı; Geliştirme "
+                                    "sekmesinden yeniden dene ya da iptal et, sonra bu koşuyu başarısız say/iptal et",
+                                    adim["id"])
+                return
+            red = kesin_red or durum == "takildi" or (onay != "evet" and durum in ("hazir", "calisiyor"))
+            kayitli = not red and (kayit or (
                 durum == "bitti" and any(self.ortam.yayinlandi(izlenen["proje"], s, paket.get("dal"), h) for s, h in adaylar)))
             if red:
                 self._adim_yaz(b, kosu["id"], adim["id"], durum="basarisiz",

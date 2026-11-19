@@ -4298,7 +4298,7 @@ function akisDugmeler(dt) {
     b.onclick = async () => { if (soru && !confirm(soru)) return; b.disabled = true; if (!await akisIslem(yol, { run_id: id, ...govde }, tamam)) b.disabled = false; }; kutu.append(b); };
   if (dt.durum === 'calisiyor') dug('Duraklat', 'duraklat', {}, null, 'Duraklatıldı: yeni adım başlamaz');
   if (dt.durum === 'duraklatildi') dug('Devam et', 'devam', {}, null, 'Devam ediyor');
-  const sinirda = dt.neden && ['dongu_siniri', 'butce', 'sure', 'erken_onay'].includes(dt.neden.sebep);
+  const sinirda = dt.neden && ['dongu_siniri', 'butce', 'sure', 'erken_onay', 'yayin_takildi'].includes(dt.neden.sebep);
   if (dt.durum === 'inceleme' && !sinirda) {
     dug('Yeniden dene', 'devam', { karar: 'yeniden_dene' }, 'Takılan adım yeni bir denemeyle başlatılsın mı? Yan etkili bir adımsa önce sonucunu kontrol et.');
   }

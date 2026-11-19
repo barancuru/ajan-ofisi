@@ -283,6 +283,13 @@ class DepoTest(unittest.TestCase):
                 raise KeyError("asıl")
         with dp.islem() as b:                                 # yeni bağlantı açılır
             b.execute("SELECT 1")
+        dp2 = akis_db.Depo(self.yol)
+        with self.assertRaises(KeyError):
+            with dp2.islem() as b:
+                dp2.kapat()
+                yeni = dp2.baglanti()                         # gövde yeni bağlantı açtı
+                raise KeyError("asıl")
+        self.assertIs(dp2._yerel.b, yeni)                     # yeni bağlantı sahipsiz bırakılmadı
 
     def test_islem_geri_alinir(self):
         dp = akis_db.Depo(self.yol)
