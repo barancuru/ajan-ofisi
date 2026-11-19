@@ -97,7 +97,8 @@ class KosucuIptalTest(HesapOrtami):
         ajan = {"id": "a", "ad": "A", "oda": "o", "model": "sonnet", "cwd": self.d}
         arg = os.path.join(self.d, "arg.json")
         with open(arg, "w") as f:
-            json.dump({"ajan": "a", "kosu_id": "k1", "prompt": "görev", "akis_ref": REF}, f)
+            json.dump({"ajan": "a", "kosu_id": "k1", "prompt": "görev", "akis_ref": REF, "model": "opus"}, f)
+        beklenen_model = kosucu.model_sec(ajan, "opus")[0]
         zamanlayici = threading.Timer(1.0, os.kill, (os.getpid(), signal.SIGUSR1))
         with mock.patch.object(kosucu.ortak, "ajanlari_yukle", return_value=({"varsayilan_yasak_araclar": []}, {"a": ajan})), \
                 mock.patch.object(kosucu, "api_anahtari", return_value=(None, None)), \
@@ -111,8 +112,10 @@ class KosucuIptalTest(HesapOrtami):
         self.assertLess(time.time() - t0, 20)
         self.assertEqual(self.bitis["hata"], kosucu.IPTAL_HATASI)
         # öldürülen claude result yazmadı: görülen usage'tan kısmi maliyet (sonnet liste fiyatı)
+        # adımın modeli (arg.model) fiyatlanır, ajanın varsayılanı değil
+        self.assertEqual(beklenen_model, "opus")
         self.assertAlmostEqual(self.bitis["sonuc"]["total_cost_usd"], kosucu.token_sayac.usd_tahmini(
-            {"input_tokens": 1000, "output_tokens": 2000}, "sonnet"))
+            {"input_tokens": 1000, "output_tokens": 2000}, "opus"))
         self.assertGreater(self.bitis["sonuc"]["total_cost_usd"], 0)
         self.assertTrue(self.bitis["sonuc"]["is_error"])
         self.assertEqual(len(cocuklar), 1)                 # ikinci hesap/yedek denenmedi
@@ -148,6 +151,38 @@ class MotorIptalNotuTest(unittest.TestCase):
                 d = self_.m.iptal(k)
                 self_.assertEqual(self_.ortam.durdurulan, [self_.son_ref()])
                 self_.assertTrue(any("durdurma sinyali gönderildi" in n for n in d["notlar"]), d["notlar"])
+        r = unittest.TestResult()
+        T().run(r)
+        self.assertTrue(r.wasSuccessful(), r.failures + r.errors)
+
+
+class BostaTaramaTest(unittest.TestCase):
+    def test_etkin_kosu_yokken_dongu_iptal_maliyetini_isler(self):
+        """Daemon etkin koşu yokken tur() çağırmaz; geç maliyet taraması yine koşmalı."""
+        from test_akis_motor import MotorTabani
+
+        class T(MotorTabani):
+            def runTest(self_):
+                from test_akis_birim import taban_tanim
+                t = self_.tanim(taban_tanim())
+                with mock.patch.object(akis_motor, "ETKIN_AKISLAR", (t["id"],)):
+                    k = self_.m.baslat(t["id"], {"konu": "x"})["run_id"]
+                self_.m.tur()
+                self_.m.iptal(k)
+                self_.assertFalse(self_.depo.aktif_var_mi())
+                self_.ajan_bitir(self_.son_ref(), "", durum="hata", hata=kosucu.IPTAL_HATASI, maliyet=0.03)
+                bitti = threading.Event()
+                gercek = self_.m._iptal_maliyetleri
+
+                def izle():
+                    gercek()
+                    bitti.set()
+                self_.m._iptal_maliyetleri = izle
+                self_.m.baslangic_uzlastir = lambda: None
+                with mock.patch.object(akis_motor, "UYANMA_BOS_SN", 0.05):
+                    self_.m.baslat_thread()
+                    self_.assertTrue(bitti.wait(5))
+                self_.assertAlmostEqual(self_.detay(k)["maliyet_usd"], 0.03)
         r = unittest.TestResult()
         T().run(r)
         self.assertTrue(r.wasSuccessful(), r.failures + r.errors)

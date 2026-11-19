@@ -55,7 +55,7 @@ class MaliyetModeliTest(MotorTabani):
                          (5, 0.25, 0.4, 1.0, 1.0, "tavan"))
 
     def test_ajan_adimi_ucuz_gecmisle_tavani_asmaz(self):
-        """Statik 1.0 ile 0.5 $ tavanlı akış, geçmiş ucuz olsa da başlamaz: max_maliyet_usd aşılamaz kalır."""
+        """Statik 1.0 ile 0.5 $ tavanlı akış, geçmiş ucuz olsa da başlamaz: bütçe çağrı başına tavanla kontrol edilir."""
         for _ in range(5):
             self.kos(0.2)
         self.tanim(taban_tanim(id="deneme", sinirlar={"max_maliyet_usd": 0.5}))

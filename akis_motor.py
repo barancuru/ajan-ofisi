@@ -772,6 +772,8 @@ class Motor:
                     aktif = self.depo.aktif_var_mi()
                     if aktif:
                         self.tur()
+                    else:
+                        self._iptal_maliyetleri()   # tek koşu iptal edildiyse etkin koşu kalmaz: geç maliyet yine işlenir
                 except Exception as e:  # noqa: BLE001 - motor sunucuyu düşürmesin
                     import sys
                     sys.stderr.write(f"akis motoru: {type(e).__name__}: {str(e)[:200]}\n")
@@ -1202,7 +1204,7 @@ class Motor:
     def _tahmin(self, adim, b=None, akis_id=None):
         """Bütçe kontrolünde kullanılan tahmin → (usd, kaynak).
         agent_task: statik tahmin = kosucu'nun `--max-budget-usd` sert tavanı ("tavan"); geçmiş ne derse desin bu kalır,
-        böylece `max_maliyet_usd` aşılamaz bir sınır olarak korunur (p90 yalnız maliyet_modeli'nde öngörü olarak görünür).
+        böylece bütçe kontrolü V1 gibi çağrı başına tavanlı kalır (p90 yalnız maliyet_modeli'nde öngörü olarak görünür).
         gelistirme_gorevi: hat turunun sert tavanı yok, 6 $ bir tahmindir: en az MALIYET_ORNEK_MIN ölçüm varsa p90
         ("p90"; tanımdaki `tahmini_usd` yalnız soğuk başlangıç), p90 statiğin MALIYET_TABAN_ORANI'nın altına inmez."""
         statik = self._statik_tahmin(adim)

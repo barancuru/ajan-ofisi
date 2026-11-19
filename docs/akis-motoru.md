@@ -90,7 +90,8 @@ tanımın tamamı kuyruk kapasitesini tüketmez.
   `ts`); motor deneme başlangıcından sonraki kayıtları toplar (`hat_maliyeti` olayı). Kayıt yoksa (eski hat, Codex)
   tahmin gerçekleşmiş sayılır. Sınır aşılacaksa adım başlamaz, koşu `inceleme` (`butce`) olur.
 - **Maliyet modeli (V2):** ajan adımının statik tahmini kosucu'nun `--max-budget-usd` **sert tavanıdır**; bütçe
-  kontrolü ajan adımında hep bunu kullanır (`tahmin_kaynagi: tavan`), böylece `max_maliyet_usd` aşılamaz kalır.
+  kontrolü ajan adımında hep bunu kullanır (`tahmin_kaynagi: tavan`): V1 gibi çağrı başına tavanlı kalır (bir deneme
+  ikinci hesap/API yedeği ya da limit sonrası yeniden koşu içerebilir; her birinin kendi tavanı var).
   Hat turunun (`gelistirme_gorevi`) sert tavanı yok, 6 $ bir tahmindir: aynı akışın aynı adımının en az 5 ölçülmüş
   denemesi varsa (son 50; yalnız `maliyet_usd > 0` gerçek ölçüm) p90 kullanılır (`p90`; en yakın sıra), statiğin
   %10'unun altına inmez; tanımdaki `tahmini_usd` yalnız soğuk başlangıç değeridir. `/api/akis` tanım başına
