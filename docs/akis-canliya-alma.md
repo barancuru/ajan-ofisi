@@ -32,11 +32,23 @@ Açmak yapılandırma değil gözden geçirilmiş bir kod değişikliğidir.
        Eksikse araştırma akışı ilk adımda `yetkisiz` ile durur (güvenli taraf). `arastirmaci`'ya dokunma.
 
 ### Aşama 2 ön koşulları (HomeOS akışı)
-- Beyin hattında (ayrı dal, kullanıcı onayıyla canlıya): ortak görev dosyası kilidi (`fm_set`, `teslim_yaz`, `sed -i`,
-  `bitti/` taşıma, görev açan betikler), güvenli geçici dosya ve symlink reddi, paket mührüne görev kimliği (`.kimlik`).
-- Ofis tarafı aynı kilidi ve güvenli yazımı kullanır; onay kaydına mühürden kimlik kopyalanır; motor mühür kimliği =
-  onay kimliği = kendi izlediği kart olmadıkça onay/yayın kanıtı kabul etmez.
-- Ancak bunlar canlıdayken `ETKIN_AKISLAR`/`HAT_ADIMLARI_ACIK` değiştirilir (ayrı PR).
+- **Beyin hattı** (`~/beyin` deposu, dal `hat-gorev-kilidi`, worktree `~/beyin-koruma`; hazır, canlıda DEĞİL):
+  ortak görev dosyası kilidi (`fm_set`, `teslim_yaz`, eski-paket `sed`, `bitti/` taşıma, görev açan iki Python bloğu),
+  `mktemp`+`mv` atomik yazım ve symlink reddi, `O_EXCL|O_NOFOLLOW` görev açılışı, paket mührüne görev kimliği
+  (`<zip>.kimlik`: gorev, dal, sha256; `.sha256` ve `onay_gecerli` biçimi değişmez), oto-onayda kimlik kopyası,
+  `hassas_degisim`'e `akis_*.py`/`akislar/`, `HAT_KORUMA_SURUMU=1` işareti. Test: `bin/test-hat-koruma` (13/13).
+  `~/beyin` `main`'ine alınması hattı **anında** değiştirir (betik çalışma ağacından koşar): hat boştayken,
+  `beyin-gorev.timer` durdurularak al.
+- **Ofis tarafı** (bu dal, canlıda bayraklar kapalı): `sunucu.gorev_kilidi()` aynı kilit dosyasını alır (30 sn, sonra
+  503); `atomik_yaz` mkstemp + replace, izin korunur; görev okumaları `O_NOFOLLOW`; `canli_onayi_yaz` kimliği mühürden
+  yalnız aynı görev+dal ise `<proje>-<sürüm>.onay.kimlik`'e kopyalar; motor mühür kimliği = onay kimliği = izlediği kart
+  (ve dal) olmadıkça UAT paketi, onay ya da yayın kanıtı kabul etmez.
+- **İkinci katman**: `HAT_ADIMLARI_ACIK`/`DAGITIM_ONAYI_ACIK` açılsa bile canlı `bin/calistir`'da `HAT_KORUMA_SURUMU`
+  yoksa hat/kapı/dağıtım adımları kapalı kalır.
+- Sıra: beyin dalı canlıya → yeni hatla bir HomeOS görevi UAT'ye gelip `.kimlik` yazıldığı görülür → ayrı PR ile
+  `ETKIN_AKISLAR`, `HAT_ADIMLARI_ACIK`, `DAGITIM_ONAYI_ACIK`, `YAZAN_AJAN_ACIK` (gerekiyorsa) değiştirilir.
+- Kalan (kilitlenemez): ajanların kendi araçlarıyla görev dosyasına yaptığı yazımlar (teşhis ajanı, `Write(~/beyin/**)`
+  izinli ofis ajanları). Ofis ret yazmadan önce dosyayı yeniden okur; değiştiyse yazmaz.
 
 ## Dağıtım penceresi (her yerel dağıtımdan önce)
 ```bash

@@ -9,9 +9,9 @@
    görev yolu yok; paralel hatlarda göreve bağlanamaz. Öneri: `~/beyin/bin/calistir` `kos()` `kayit`'e ve JSON yanına
    `gorev` (4. argüman, görev dosyası) yazsın; adaptör bunu okuyup tahmini (6 $/tur) gerçekleşenle değiştirsin.
    Kabul ölçümü: iki haiku hat turu gerçekte ≈0,0105 $, motor tahmini 12 $. Bütçe tavanı (30 $) değişmez.
-2. **Görev dosyası için ortak dosya kilidi (hat değişikliği)**: `bin/calistir fm_set` kilitsiz yazar; ofis/workflow `uat_reddet` yazmadan hemen önce dosyayı yeniden okuyarak yarışı daraltır ama kapatamaz. İki taraf aynı `flock`'u alsın.
-3. **Görev dosyası yazımında symlink yarışı** (önceden var, ofisin elle `reddet` yolu da): `uat_reddet`/`atomik_yaz` symlink kontrolünü kilitten önce yapar ve okuma/yazma symlink izler; `~/beyin`'e yazabilen bir ajan kartı ya da `.ofis.tmp`'yi symlink'e çevirebilir. `O_NOFOLLOW` ve `mkstemp` ile yaz.
-4. **Onay kaydını göreve bağlama (hat değişikliği)**: `~/.config/ofis-kapi/onaylar/<proje>-<sürüm>.onay` ve paket mührü
+2. ~~**Görev dosyası için ortak dosya kilidi (hat değişikliği)**~~ — beyin dalı `hat-gorev-kilidi` + ofis `gorev_kilidi()`; canlıya alınması aşama 2 ön koşulu: `bin/calistir fm_set` kilitsiz yazar; ofis/workflow `uat_reddet` yazmadan hemen önce dosyayı yeniden okuyarak yarışı daraltır ama kapatamaz. İki taraf aynı `flock`'u alsın.
+3. ~~**Görev dosyası yazımında symlink yarışı**~~ — mkstemp/`O_NOFOLLOW` (ofis), mktemp+mv ve symlink reddi (beyin dalı): (önceden var, ofisin elle `reddet` yolu da): `uat_reddet`/`atomik_yaz` symlink kontrolünü kilitten önce yapar ve okuma/yazma symlink izler; `~/beyin`'e yazabilen bir ajan kartı ya da `.ofis.tmp`'yi symlink'e çevirebilir. `O_NOFOLLOW` ve `mkstemp` ile yaz.
+4. ~~**Onay kaydını göreve bağlama (hat değişikliği)**~~ — `<zip>.kimlik` + `.onay.kimlik`, motor kimlik denetimi: `~/.config/ofis-kapi/onaylar/<proje>-<sürüm>.onay` ve paket mührü
    yalnız proje-sürüme bağlı; görev dosyası kapısız yazılabildiği için workflow UAT anındaki kart değerine güvenmek
    zorunda. `canli_onayi_yaz` ve `paket_muhurle` görev dosya adını ve dalı da yazsın; motor bunları karşılaştırsın.
 5. **Dış çağrıda kilit tutma**: motor, iptal yarışını kapatmak için `gorev_baslat`/görev dosyası yazımı süresince

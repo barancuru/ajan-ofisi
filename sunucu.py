@@ -14,6 +14,9 @@ import secrets
 import shutil
 import subprocess
 import sys
+import contextlib
+import fcntl
+import tempfile
 import threading
 import time
 from datetime import datetime, timedelta
@@ -1483,7 +1486,7 @@ def dizin_yaz(veri):
     surum = veri.get("surum")
     if not isinstance(surum, str) or not re.fullmatch(r"[0-9a-f]{64}", surum):
         raise IstekHatasi(409, "sürüm bilgisi yok: sayfayı yenileyip yeniden aç")
-    with GELISTIRME_KILIDI:
+    with gorev_kilidi():
         if dosya_surumu(tam) != surum:
             raise IstekHatasi(409, "dosya sen açtıktan sonra başka yerde değişti (telefon, PC ya da ajan); kaydedilmedi")
         atomik_yaz(tam, metin)
@@ -1700,7 +1703,7 @@ def alarm_gordum(kapi_imzasi):
     """'Gördüm': marks every current critical alarm as read. Persisted under durum/; only the web login may do it."""
     if not kapidan_geldi(kapi_imzasi):
         raise IstekHatasi(403, "alarm yalnız ofis girişinden kapatılabilir")
-    with GELISTIRME_KILIDI:
+    with gorev_kilidi():
         okunan = _okunmuslar() | {a["id"] for a in alarmlar_oku() if a["seviye"] == "kritik"}
         os.makedirs(os.path.dirname(ALARM_OKUNDU_DOSYASI), exist_ok=True)
         atomik_yaz(ALARM_OKUNDU_DOSYASI, json.dumps({"okundu": sorted(okunan)[-500:]}))
@@ -1765,7 +1768,7 @@ def takilan_islem(gorev, eylem, kapi_imzasi):
     if eylem not in TEKRAR_DEN:
         raise IstekHatasi(400, "eylem: yeniden-dene | teshis-iste | iptal")
     yol = takilan_dosya(gorev)
-    with GELISTIRME_KILIDI:
+    with gorev_kilidi():
         with open(yol, encoding="utf-8", errors="replace") as f:
             metin = f.read()
         fm, _ = on_bilgi(metin)
@@ -1814,10 +1817,79 @@ def kosucuyu_durt():
 
 
 def atomik_yaz(yol, metin):
-    gecici = yol + ".ofis.tmp"
-    with open(gecici, "w", encoding="utf-8") as f:
-        f.write(metin)
-    os.replace(gecici, yol)
+    """Aynı klasörde mkstemp (O_EXCL: yerleştirilmiş symlink/sabit ad izlenmez) + os.replace (hedef symlink ise bağın
+    kendisi değişir, gösterdiği dosya değil). Var olan dosyanın izinleri korunur."""
+    klasor = os.path.dirname(yol) or "."
+    try:
+        kip = os.stat(yol, follow_symlinks=False).st_mode & 0o777
+    except FileNotFoundError:
+        kip = None
+    fd, gecici = tempfile.mkstemp(dir=klasor, prefix=".ofis.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(metin)
+            if kip is not None:
+                os.fchmod(f.fileno(), kip)
+        os.replace(gecici, yol)
+    except BaseException:
+        try:
+            os.unlink(gecici)
+        except OSError:
+            pass
+        raise
+
+
+GOREV_KILIDI_DOSYASI = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
+                                    "beyin", "gorev-dosyasi.lock")   # bin/calistir GOREV_KILIDI ile aynı yol
+_VARSAYILAN_GOREV_DIZINI = GOREV_DIZINI
+_VARSAYILAN_KILIT = GOREV_KILIDI_DOSYASI
+
+
+def _gorev_kilidi_yolu():
+    """Gerçek görev klasöründe hattın kilidi; GOREV_DIZINI başka bir yere çevrildiyse (testler, başka beyin) o klasörün
+    yanında ayrı kilit (gerçek durum klasörüne dokunulmaz)."""
+    if GOREV_KILIDI_DOSYASI != _VARSAYILAN_KILIT or GOREV_DIZINI == _VARSAYILAN_GOREV_DIZINI:
+        return GOREV_KILIDI_DOSYASI
+    return os.path.join(GOREV_DIZINI, ".gorev-dosyasi.lock")
+GOREV_KILIDI_BEKLE_SN = 30
+
+
+@contextlib.contextmanager
+def gorev_kilidi():
+    """Görev dosyası yazımları için ortak kilit: süreç içi GELISTIRME_KILIDI + hattın (bin/calistir fm_set, teslim_yaz,
+    bitti/ taşıma) aldığı dosya kilidi. İç içe alınmaz. 30 sn'de alınamazsa 503 (yazma yapılmaz)."""
+    with GELISTIRME_KILIDI:
+        kilit = _gorev_kilidi_yolu()
+        os.makedirs(os.path.dirname(kilit), exist_ok=True)
+        fd = os.open(kilit, os.O_RDWR | os.O_CREAT | os.O_APPEND, 0o600)
+        try:
+            son = time.monotonic() + GOREV_KILIDI_BEKLE_SN
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() > son:
+                        raise IstekHatasi(503, "görev dosyası kilidi alınamadı (hat yazıyor); biraz sonra yeniden dene")
+                    time.sleep(0.1)
+            yield
+        finally:
+            os.close(fd)
+
+
+def gorev_oku(yol):
+    """Kilit altında görev dosyası okuma: symlink izlenmez (O_NOFOLLOW), yalnız sıradan dosya."""
+    try:
+        fd = os.open(yol, os.O_RDONLY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        raise IstekHatasi(404, "görev yok")
+    except OSError as e:
+        raise IstekHatasi(409, f"görev dosyası okunamadı ({type(e).__name__}; symlink olabilir)")
+    with os.fdopen(fd, encoding="utf-8", errors="replace") as f:
+        import stat as _stat
+        if not _stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+            raise IstekHatasi(409, "görev dosyası sıradan dosya değil")
+        return f.read()
 
 
 KAPI_IMZA_DOSYASI = os.path.expanduser("~/.config/ofis-kapi/kapi.env")
@@ -1841,7 +1913,7 @@ def kapidan_geldi(deger):
     return False
 
 
-def canli_onayi_yaz(fm):
+def canli_onayi_yaz(fm, dosya=None):
     """Production permission, bound to the exact sealed package. Agents cannot write here; task files alone never authorize production."""
     proje, surum = fm.get("proje", ""), fm.get("surum", "")
     if not re.fullmatch(r"[a-z-]{1,40}", proje) or not re.fullmatch(r"[0-9.]{1,24}", surum):
@@ -1854,7 +1926,18 @@ def canli_onayi_yaz(fm):
     if not re.fullmatch(r"[0-9a-f]{64}", muhur):
         return False
     os.makedirs(CANLI_ONAY_DIZINI, mode=0o700, exist_ok=True)
-    atomik_yaz(os.path.join(CANLI_ONAY_DIZINI, f"{proje}-{surum}.onay"), muhur + "\n")
+    atomik_yaz(os.path.join(CANLI_ONAY_DIZINI, f"{proje}-{surum}.onay"), muhur + "\n")   # biçim değişmez (onay_gecerli)
+    # Kimlik: hattın mührüne yazdığı görev/dal bu kartla eşleşiyorsa ek dosyaya kopyalanır; workflow motoru onay kaydını
+    # yalnız kendi izlediği kartın kimliğiyle kabul eder. Eşleşmezse (eski hat, başka görev) kimlik yazılmaz.
+    kimlik_yolu = os.path.join(CANLI_ONAY_DIZINI, f"{proje}-{surum}.onay.kimlik")
+    k = akis_ofis.kimlik_oku(os.path.join(PAKET_MUHUR_DIZINI, f"{proje}-{surum}.zip.kimlik"))
+    if k and dosya and k.get("gorev") == dosya and k.get("sha256") == muhur and k.get("dal") == fm.get("dal", ""):
+        atomik_yaz(kimlik_yolu, "".join(f"{a}={k[a]}\n" for a in ("gorev", "dal", "sha256")))
+    else:
+        try:
+            os.remove(kimlik_yolu)
+        except FileNotFoundError:
+            pass
     return True
 
 
@@ -1900,7 +1983,7 @@ def gelistirme_gorevi_yaz(proje, baslik, istek, model, ek_alanlar=None):
     kaynak = ek.pop("kaynak", "ofis")
     ek_satir = "".join(f"{k}: {v}\n" for k, v in ek.items()
                        if re.fullmatch(r"[a-z_]{1,30}", k) and re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", str(v)))
-    with GELISTIRME_KILIDI:
+    with gorev_kilidi():
         os.makedirs(GOREV_DIZINI, exist_ok=True)
         yol, n = os.path.join(GOREV_DIZINI, ad + ".md"), 2
         while os.path.exists(yol) or os.path.exists(os.path.join(GOREV_DIZINI, "bitti", os.path.basename(yol))):
@@ -1922,14 +2005,13 @@ def uat_reddet(dosya, not_, kimden="workflow", beklenen_sha=None):
     yol = os.path.join(GOREV_DIZINI, dosya)
     if os.path.islink(yol) or not os.path.isfile(yol):
         raise IstekHatasi(404, "görev yok")
-    with GELISTIRME_KILIDI:
+    with gorev_kilidi():
         try:
-            with open(yol, encoding="utf-8", errors="replace") as f:
-                metin = f.read()
-        except FileNotFoundError:
-            raise IstekHatasi(410, "kart bu arada kayboldu ya da taşındı; ret yazılmadı")
-        except OSError as e:
-            raise IstekHatasi(409, f"kart okunamadı ({type(e).__name__}); ret yazılmadı")
+            metin = gorev_oku(yol)   # O_NOFOLLOW: kilit altında symlink izlenmez
+        except IstekHatasi as e:
+            if e.kod == 404:
+                raise IstekHatasi(410, "kart bu arada kayboldu ya da taşındı; ret yazılmadı") from e
+            raise
         fm, _ = on_bilgi(metin)
         if fm.get("durum") != "uat":
             raise IstekHatasi(409, f"görev UAT'de değil (durum: {fm.get('durum') or '-'})")
@@ -1939,8 +2021,8 @@ def uat_reddet(dosya, not_, kimden="workflow", beklenen_sha=None):
             # okuma ile yazma arasında kart yeni pakete geçti: kalite kapısının test etmediği paket reddedilmez
             raise IstekHatasi(409, "kart bu arada yeni bir pakete geçti; test edilmeyen paket reddedilmez")
         yeni = on_bilgi_yaz(geri_bildirim_ekle(metin, not_, kimden), "onay", "hayir")
-        # Hat (bin/calistir fm_set) ayrı süreçte ve kilitsiz yazar: GELISTIRME_KILIDI onu durdurmaz. Yazmadan hemen önce
-        # dosya yeniden okunur; değiştiyse hattın yazdığı ezilmez. Kalan pencere yazma anıdır (V1.1: ortak dosya kilidi).
+        # Korumalı hat (HAT_KORUMA_SURUMU) aynı gorev_kilidi'ni alır. Eski hat ve ajanların kendi araçlarıyla yaptığı
+        # yazımlar kilitsizdir: yazmadan hemen önce dosya yeniden okunur, değiştiyse ezilmez.
         try:
             with open(yol, encoding="utf-8", errors="replace") as f:
                 degisti = f.read() != metin
@@ -1995,16 +2077,15 @@ def gelistirme_degistir(veri, kapi_imzasi=""):
         yol = os.path.join(GOREV_DIZINI, dosya)
         if os.path.islink(yol) or not os.path.isfile(yol):
             raise IstekHatasi(404, "görev yok")
-        with GELISTIRME_KILIDI:
-            with open(yol, encoding="utf-8", errors="replace") as f:  # one bad byte must not hide the task or break the approval
-                metin = f.read()
+        with gorev_kilidi():
+            metin = gorev_oku(yol)  # symlink izlenmez; one bad byte must not hide the task or break the approval
             fm, _ = on_bilgi(metin)
             if fm.get("durum") != "uat":
                 raise IstekHatasi(409, f"görev UAT'de değil (durum: {fm.get('durum') or '-'})")
             if karar == "hayir":
                 metin = geri_bildirim_ekle(metin, not_)
             if karar == "evet" and kapidan_geldi(kapi_imzasi):
-                canli_onayi_yaz(fm)
+                canli_onayi_yaz(fm, dosya)
             atomik_yaz(yol, on_bilgi_yaz(metin, "onay", karar))
         kosucuyu_durt()
         return gelistirme_yaniti()
@@ -2020,9 +2101,8 @@ def gelistirme_degistir(veri, kapi_imzasi=""):
         yol = os.path.join(GOREV_DIZINI, dosya)
         if os.path.islink(yol) or not os.path.isfile(yol):
             raise IstekHatasi(404, "öneri yok")
-        with GELISTIRME_KILIDI:
-            with open(yol, encoding="utf-8", errors="replace") as f:  # one bad byte must not hide the task or break the approval
-                metin = f.read()
+        with gorev_kilidi():
+            metin = gorev_oku(yol)  # symlink izlenmez; one bad byte must not hide the task or break the approval
             fm, _ = on_bilgi(metin)
             if fm.get("durum") != "oneri":
                 raise IstekHatasi(409, f"bu bir öneri değil (durum: {fm.get('durum') or '-'})")

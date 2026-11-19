@@ -30,6 +30,28 @@ def guvenli_git_ortami(temel):
             "GIT_OPTIONAL_LOCKS": "0"}
 
 
+HAT_BETIGI = os.path.expanduser(os.environ.get("OFIS_HAT_BETIGI", "~/beyin/bin/calistir"))
+
+
+def kimlik_oku(yol):
+    """Hattın mühür kimliği (paket_muhurle) ya da onay kaydı kimliği: 'anahtar=değer' satırları. Symlink izlenmez.
+    Geçersiz/eksikse None. Alanlar: gorev (görev dosyası adı), dal, sha256."""
+    try:
+        fd = os.open(yol, os.O_RDONLY | os.O_NOFOLLOW)
+        with os.fdopen(fd, encoding="utf-8", errors="replace") as f:
+            metin = f.read(4096)
+    except OSError:
+        return None
+    k = {}
+    for satir in metin.splitlines():
+        a, ayr, d = satir.partition("=")
+        if ayr and a in ("gorev", "dal", "sha256"):
+            k[a] = d.strip()
+    if not (k.get("gorev") and re.fullmatch(r"[0-9a-f]{64}", k.get("sha256", ""))):
+        return None
+    return k
+
+
 class OfisOrtami:
     def __init__(self, sunucu):
         self.s = sunucu
@@ -57,32 +79,49 @@ class OfisOrtami:
         refler |= {k.get("akis_ref") for _, k in self._limit_bekleyenler() if k.get("akis_ref")}
         return refler
 
-    def yayinlandi(self, proje, surum, dal, sha):
+    def hat_korumasi_var(self):
+        """Canlı hat (bin/calistir) görev kilidi + güvenli yazım + mühür kimliğiyle mi çalışıyor (HAT_KORUMA_SURUMU)?"""
+        try:
+            with open(HAT_BETIGI, encoding="utf-8", errors="replace") as f:
+                return re.search(r"^HAT_KORUMA_SURUMU=([1-9][0-9]*)\b", f.read(), re.M) is not None
+        except OSError:
+            return False
+
+    def yayinlandi(self, proje, surum, dal, sha, dosya=None):
         """'durum: bitti' kapısız yazılabilir. Yayın kanıtı üç parça: (1) hattın paket mühürü (ajanların yazamadığı
         ~/.local/state/beyin/paket-muhur) bu sürüm için bu sha, (2) klonda v<sürüm> etiketi, (3) dal o etikete alınmış.
         Olumsuz sonuç 60 sn önbellekte: bekleyen kart her turda git çalıştırmasın."""
-        anahtar = (proje, surum, dal, sha)
+        anahtar = (proje, surum, dal, sha, dosya)
         onbellek = self.__dict__.setdefault("_yayin_onbellek", {})
         if anahtar in onbellek and time.time() - onbellek[anahtar] < 60:
             return False
-        sonuc = self._yayinlandi(proje, surum, dal, sha)
+        sonuc = self._yayinlandi(proje, surum, dal, sha, dosya)
         if not sonuc:
             onbellek[anahtar] = time.time()
         return sonuc
 
-    def muhur_var(self, proje, surum, sha):
-        """Hattın paket mührü (ajanların yazamadığı ~/.local/state/beyin/paket-muhur) bu sürüm için bu sha mı."""
+    def muhur_var(self, proje, surum, sha, dosya=None, dal=None):
+        """Hattın paket mührü (ajanların yazamadığı ~/.local/state/beyin/paket-muhur) bu sürüm için bu sha mı.
+        dosya verilirse mühür kimliği (.kimlik) de bu göreve (ve verilirse dala) ait olmalı: kimliksiz mühür (eski hat)
+        workflow için kanıt sayılmaz."""
         if proje not in akis_tanim.GELISTIRME_PROJELERI or not isinstance(surum, str) or not isinstance(sha, str) \
                 or not akis_motor.DEGER_DESENLERI["surum"].match(surum) or not akis_motor.DEGER_DESENLERI["sha256"].match(sha):
             return False
+        taban = os.path.join(self.s.PAKET_MUHUR_DIZINI, f"{proje}-{surum}.zip")
         try:
-            with open(os.path.join(self.s.PAKET_MUHUR_DIZINI, f"{proje}-{surum}.zip.sha256"), encoding="utf-8") as f:
-                return f.read().split()[0:1] == [sha]
+            fd = os.open(taban + ".sha256", os.O_RDONLY | os.O_NOFOLLOW)
+            with os.fdopen(fd, encoding="utf-8") as f:
+                if f.read().split()[0:1] != [sha]:
+                    return False
         except OSError:
             return False
+        if dosya is None:
+            return True
+        k = kimlik_oku(taban + ".kimlik")
+        return bool(k and k["gorev"] == dosya and k["sha256"] == sha and (dal is None or k.get("dal") == dal))
 
-    def _yayinlandi(self, proje, surum, dal, sha):
-        if not akis_motor.DEGER_DESENLERI["dal"].match(dal or "") or not self.muhur_var(proje, surum, sha):
+    def _yayinlandi(self, proje, surum, dal, sha, dosya=None):
+        if not akis_motor.DEGER_DESENLERI["dal"].match(dal or "") or not self.muhur_var(proje, surum, sha, dosya, dal):
             return False
         klon = os.path.join(IS_DIZINI, proje)
         ortam = guvenli_git_ortami({"PATH": "/usr/bin:/bin", "HOME": os.path.expanduser("~"), "LANG": "C.UTF-8"})
@@ -107,16 +146,24 @@ class OfisOrtami:
     def kuyrukta_mi(self, ref):
         return ref in self.kuyruktaki_refler()
 
-    def canli_onay_var(self, proje, surum, sha):
-        """Ofis girişinin (kapı imzası) yazdığı, mühürlü pakete bağlı canlı onay kaydı (sunucu.canli_onayi_yaz)."""
+    def canli_onay_var(self, proje, surum, sha, dosya=None):
+        """Ofis girişinin (kapı imzası) yazdığı, mühürlü pakete bağlı canlı onay kaydı (sunucu.canli_onayi_yaz).
+        dosya verilirse onay kimliği (.onay.kimlik, mühürden kopyalanır) de bu göreve ait olmalı."""
         if not (isinstance(proje, str) and re.fullmatch(r"[a-z-]{1,40}", proje) and isinstance(surum, str)
                 and re.fullmatch(r"[0-9.]{1,24}", surum) and isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{64}", sha)):
             return False
+        taban = os.path.join(self.s.CANLI_ONAY_DIZINI, f"{proje}-{surum}.onay")
         try:
-            with open(os.path.join(self.s.CANLI_ONAY_DIZINI, f"{proje}-{surum}.onay"), encoding="utf-8") as f:
-                return f.read().strip() == sha
+            fd = os.open(taban, os.O_RDONLY | os.O_NOFOLLOW)
+            with os.fdopen(fd, encoding="utf-8") as f:
+                if f.read().strip() != sha:
+                    return False
         except OSError:
             return False
+        if dosya is None:
+            return True
+        k = kimlik_oku(taban + ".kimlik")
+        return bool(k and k["gorev"] == dosya and k["sha256"] == sha)
 
     @contextlib.contextmanager
     def baslatma_kilidi(self):
@@ -197,7 +244,8 @@ class OfisOrtami:
         if not yol:
             return None
         try:
-            with open(yol, encoding="utf-8", errors="replace") as f:
+            fd = os.open(yol, os.O_RDONLY | os.O_NOFOLLOW)   # symlink izlenmez
+            with os.fdopen(fd, encoding="utf-8", errors="replace") as f:
                 fm, _ = self.s.on_bilgi(f.read(400_000))
         except OSError:
             return None

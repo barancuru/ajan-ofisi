@@ -1021,6 +1021,10 @@ class Motor:
         neden = adim_kapali_mi(adim)
         if neden:
             return neden
+        hat_adimi = adim["tur"] in ("gelistirme_gorevi", "quality_gate") or (
+            adim["tur"] == "approval" and adim.get("kategori") in KAPALI_ONAY_KATEGORILERI)
+        if hat_adimi and not self.ortam.hat_korumasi_var():
+            return "canlı hat görev kilidi/mühür kimliği olmadan çalışıyor (HAT_KORUMA_SURUMU yok)"
         if not YAZAN_AJAN_ACIK and adim["tur"] == "agent_task":
             yetki = self.ajan_yazabilir(adim["ajan"])
             if yetki:
@@ -1249,7 +1253,7 @@ class Motor:
                 cikti["uyari"] = -1
             cikti["rapor"] = f"UAT'ye hazır: sürüm {cikti['surum'] or '?'}, uyarı {cikti['uyari']}"
             proje = adim.get("proje") or (akis_tanim.adim_bul(tanim, adim.get("hedef_adim")) or {}).get("proje")
-            if not self.ortam.muhur_var(proje, cikti["surum"], cikti["sha256"]):
+            if not self.ortam.muhur_var(proje, cikti["surum"], cikti["sha256"], t["dosya"], cikti["dal"] or None):
                 # kart dosyası kapısız yazılabilir: kaydedilecek paket hattın mührüyle doğrulanmalı
                 return ("kaynak", "UAT paketi hattın mührüyle uyuşmuyor: kart değişmiş, mühür henüz yazılıyor ya da aynı "
                                   "sürüm başka bir görevde mühürlenmiş. Kartı kontrol et; 'Yeniden dene' aynı kartı yeniden izler")
@@ -1353,7 +1357,8 @@ class Motor:
             paket = self._son_basarili_cikti(b, kosu["id"], adim["izle_adim"]) or {}
             # görev dosyasındaki 'onay: evet' kapısız yazılabilir: kabul yalnız ofis girişinin yazdığı, mühürlü pakete
             # bağlı canlı onay kaydıyla ya da hattın o kayıtla yaptığı yayın sonucuyla (durum: bitti)
-            adaylar = self._guvenilir_paketler(izlenen["proje"], paket, fm)
+            dosya = t["dosya"]
+            adaylar = self._guvenilir_paketler(izlenen["proje"], paket, fm, dosya)
             if not adaylar and not (onay == "hayir" or durum == "reddedildi"
                                     or (onay != "evet" and durum in ("hazir", "calisiyor"))):   # ret paket kanıtı istemez
                 self._adim_yaz(b, kosu["id"], adim["id"], durum="inceleme", hata="geçerli paket kaydı yok")
@@ -1365,10 +1370,10 @@ class Motor:
             # manual_review (ret değil: 'yeniden dene' ile yayınlanabilir); kayıtsız takıldı → ret; (3) kayıt/yayın kanıtı
             # → onay; (4) 'evet' olmayan hazir/calisiyor (kart geri döndü) → ret; (5) aksi hâlde beklenir.
             kesin_red = onay == "hayir" or durum == "reddedildi"
-            kayit = not kesin_red and any(self.ortam.canli_onay_var(izlenen["proje"], s, h) for s, h in kayit_adaylari)
+            kayit = not kesin_red and any(self.ortam.canli_onay_var(izlenen["proje"], s, h, dosya) for s, h in kayit_adaylari)
             if durum == "takildi" and not kayit and not kesin_red:
                 # hat main'e alıp etiketledi ama canlıya geçemedi: onay kaydını siler, kartı takildi yapar
-                kayit = any(self.ortam.yayinlandi(izlenen["proje"], s, paket.get("dal"), h) for s, h in adaylar)
+                kayit = any(self.ortam.yayinlandi(izlenen["proje"], s, paket.get("dal"), h, dosya) for s, h in adaylar)
             if durum == "takildi" and kayit:
                 self._adim_yaz(b, kosu["id"], adim["id"], durum="inceleme", hata="yayın takıldı")
                 self._incelemeye_al(b, kosu, "yayin_takildi", "kart kapıdan onaylandı ama yayın takıldı; Geliştirme "
@@ -1377,7 +1382,7 @@ class Motor:
                 return
             red = kesin_red or durum == "takildi" or (onay != "evet" and durum in ("hazir", "calisiyor"))
             kayitli = not red and (kayit or (
-                durum == "bitti" and any(self.ortam.yayinlandi(izlenen["proje"], s, paket.get("dal"), h) for s, h in adaylar)))
+                durum == "bitti" and any(self.ortam.yayinlandi(izlenen["proje"], s, paket.get("dal"), h, dosya) for s, h in adaylar)))
             if red:
                 self._adim_yaz(b, kosu["id"], adim["id"], durum="basarisiz",
                                cikti_json=json.dumps({"karar": "hayir", "not": f"kart reddedildi ya da takıldı (durum {durum})"}))
@@ -1509,7 +1514,7 @@ class Motor:
                 sonuc.append(v)
         return sonuc
 
-    def _guvenilir_paketler(self, proje, paket, fm):
+    def _guvenilir_paketler(self, proje, paket, fm, dosya=None):
         """İlk öğe: motorun UAT'de kaydettiği ve hattın mührüyle doğruladığı paket — onay KAYDI yalnız bununla aranır
         (kayıtlar proje-sürüme bağlıdır, göreve değil: kart değeriyle başka kartın onayı ödünç alınmasın). İkinci öğe
         (yalnız yayın kanıtı için; o da motorun kaydettiği dala bağlı): kartın, UAT paketinden DAHA YENİ ve hattın mührü
@@ -1522,7 +1527,7 @@ class Motor:
             adaylar.append((ps, ph))
         fs, fh = fm.get("surum"), fm.get("sha256")
         if adaylar and DEGER_DESENLERI["surum"].match(str(fs or "")) and DEGER_DESENLERI["sha256"].match(str(fh or "")) \
-                and (fs, fh) != (ps, ph) and surum_t(fs) > surum_t(ps) and self.ortam.muhur_var(proje, fs, fh):
+                and (fs, fh) != (ps, ph) and surum_t(fs) > surum_t(ps) and self.ortam.muhur_var(proje, fs, fh, dosya):
             adaylar.append((fs, fh))
         return adaylar
 

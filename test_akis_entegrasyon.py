@@ -12,6 +12,7 @@ from http.server import ThreadingHTTPServer
 from unittest import mock
 
 import subprocess
+import sys
 
 import akis_db
 import akis_motor
@@ -55,6 +56,7 @@ class OfisTabani(unittest.TestCase):
                    mock.patch.object(sunucu, "kosucuyu_durt", lambda: None),
                    mock.patch.object(sunucu, "_AKIS_ALARM_SUREC", None),
                    mock.patch.object(sunucu, "tmux_hazirla", lambda: "tmux"),
+                   mock.patch.object(sunucu, "GOREV_KILIDI_DOSYASI", os.path.join(self.d, "gorev-dosyasi.lock")),
                    mock.patch.object(sunucu.subprocess, "run", self.sahte_tmux)]
         for y in yamalar:
             y.start()
@@ -584,14 +586,19 @@ class KuyrukIptalSiralamaTest(OfisTabani):
         with open(yol) as f:
             once = f.read()
         asil = builtins.open
-        for kacinci in (1, 2):
+        for hata, kod in ((sunucu.IstekHatasi(404, "görev yok"), 410), (sunucu.IstekHatasi(409, "x"), 409)):   # 1. okuma
+            with mock.patch.object(sunucu, "gorev_oku", side_effect=hata):
+                with self.assertRaises(akis_motor.BaslatmaHatasi) as c:
+                    self.ortam.gelistirme_reddet(dosya, "düzelt", "a" * 64)
+            self.assertEqual(c.exception.kod, kod)
+        for kacinci in (1,):   # 2. okuma (yazmadan önce yeniden okuma) builtins.open ile
             for hata, kod in ((FileNotFoundError, 410), (PermissionError, 409)):
                 sayac = [0]
 
                 def bozuk_open(p, *a, **k):
                     if p == yol and (not a or "r" in a[0]) and "w" not in (a[0] if a else ""):
                         sayac[0] += 1
-                        if sayac[0] == kacinci:
+                        if sayac[0] == kacinci:   # ilk okuma gorev_oku (os.open) ile: builtins.open'daki ilk = yeniden okuma
                             raise hata("x")
                     return asil(p, *a, **k)
                 with mock.patch("builtins.open", bozuk_open):
@@ -683,6 +690,108 @@ class KuyrukIptalSiralamaTest(OfisTabani):
         self.assertEqual(d["durum"], "iptal")
         self.assertIn("çalışan ajan koşusu durdurulmadı", d["neden"]["metin"])   # dürüst not: koşu açılmıştı
         self.assertEqual(sunucu.kuyruk_oku(), [])
+
+
+class HatKorumaTest(OfisTabani):
+    """Aşama 2 ön koşulları ofis tarafı: ortak görev kilidi, güvenli yazım, mühür/onay kimlik bağı, koruma işareti."""
+
+    def setUp(self):
+        super().setUp()
+        self.muhur = os.path.join(self.d, "muhur")
+        self.onay = os.path.join(self.d, "onaylar")
+        os.makedirs(self.muhur)
+        os.makedirs(self.onay)
+        for y in (mock.patch.object(sunucu, "PAKET_MUHUR_DIZINI", self.muhur),
+                  mock.patch.object(sunucu, "CANLI_ONAY_DIZINI", self.onay),
+                  mock.patch.object(sunucu, "GOREV_KILIDI_DOSYASI", os.path.join(self.d, "gorev.lock"))):
+            y.start()
+            self.addCleanup(y.stop)
+
+    def yaz(self, yol, metin):
+        with open(yol, "w") as f:
+            f.write(metin)
+
+    def muhurle(self, surum, sha, gorev=None, dal="beyin/1119-x"):
+        self.yaz(os.path.join(self.muhur, f"homeos-{surum}.zip.sha256"), sha + "\n")
+        if gorev:
+            self.yaz(os.path.join(self.muhur, f"homeos-{surum}.zip.kimlik"), f"gorev={gorev}\ndal={dal}\nsha256={sha}\n")
+
+    def test_muhur_kimligi_gorevle_eslesmeli(self):
+        self.muhurle("0.10.1", "a" * 64, gorev="G0.md")
+        self.assertTrue(self.ortam.muhur_var("homeos", "0.10.1", "a" * 64))                 # kimliksiz çağrı (eski davranış)
+        self.assertTrue(self.ortam.muhur_var("homeos", "0.10.1", "a" * 64, "G0.md", "beyin/1119-x"))
+        self.assertFalse(self.ortam.muhur_var("homeos", "0.10.1", "a" * 64, "Baska.md"))     # başka görev
+        self.assertFalse(self.ortam.muhur_var("homeos", "0.10.1", "a" * 64, "G0.md", "beyin/1119-y"))   # başka dal
+        self.muhurle("0.10.2", "b" * 64)                                                     # eski hat: kimlik yok
+        self.assertFalse(self.ortam.muhur_var("homeos", "0.10.2", "b" * 64, "G0.md"))
+
+    def test_canli_onayi_kimligi_muhurden_kopyalar(self):
+        self.muhurle("0.10.1", "a" * 64, gorev="G0.md")
+        fm = {"proje": "homeos", "surum": "0.10.1", "dal": "beyin/1119-x"}
+        self.assertTrue(sunucu.canli_onayi_yaz(fm, "G0.md"))
+        with open(os.path.join(self.onay, "homeos-0.10.1.onay")) as f:
+            self.assertEqual(f.read(), "a" * 64 + "\n")                                   # onay_gecerli biçimi
+        self.assertTrue(self.ortam.canli_onay_var("homeos", "0.10.1", "a" * 64, "G0.md"))
+        self.assertFalse(self.ortam.canli_onay_var("homeos", "0.10.1", "a" * 64, "Baska.md"))
+        sunucu.canli_onayi_yaz(fm, "Baska.md")                                               # başka kartın onayı
+        self.assertFalse(os.path.exists(os.path.join(self.onay, "homeos-0.10.1.onay.kimlik")))   # eski kimlik silinir
+        self.assertFalse(self.ortam.canli_onay_var("homeos", "0.10.1", "a" * 64, "G0.md"))
+
+    def test_gorev_kilidi_suregler_arasi_ve_zaman_asimi(self):
+        hazir = os.path.join(self.d, "tutuldu")
+        p = subprocess.Popen([sys.executable, "-c", "import fcntl,sys,time; f=open(sys.argv[1],'a'); "
+                              "fcntl.flock(f, fcntl.LOCK_EX); open(sys.argv[2],'w').close(); time.sleep(3)",
+                              sunucu.GOREV_KILIDI_DOSYASI, hazir])
+        self.addCleanup(p.kill)
+        for _ in range(100):
+            if os.path.exists(hazir):
+                break
+            time.sleep(0.03)
+        with mock.patch.object(sunucu, "GOREV_KILIDI_BEKLE_SN", 0.5):
+            with self.assertRaises(sunucu.IstekHatasi) as c:
+                with sunucu.gorev_kilidi():
+                    pass
+        self.assertEqual(c.exception.kod, 503)
+        p.wait(10)
+        with sunucu.gorev_kilidi():                                                           # bırakılınca alınır
+            pass
+
+    def test_atomik_yaz_symlink_ve_izin(self):
+        hedef = os.path.join(self.d, "hedef")
+        self.yaz(hedef, "dokunma")
+        bag = os.path.join(self.dizin["gorevler"], "L.md")
+        os.symlink(hedef, bag)
+        sunucu.atomik_yaz(bag, "yeni")
+        with open(hedef) as f:
+            self.assertEqual(f.read(), "dokunma")                                            # symlink izlenmedi
+        self.assertFalse(os.path.islink(bag))
+        g = os.path.join(self.dizin["gorevler"], "G.md")
+        self.yaz(g, "x")
+        os.chmod(g, 0o640)
+        sunucu.atomik_yaz(g, "y")
+        self.assertEqual(os.stat(g).st_mode & 0o777, 0o640)
+        self.assertEqual([a for a in os.listdir(self.dizin["gorevler"]) if a.startswith(".ofis.")], [])
+        with self.assertRaises(sunucu.IstekHatasi):
+            os.symlink(hedef, os.path.join(self.dizin["gorevler"], "L2.md"))
+            sunucu.gorev_oku(os.path.join(self.dizin["gorevler"], "L2.md"))
+        self.assertIsNone(self.ortam.gelistirme_oku("L2.md"))
+
+    def test_hat_koruma_isareti(self):
+        betik = os.path.join(self.d, "calistir")
+        with mock.patch.object(akis_ofis, "HAT_BETIGI", betik):
+            self.assertFalse(self.ortam.hat_korumasi_var())                                   # betik yok
+            self.yaz(betik, "#!/bin/bash\nGOREV_KILIDI=x\n")
+            self.assertFalse(self.ortam.hat_korumasi_var())
+            self.yaz(betik, "#!/bin/bash\nHAT_KORUMA_SURUMU=1   # açıklama\n")
+            self.assertTrue(self.ortam.hat_korumasi_var())
+
+    def test_canli_hat_bugun_korumasiz(self):
+        """Gerçek ~/beyin/bin/calistir (bu kabul anında): işaret yok → hat adımları ikinci katmanda da kapalı."""
+        if not os.path.exists(akis_ofis.HAT_BETIGI):
+            self.skipTest("hat betiği yok")
+        with open(akis_ofis.HAT_BETIGI, encoding="utf-8", errors="replace") as f:
+            beklenen = "HAT_KORUMA_SURUMU=" in f.read()
+        self.assertEqual(self.ortam.hat_korumasi_var(), beklenen)
 
 
 class ApiTest(OfisTabani):

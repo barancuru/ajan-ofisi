@@ -31,6 +31,7 @@ class SahteOrtam:
         self.onaylar = set()          # (proje, sürüm, sha): ofis girişinin yazdığı canlı onay kayıtları
         self.yayinlar = set()         # (proje, sürüm, dal, sha): mühür + klonda v<sürüm> etiketi + dal etikete alınmış
         self.muhurler = set()         # (proje, sürüm, sha): hattın paket mühürü
+        self.hat_korumasi = True      # canlı hatta HAT_KORUMA_SURUMU var mı
         self.ajanlar = {"arastirmaci": {"id": "arastirmaci", "kurulu": True, "butce_usd": 1.0, "izinli_araclar": ["Read", "Grep"]},
                         "gunlukcu": {"id": "gunlukcu", "kurulu": True, "butce_usd": 0.5, "izinli_araclar": ["Read", "Glob"]},
                         "akis-okuyucu": {"id": "akis-okuyucu", "kurulu": True, "butce_usd": 1.5,
@@ -59,13 +60,16 @@ class SahteOrtam:
     def kuyruktaki_refler(self):
         return set(self.kuyruk)
 
-    def canli_onay_var(self, proje, surum, sha):
+    def canli_onay_var(self, proje, surum, sha, dosya=None):
         return (proje, surum, sha) in self.onaylar
 
-    def muhur_var(self, proje, surum, sha):
+    def muhur_var(self, proje, surum, sha, dosya=None, dal=None):
         return (proje, surum, sha) in self.muhurler
 
-    def yayinlandi(self, proje, surum, dal, sha):
+    def hat_korumasi_var(self):
+        return self.hat_korumasi
+
+    def yayinlandi(self, proje, surum, dal, sha, dosya=None):
         return (proje, surum, dal, sha) in self.yayinlar
 
     def baslatma_kilidi(self):
@@ -308,6 +312,14 @@ class KademeliDevreyeAlmaTest(MotorTabani):
     def test_dagitim_onayi_ayri_anahtar(self):
         with mock.patch.object(akis_motor, "HAT_ADIMLARI_ACIK", True):
             self.assertIsNotNone(akis_motor.adim_kapali_mi({"tur": "approval", "kategori": "dagitim"}))
+
+    def test_hat_korumasi_yoksa_bayraklar_acik_olsa_da_kapali(self):
+        self.ortam.hat_korumasi = False
+        with mock.patch.object(akis_motor, "ETKIN_AKISLAR", HerAkis()), mock.patch.object(akis_motor, "HAT_ADIMLARI_ACIK", True), \
+                mock.patch.object(akis_motor, "DAGITIM_ONAYI_ACIK", True):
+            with self.assertRaises(akis_motor.AkisHatasi) as c:
+                self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"})
+        self.assertIn("HAT_KORUMA_SURUMU", str(c.exception))
 
     def test_arastirma_akisi_calisir(self):
         k = self.m.baslat("ornek-arastirma-ozeti", {"konu": "x"})["run_id"]
