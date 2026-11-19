@@ -129,7 +129,13 @@ kosucu sonucu `son: false` yazar; motor aynı denemeyi beklemeyi sürdürür, ke
   sunucusu ve systemd tekrar servisi aynı dosya kilidini kullanır) → SQLite yazma. Kuyruk tarafı geçerlilik kontrolünü
   ve tmux başlatmayı başlatma kilidi altında yapar, motor kilidini hiç almaz, DB'yi yalnız okur. İptal, commit'ini ve
   kuyruk temizliğini aynı başlatma kilidi altında yapar: iptal commit'i kontrol ile başlatma arasına giremez; ya önce
-  olur (iş düşürülür) ya da başlatmadan sonra (koşu açılmıştır, sonucu yok sayılır, not bunu söyler).
+  olur (iş düşürülür) ya da başlatmadan sonra (koşu açılmıştır, sonucu yok sayılır, not bunu söyler). Motor turu da
+  terk ettiği denemenin kuyruk kaydını commit'ten **sonra** temizler (yazma kilidini tutarken dosya kilidi beklenmez).
+- Bilinen bekleme: systemd tekrar servisi `baslatma.lock`'u tutarken (birkaç tmux penceresi açarken) iptal ve motor
+  kilidi altındaki API çağrıları kısa süre bekler. `bilinmiyor` durumunda korunan workflow işleri kuyruk sınırına
+  (`MAKS_KUYRUK`) sayılır; DB uzun süre okunamazsa yeni işler 429 alabilir. "Workflow DB okunamadı" alarmı süreç
+  başına en çok 10 dakikada bir yazılır.
+- Yayın kanıtı eksikse (`durum: bitti` ama mühür/etiket yok) `yayin_kaniti_yok` olayı bir kez yazılır, onay verilmez.
 - Sonuç işleme `UPDATE denemeler ... WHERE durum IN (uçuşta)` ile tek seferliktir. `olaylar.anahtar` UNIQUE olduğu
   için aynı olay iki kez yayınlanmaz.
 - Duraklatma yeni adım başlatmaz, uçuştaki sonuçları toplamayı sürdürür.

@@ -73,6 +73,10 @@ class SahteOrtam:
 
     def kuyruktan_cikar(self, ref):
         self.cikarirken_ucusta = getattr(self, "motor", None) and self.motor.ref_ucusta(ref)
+        if getattr(self, "motor", None):   # kilit sırası: kuyruk temizliği SQLite yazma işlemi DIŞINDA
+            self.cikarirken_islemde = self.motor.depo.baglanti().in_transaction
+        if getattr(self, "cikar_hatasi", None):
+            raise self.cikar_hatasi
         if ref in self.kuyruk:
             self.kuyruk.discard(ref)
             return True
@@ -522,6 +526,53 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         self.assertEqual(d["durum"], "basarili")
         self.assertAlmostEqual(d["maliyet_usd"], 0.9)
         self.assertAlmostEqual(self.adim(k, "a")["denemeler"][0]["maliyet_usd"], 0.9)
+
+    def test_iptal_kuyruk_temizligi_hata_verse_de_iptal_tamamlanir(self):
+        """Son inceleme 1: kuyruk dosyası yazılamazsa iptal yine tamamlanır (HTTP 500 yok), not bunu söyler."""
+        self.tanim(taban_tanim())
+        k = self.m.baslat("deneme", {"konu": "x"})["run_id"]
+        self.ortam.davranis = ["kuyruk"]
+        self.m.tur()
+        self.ortam.cikar_hatasi = OSError("disk dolu")
+        d = self.m.iptal(k)
+        self.assertEqual(d["durum"], "iptal")
+        self.assertIn("kuyruk temizlenemedi", " ".join(d["notlar"]))
+
+    def test_zaman_asimi_kuyruk_temizligi_db_islemi_disinda(self):
+        """Son inceleme 3: motor turu kuyruk/flock'u SQLite yazma kilidini tutarken beklemez."""
+        t = taban_tanim()
+        t["adimlar"][0].update({"zaman_asimi_sn": 600, "yan_etkili": False})
+        self.tanim(t)
+        self.m.baslat("deneme", {"konu": "x"})
+        self.ortam.davranis = ["kuyruk"]
+        self.m.tur()
+        self.ortam.motor = self.m
+        self.saat[0] += 601
+        self.m.tur()
+        self.assertIs(self.ortam.cikarirken_islemde, False)
+
+    def test_yayin_kaniti_eksikse_neden_gorunur(self):
+        """Son inceleme 6: 'durum: bitti' ama kanıt yok (ör. etiket başka commit'te) → ayrı olay, onay verilmez."""
+        tanimlar, _ = akis_tanim.tanimlari_yukle()
+        self.tanimlar.update(tanimlar)
+        k = self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"})["run_id"]
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"plan": "p", "risk": "dusuk", "yetki_gerekli": False}) + '</akis_cikti>')
+        self.m.tur()
+        self.ortam.hat_uat("G0.md")
+        self.m.tur()
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"karar": "gecti", "bulgular": "-"}) + '</akis_cikti>')
+        self.m.tur()
+        self.m.tur()
+        self.assertEqual(self.adim(k, "uat_onayi")["durum"], "onay_bekliyor")
+        self.ortam.gorevler["G0.md"].update({"durum": "bitti", "onay": "evet"})
+        for _ in range(3):
+            self.m.tur()
+        self.assertEqual(self.adim(k, "uat_onayi")["durum"], "onay_bekliyor")
+        eksik = [o for o in self.ortam.olaylar if o["olay"] == "yayin_kaniti_yok"]
+        self.assertEqual(len(eksik), 1)                     # bir kez, her turda değil
+        self.assertIn("etiket", eksik[0]["neden"])
 
     def test_iptal_kuyruk_temizligi_db_commit_sonrasi(self):
         self.tanim(taban_tanim())

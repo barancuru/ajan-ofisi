@@ -411,6 +411,10 @@ def limit_bekleyenleri_al(kuyruk):
     return eklenen
 
 
+AKIS_ALARM_ARALIK_SN = 600
+_AKIS_ALARM_TS = 0.0   # bu süreçte son "workflow DB okunamadı" alarmı (her kuyruk turunda yeni alarm yazılmasın)
+
+
 def akis_ref_durumu(ref):
     """Kuyruktaki/limit-bekleyen'deki işin workflow durumu: 'gecerli' (deneme uçuşta ya da workflow işi değil),
     'gecersiz' (iptal/terk edilmiş: iş düşürülür) ya da 'bilinmiyor' (workflow DB okunamadı: kayıt KORUNUR ama
@@ -420,8 +424,11 @@ def akis_ref_durumu(ref):
     try:
         return "gecerli" if motor().ref_ucusta(ref) else "gecersiz"
     except Exception as e:  # noqa: BLE001
-        ortak.olay_yaz({"tur": "hata", "ajan": "ofis", "detay": f"workflow durumu okunamadı ({type(e).__name__}); "
-                        "kuyruktaki workflow işi korunuyor, başlatılmıyor"})
+        global _AKIS_ALARM_TS
+        if time.time() - _AKIS_ALARM_TS >= AKIS_ALARM_ARALIK_SN:
+            _AKIS_ALARM_TS = time.time()
+            ortak.olay_yaz({"tur": "hata", "ajan": "ofis", "detay": f"workflow durumu okunamadı ({type(e).__name__}); "
+                            "kuyruktaki workflow işleri korunuyor, başlatılmıyor"})
         return "bilinmiyor"
 
 

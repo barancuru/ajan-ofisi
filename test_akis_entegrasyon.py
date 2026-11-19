@@ -48,6 +48,7 @@ class OfisTabani(unittest.TestCase):
                    mock.patch.object(ortak, "OLAYLAR", os.path.join(self.d, "olaylar.jsonl")),
                    mock.patch.object(sunucu, "GOREV_DIZINI", dizinler["gorevler"]),
                    mock.patch.object(sunucu, "kosucuyu_durt", lambda: None),
+                   mock.patch.object(sunucu, "_AKIS_ALARM_TS", 0.0),
                    mock.patch.object(sunucu, "tmux_hazirla", lambda: "tmux"),
                    mock.patch.object(sunucu.subprocess, "run", self.sahte_tmux)]
         for y in yamalar:
@@ -456,6 +457,15 @@ class KuyrukIptalSiralamaTest(OfisTabani):
         sunucu.kuyrugu_isle()                                              # DB geri geldi: normal akış
         self.assertEqual(len(self.tmux), 1)
 
+    def test_db_okunamazsa_alarm_her_turda_tekrarlanmaz(self):
+        """Son inceleme 2: DB okunamazken her kuyruk turu yeni hata olayı (Telegram) yazmaz."""
+        self.kuyruktaki_kosu()
+        with mock.patch.object(sunucu, "motor", side_effect=RuntimeError("db kilitli")):
+            for _ in range(5):
+                sunucu.kuyrugu_isle()
+        self.assertEqual(len(self.hata_olaylari()), 1)
+        self.assertEqual(self.tmux, [])
+
     def test_db_okunamazsa_limit_kaydi_korunur_baslatilmaz(self):
         arg = {"kosu_id": "2026-11-19-1-akis-okuyucu", "ajan": "akis-okuyucu", "prompt": "p", "kaynak": "akis",
                "akis_ref": REF}
@@ -477,17 +487,29 @@ class KuyrukIptalSiralamaTest(OfisTabani):
         """P0-2: kuyruk 'geçerli' dedikten sonra iptal başlarsa, iptal commit'i başlatma bitene dek bekler.
         Başlatma anında koşu DB'de hâlâ 'calisiyor' olmalı; iptal commit'inden SONRA hiçbir koşu başlamamalı."""
         k, ref = self.kuyruktaki_kosu()
-        kontrol_yapildi, iptal_basladi = threading.Event(), threading.Event()
+        kontrol_yapildi = threading.Event()
+        iptal_ilerledi = threading.Event()   # iptal ya başlatma kilidinde bekliyor ya da commit etti: hangisi önce
         baslatma_anindaki_durum = []
-        asil_ucusta = self.m.ref_ucusta
-        iptal_is = threading.Thread(target=lambda: (iptal_basladi.set(), self.m.iptal(k)), name="iptal")
+        asil_ucusta, asil_kilit, asil_commit = self.m.ref_ucusta, self.ortam.baslatma_kilidi, self.m._iptal_commit
+        iptal_is = threading.Thread(target=lambda: self.m.iptal(k), name="iptal")
+
+        def kilit_izle():
+            if threading.current_thread() is iptal_is:
+                iptal_ilerledi.set()          # düzeltmeyle: iptal commit'ten ÖNCE buraya gelir ve bekler
+            return asil_kilit()
+
+        def commit_izle(*a, **kw):
+            sonuc = asil_commit(*a, **kw)
+            iptal_ilerledi.set()              # düzeltme yoksa: kontrol ile başlatma arasında commit etti
+            return sonuc
 
         def ucusta_sonra_bekle(r):
             sonuc = asil_ucusta(r)
             kontrol_yapildi.set()
-            iptal_basladi.wait(5)
-            iptal_is.join(1.0)            # düzeltme yoksa iptal bu arada commit eder
+            self.assertTrue(iptal_ilerledi.wait(10))
             return sonuc
+        self.ortam.baslatma_kilidi = kilit_izle
+        self.m._iptal_commit = commit_izle
         self.m.ref_ucusta = ucusta_sonra_bekle
         asil_tmux = self.sahte_tmux
 
