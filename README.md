@@ -254,6 +254,26 @@ tablonun en altına gider. Ana ajan ve Geliştirme hattı özet kutularında ayr
 `(giriş, çıkış, önbellek okuma)` $/milyon token. Önbelleğe yazma = giriş × `ONBELLEK_YAZMA_KAT` (1,25). Kısa adlar
 (`opus`, `sonnet`, `haiku`) `KISA_MODEL`'den eşlenir; tarihli kimlikler (`claude-opus-5-5-20261101`) ön ekle eşleşir.
 Yeni model gelince satırı ekle, sunucuyu yeniden başlat; geçmiş günler de yeni fiyatla yeniden hesaplanır.
+Anthropic dışı modeller (OpenAI, Google) `model_kullanim.py` içindeki `DIS_FIYATLAR`'dadır: model öneki, tarihe bağlı
+fiyat dönemleri ve varsa istek başına uzun bağlam eşiği; her satırda kaynak sayfa ve okunduğu tarih yazar.
+
+### Model kullanımı
+Araçlar → **Model kullanımı** (`#sekme=modeller`, `GET /api/model-kullanim`): bugün / 7 gün / 30 gün token ve API
+karşılığı USD, 30 günlük modele göre yığılmış grafik, model ve laboratuvar payı, ofis rolleri. `model_kullanim.py`
+dört kaynaktan yalnız sayıları okur (metin içeriği önbelleğe ya da API'ye girmez):
+Claude Code transkriptleri (`~/.claude/projects` + diğer Pro hesabı; `message.id` tüm dosyalar arasında tekil),
+Codex oturumları (`~/.codex/sessions`, `token_usage_record` `response_id` ile tekil), Antigravity CLI konuşmaları
+(`~/.gemini/antigravity-cli/conversations/*.db`, salt okunur SQLite, `gen_metadata` protobuf'u) ve ofis koşu olayları
+(`claude -p --no-session-persistence` transkript yazmaz). Dosya başına özet `durum/model-kullanim.json`'da
+(mtime, boyut) ile tutulur; tarama en sık 5 dakikada bir, yalnız değişen dosyalar okunur. Maliyet sekmesinden yüksek
+çıkması normaldir: o sekme yalnız köprünün eşlediği oturumları sayar, bu sayfa tüm transkriptleri.
+"Toplam" kutusu ve "Tümü" dönemi ilk kayıttan bugüne sayar. Claude Code transkriptleri 30 günde siler; silinen dosyanın
+özeti ve olaylar.jsonl döndürülünce düşen ofis koşuları önbellekte kalır, toplam küçülmez. **Tam sayfa ↗** düğmesi
+`modeller.html`'yi yeni sekmede açar (3D sahne yok, 5 dakikada bir yenilenir); kod `on-yuz/modeller.js` +
+`modeller.css`, ofis sekmesiyle ortaktır.
+"Ofis rolleri" herkesi gruplu gösterir: ajanlar.json ajanları, Yönetim Kurulu Başkanı (`ykb.tanim`), Mentor Kurulu
+(`kurul_yukle`; token'ı CEO kararına eklenir, ayrı sayılmaz), Ana ajan ve Geliştirme hattı (modeli ve 30 günlük token'ı
+`kopru.json` `ana_ajan_cwd` / `hat_cwd` klasörlerindeki transkriptlerden okunur) ve Çaycı Kedi (model çağırmaz, 0 token).
 
 ### API
 | Uç | Ne |

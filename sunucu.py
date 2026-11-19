@@ -25,6 +25,7 @@ import ortak  # noqa: E402
 import kopru  # noqa: E402
 import kosucu  # noqa: E402  (CEO limit yedeği: aynı anahtar/model/limit kuralları)
 import token_sayac  # noqa: E402
+import model_kullanim  # noqa: E402
 import zamanlayici  # noqa: E402
 import ykb  # noqa: E402
 
@@ -223,7 +224,7 @@ def gorev_baslat(ajan_id, etiket=None, prompt=None, kaynak="buton", ekler=None, 
         return _baslat_kilitli(ajan, etiket, prompt, kaynak, ekler, ust, havuz, model=model)
 
 
-def _baslat_kilitli(ajan, etiket, prompt, kaynak, ekler, ust, havuz, kuyruktan=False, model=None):
+def _baslat_kilitli(ajan, etiket, prompt, kaynak, ekler, ust, havuz, kuyruktan=False, model=None, limit_deneme=None):
     """BASLATMA_KILIDI + baslatma_kilidi altında çağrılır. havuz=True: ajan meşgulse çift koşu açılmaz;
     ALT_AJANLI ajanda boş alt yuvada (derinlik 1) koşar, yoksa kuyruğa alınır."""
     ajan_id = ajan["id"]
@@ -242,7 +243,8 @@ def _baslat_kilitli(ajan, etiket, prompt, kaynak, ekler, ust, havuz, kuyruktan=F
                    "prompt": prompt, "kaynak": kaynak,
                    **({"model": model} if model is not None else {}),  # kosucu yalnız beyaz listeden kabul eder
                    **({"durum_id": durum_id} if durum_id != ajan_id else {}),
-                   **({"ust_kosu": ust} if ust and KOSU_ID_DESENI.match(ust) else {})}, f, ensure_ascii=False)
+                   **({"ust_kosu": ust} if ust and KOSU_ID_DESENI.match(ust) else {}),
+                   **({"limit_deneme": limit_deneme} if limit_deneme else {})}, f, ensure_ascii=False)
     ortak.durum_yaz(durum_id, {"durum": "basliyor", "kosu_id": kosu_id, "pid": None,
                                "baslangic_ts": time.time()})
     try:
@@ -265,7 +267,8 @@ def _baslat_kilitli(ajan, etiket, prompt, kaynak, ekler, ust, havuz, kuyruktan=F
 ALT_AJANLI = ("gorevci",)  # meşgulken alt ajan açabilen ajanlar (CEO'nun eşzamanlılığı: ceo_calistir)
 MAKS_ALT = 2
 MAKS_KUYRUK = 20
-MAKS_KUYRUK_PROMPT = ortak.MAKS_GIRDI + MAKS_EK_KARAKTER * 2 + 4000  # ekler gömülü hâliyle
+MAKS_KUYRUK_PROMPT = (ortak.MAKS_GIRDI + MAKS_EK_KARAKTER * 2 + 4000  # ekler gömülü hâliyle
+                      + kosucu.MAKS_ONCEKI_OZET + 2000)  # limit sonrası yeniden denemenin önceki-deneme başlığı
 KUYRUK_KAYNAKLARI = ("buton", "ceo", "tekrar")
 KUYRUK_ID_DESENI = re.compile(r"^q[0-9a-f]{10}$")
 KUYRUK_UYANMA_SN = 20
@@ -300,12 +303,19 @@ def kuyruk_oku():
             pass
         ortak.olay_yaz({"tur": "hata", "ajan": "ofis", "detay": f"kuyruk.json bozuk, yana alındı ({type(e).__name__})"})
         return []
-    return [k for k in veri["isler"][:MAKS_KUYRUK]
+    return _kuyruk_dogrula(veri["isler"][:MAKS_KUYRUK])
+
+
+def _kuyruk_dogrula(isler):
+    return [k for k in isler
             if isinstance(k, dict) and KUYRUK_ID_DESENI.match(str(k.get("id")))
             and ortak.AJAN_ID_DESENI.match(str(k.get("ajan"))) and k.get("kaynak") in KUYRUK_KAYNAKLARI
             and isinstance(k.get("prompt"), str) and k["prompt"].strip() and len(k["prompt"]) <= MAKS_KUYRUK_PROMPT
             and (k.get("etiket") is None or isinstance(k.get("etiket"), str))
-            and (k.get("ust") is None or (isinstance(k.get("ust"), str) and KOSU_ID_DESENI.match(k["ust"])))]
+            and (k.get("ust") is None or (isinstance(k.get("ust"), str) and KOSU_ID_DESENI.match(k["ust"])))
+            and (k.get("sonra") is None or (isinstance(k.get("sonra"), int) and not isinstance(k.get("sonra"), bool)))
+            and (k.get("limit_deneme") is None
+                 or (isinstance(k.get("limit_deneme"), int) and 0 < k["limit_deneme"] <= kosucu.MAKS_LIMIT_DENEME))]
 
 
 def kuyruk_yaz(isler):
@@ -335,15 +345,70 @@ def kuyruga_ekle(ajan_id, etiket, prompt, kaynak, ekler, ust, model=None):
     return {"kosu_id": None, "ajan": ajan_id, "kuyrukta": q_id, "sira": len(kuyruk)}
 
 
+def limit_bekleyenleri_al(kuyruk):
+    """kosucu'nun limit yüzünden düşürdüğü koşuları (durum/limit-bekleyen/*.json) kuyruğa ekler; dosyayı siler.
+    Kuyruk doluysa dosya yerinde kalır, sonraki turda yeniden denenir. Dönen: eklenen sayısı."""
+    try:
+        adlar = sorted(a for a in os.listdir(kosucu.limit_bekleyen_dizini()) if a.endswith(".json"))
+    except OSError:
+        return 0
+    eklenen = 0
+    for ad in adlar:
+        if len(kuyruk) >= MAKS_KUYRUK:
+            break
+        yol = os.path.join(kosucu.limit_bekleyen_dizini(), ad)
+        try:
+            with open(yol, encoding="utf-8") as f:
+                k = json.load(f)
+        except (OSError, ValueError, UnicodeDecodeError):
+            k = None
+        kayit = None
+        if isinstance(k, dict):
+            kayit = {"id": "q" + secrets.token_hex(5), "ajan": k.get("ajan"),
+                     "etiket": k.get("etiket") if isinstance(k.get("etiket"), str) else None,
+                     "prompt": k.get("prompt"),
+                     "kaynak": k.get("kaynak") if k.get("kaynak") in KUYRUK_KAYNAKLARI else "buton",
+                     "ust": k.get("ust") if isinstance(k.get("ust"), str) and KOSU_ID_DESENI.match(k["ust"]) else None,
+                     **({"model": k["model"]} if k.get("model") in kosucu.ATAMA_MODELLERI else {}),
+                     "sonra": k.get("sonra"), "limit_deneme": k.get("limit_deneme"), "zaman": ortak.simdi_iso()}
+            if _kuyruk_dogrula([kayit]):  # kuyruk_oku ile aynı doğrulama
+                kuyruk.append(kayit)
+            else:
+                kayit = None
+        try:
+            os.remove(yol)
+        except OSError:
+            pass
+        if kayit is None:
+            ortak.olay_yaz({"tur": "hata", "ajan": "ofis", "detay": f"limit bekleyen kayıt geçersiz, düşürüldü ({ad})"})
+            continue
+        eklenen += 1
+        ortak.olay_yaz({"tur": "kuyruga_alindi", "ajan": kayit["ajan"], "kuyruk_id": kayit["id"], "kaynak": "limit",
+                        "sira": len(kuyruk), "sonra": kayit["sonra"], "onceki_kosu": k.get("onceki_kosu")})
+    return eklenen
+
+
 def kuyrugu_isle():
-    """Kuyruktaki işleri sırayla dener; ajan (ya da alt yuvası) boşsa başlatır. Model çağırmaz, yalnız koşu açar."""
-    if not os.path.exists(kuyruk_yolu()):
+    """Kuyruktaki işleri sırayla dener; ajan (ya da alt yuvası) boşsa başlatır. Model çağırmaz, yalnız koşu açar.
+    Limit yüzünden yeniden kuyruğa giren iş (sonra) sıfırlanma saatine ve bir Pro hesabı açılana dek bekler."""
+    try:
+        bekleyen = any(a.endswith(".json") for a in os.listdir(kosucu.limit_bekleyen_dizini()))
+    except OSError:
+        bekleyen = False
+    if not bekleyen and not os.path.exists(kuyruk_yolu()):
         return []
     _, tablo = ortak.ajanlari_yukle()
     baslayan = []
     with BASLATMA_KILIDI, ortak.baslatma_kilidi():
         kalan = []
-        for k in kuyruk_oku():
+        kuyruk = kuyruk_oku()
+        if bekleyen and limit_bekleyenleri_al(kuyruk):
+            kuyruk_yaz(kuyruk)
+        simdi = time.time()
+        for k in kuyruk:
+            if k.get("sonra") and (k["sonra"] > simdi or kosucu.hepsi_limitte()):
+                kalan.append(k)
+                continue
             ajan = tablo.get(k["ajan"])
             if not ajan or k["ajan"] in ortak.ATANAMAZ or not ajan["kurulu"]:
                 ortak.olay_yaz({"tur": "hata", "ajan": k["ajan"], "kuyruk_id": k["id"],
@@ -351,7 +416,8 @@ def kuyrugu_isle():
                 continue
             try:
                 b = _baslat_kilitli(ajan, k["etiket"], k["prompt"], k["kaynak"], None, k["ust"], True, kuyruktan=True,
-                                    model=k.get("model") if k.get("model") in kosucu.ATAMA_MODELLERI else None)
+                                    model=k.get("model") if k.get("model") in kosucu.ATAMA_MODELLERI else None,
+                                    limit_deneme=k.get("limit_deneme"))
             except IstekHatasi as e:
                 if e.kod == 409 and "çalışıyor" in str(e):
                     kalan.append(k)
@@ -741,18 +807,28 @@ def _ceo_calistir(metin, kuru=False, ekler=None):
     def ceo_sor(prompt, sema, log_adi):
         komut = [claude, "-p", "--model", ceo["model"], "--output-format", "json",
                  "--no-session-persistence", "--max-budget-usd", "0.20", "--tools", "", "--json-schema", json.dumps(sema)]
-        surec = subprocess.run(komut, cwd=ortak.KOK, input=prompt, text=True,
-                               capture_output=True, timeout=CEO_ZAMAN_ASIMI, env=kosucu.pro_ortami())
-        kayit =surec.stdout + ("\n--- stderr ---\n" + surec.stderr if surec.stderr else "")
-        saglayici = "claude"
-        try:
-            ilk = json.loads(surec.stdout)
-        except ValueError:
-            ilk = None
-        ilk = ilk if isinstance(ilk, dict) else None
-        hata = f"claude çıkış kodu {surec.returncode}" if surec.returncode != 0 else None
-        if kosucu.limit_hatasi_mi(ilk, hata, surec.stderr + ("" if ilk else surec.stdout)) \
-                and kosucu.api_yedegi_acik():
+        son, parcalar = {}, []
+
+        def pro(env):  # Pro hesapları sırayla (kosucu.pro_dene; hesap1 limitteyse hesap2, aynı işaret dosyaları)
+            surec = subprocess.run(komut, cwd=ortak.KOK, input=prompt, text=True,
+                                   capture_output=True, timeout=CEO_ZAMAN_ASIMI, env=env)
+            son["surec"] = surec
+            if parcalar:
+                parcalar.append(f"\n--- {kosucu.hesap_saglayici(env.get('CLAUDE_CONFIG_DIR', '-'))} ---\n")
+            parcalar.append(surec.stdout + ("\n--- stderr ---\n" + surec.stderr if surec.stderr else ""))
+            try:
+                ilk = json.loads(surec.stdout)
+            except ValueError:
+                ilk = None
+            ilk = ilk if isinstance(ilk, dict) else None
+            hata = f"claude çıkış kodu {surec.returncode}" if surec.returncode != 0 else None
+            return ilk, hata, surec.stderr + ("" if ilk else surec.stdout)
+
+        _, _, _, hesap, limitte = kosucu.pro_dene(pro)
+        surec = son["surec"]
+        kayit = "".join(parcalar)
+        saglayici = kosucu.hesap_saglayici(hesap)
+        if limitte and kosucu.api_yedegi_acik():
             # Limit yedeği: aynı komut, yalnız bu alt sürecin env'inde API anahtarıyla bir kez daha (CEO'da Codex yok)
             anahtar, anahtar_hata = kosucu.api_anahtari()
             if anahtar:
@@ -770,7 +846,9 @@ def _ceo_calistir(metin, kuru=False, ekler=None):
         return json.loads(surec.stdout)
 
     def saglayici_ozeti():
-        return kosucu.API_SAGLAYICI if kosucu.API_SAGLAYICI in saglayicilar else ("claude" if saglayicilar else None)
+        if kosucu.API_SAGLAYICI in saglayicilar:
+            return kosucu.API_SAGLAYICI
+        return next((x for x in saglayicilar if x != "claude"), "claude" if saglayicilar else None)  # "claude (hesap2)"
 
     baslangic = time.time()
     try:
@@ -1853,7 +1931,8 @@ def ongorulebilirlik_yaniti():
     ajanlar = [{"id": a["id"], "ad": a.get("ad") or a["id"],
                 "hazir_gorevler": [g["etiket"] for g in a.get("hazir_gorevler", []) if g.get("etiket")]}
                for a in tablo.values() if a["id"] != "ceo" and a["kurulu"]]
-    kuyruk = [{"ajan": k["ajan"], "kaynak": k["kaynak"], "etiket": k["etiket"], "zaman": k.get("zaman")}
+    kuyruk = [{"ajan": k["ajan"], "kaynak": k["kaynak"], "etiket": k["etiket"], "zaman": k.get("zaman"),
+               **({"limit_sonra": _iso(datetime.fromtimestamp(k["sonra"]))} if k.get("sonra") else {})}
               for k in kuyruk_oku()]  # prompt gönderilmez
     alt = [{"ajan": a, "calisan": sum(1 for n in range(1, MAKS_ALT + 1) if ortak.ajan_mesgul(f"{a}--alt-{n}"))}
            for a in ALT_AJANLI if a in tablo]
@@ -2214,6 +2293,10 @@ class Isleyici(SimpleHTTPRequestHandler):
             return self._json(200, ykb_yaniti())
         if yol.path == "/api/token":
             return self._json(200, token_sayac.api_yaniti())
+        if yol.path == "/api/model-kullanim":
+            _, tablo = ortak.ajanlari_yukle()
+            return self._json(200, model_kullanim.ozet(
+                olaylari_oku(eski=True, turler=("kosu_bitti", "ceo_bitti", "ykb_bitti")), tablo, kurul=kurul_yukle()))
         if yol.path == "/api/son-is":
             try:
                 q = parse_qs(yol.query)

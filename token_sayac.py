@@ -25,6 +25,7 @@ FIYATLAR = {
     "claude-opus-5-5": (4.0, 20.0, 0.20),
     "claude-sonnet-5-5": (2.0, 10.0, 0.10),
     "claude-haiku-5-5": (0.10, 0.50, 0.01),
+    "claude-sonnet-4-6": (3.0, 15.0, 0.30),   # Antigravity üzerinden kullanıldı
 }
 KISA_MODEL = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "haiku": "claude-haiku-5-5"}
 ONBELLEK_YAZMA_KAT = 1.25

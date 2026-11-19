@@ -11,6 +11,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="modeller.css">
 <style>
 :root{
   --krem:#efe7da; --murekkep:#3b342c; --soluk:#6f665a; --mercan:#ff7a59; --mercan-k:#c2482a; --mercan-kk:#a83d22;
@@ -591,6 +592,7 @@ body.boyut-2d #sahne,body.boyut-2d .vinyet,body.boyut-2d #etiketler,body.boyut-2
 </header>
 <div class="alarm-bant" id="alarmBant" role="alert" hidden><span class="metin" id="alarmMetin"></span><button type="button" id="alarmGordum">Gördüm</button></div>
 <div class="arac-menu" id="aracMenu" role="menu" aria-label="Araçlar" hidden>
+  <button type="button" role="menuitem" data-sekme="modeller">Model kullanımı</button>
   <button type="button" role="menuitem" data-sekme="dizin">Dizin</button>
   <button type="button" role="menuitem" data-sekme="kodgrafi">Kod Grafı</button>
   <button type="button" role="menuitem" data-sekme="diyagram">Diyagramlar</button>
@@ -632,6 +634,7 @@ body.boyut-2d #sahne,body.boyut-2d .vinyet,body.boyut-2d #etiketler,body.boyut-2
 <div class="mod" id="mod"><span class="nokta"></span><span id="modYazi">Canlı</span></div>
 
 
+<script src="modeller.js"></script>
 <script>
 /* Phone: toggle between panel and office scene; choice remembered per device */
 (function () {
@@ -3250,7 +3253,7 @@ async function sekmeAc(ad) {
   sekmeAdres(ad);
   if (ad === 'ofis') { sayfa.classList.remove('acik'); return; }
   panelKapat();
-  const icerik = ad === 'kodgrafi' ? await kodGrafiSayfasi() : ad === 'diyagram' ? await diyagramSayfasi() : ad === 'notgrafi' ? await notGrafiSayfasi() : ad === 'odalar' ? odalarSayfasi() : ad === 'hafiza' ? await hafizaSayfasi() : ad === 'gelistirme' ? await gelistirmeSayfasi() : ad === 'dizin' ? await dizinSayfasi() : ad === 'ongorulebilirlik' ? await ongorulebilirlikSayfasi() : ad === 'operator' ? await operatorSayfasi() : maliyetSayfasi();
+  const icerik = ad === 'kodgrafi' ? await kodGrafiSayfasi() : ad === 'diyagram' ? await diyagramSayfasi() : ad === 'notgrafi' ? await notGrafiSayfasi() : ad === 'odalar' ? odalarSayfasi() : ad === 'hafiza' ? await hafizaSayfasi() : ad === 'gelistirme' ? await gelistirmeSayfasi() : ad === 'dizin' ? await dizinSayfasi() : ad === 'ongorulebilirlik' ? await ongorulebilirlikSayfasi() : ad === 'operator' ? await operatorSayfasi() : ad === 'modeller' ? await modellerSayfasi() : maliyetSayfasi();
   if (aktifSekme !== ad) return;
   sayfa.replaceChildren(...icerik); sayfa.classList.add('acik');
 }
@@ -3585,9 +3588,12 @@ function maliyetSayfasi() {
   });
   if (!satirlar.length) { const tr = el('tr'); const td = el('td', null, 'Bugün henüz koşu yok.'); td.colSpan = 7; tr.append(td); tablo.append(tr); }
   const kap = el('div', 'maliyet-kap'); kap.append(tablo);
-  return [el('h2', null, 'Maliyet'), el('p', 'alt', sayac.maliyet_notu || 'Ajanlar yalnız iş gelince çalışır; boştayken model çağrısı yok.'),
+  const git = el('button', 'mini', 'Model kullanımı · 30 gün →'); git.type = 'button'; git.onclick = () => sekmeAc('modeller');
+  return [el('h2', null, 'Maliyet'), git, el('p', 'alt', sayac.maliyet_notu || 'Ajanlar yalnız iş gelince çalışır; boştayken model çağrısı yok.'),
     el('p', 'alt', 'Pro aboneliğinde gerçek fatura değil; API liste fiyatı eşdeğeri.'), ozet, kap];
 }
+/* ---------- model kullanımı: kod on-yuz/modeller.js'de (tam sayfa modeller.html de kullanır) ---------- */
+function modellerSayfasi() { return window.ModelKullanim.sayfa({ tamSayfaDugmesi:true }); }
 /* ---------- dizin sekmesi: ~/beyin altında gezin, .md dosyalarını oku (salt okuma) ---------- */
 let dizinYol = '', dizinDosya = null, dizinDuzenle = false;
 function mdSatirici(kap, s) {
@@ -4295,7 +4301,7 @@ async function ongorulebilirlikSayfasi() {
       (d.alt.length ? ' · ' : '') + 'CEO aynı anda en çok 1 + ' + d.maks_alt + ' koşu. Koşular yine sırayla yürür (ortak kilit).'));
   if (!d.kuyruk.length) kuy.append(el('p', 'alt', 'Kuyrukta bekleyen iş yok.'));
   const kuyListe = el('ul', 'ong-oto');
-  d.kuyruk.forEach((q, i) => { const li = el('li'); li.append(el('b', null, (i + 1) + '. ' + q.ajan), el('span', null, (q.etiket || q.kaynak) + ' · ' + ongTarih(q.zaman))); kuyListe.append(li); });
+  d.kuyruk.forEach((q, i) => { const li = el('li'); li.append(el('b', null, (i + 1) + '. ' + q.ajan), el('span', null, (q.etiket || q.kaynak) + ' · ' + ongTarih(q.zaman) + (q.limit_sonra ? ' · limit: ' + ongTarih(q.limit_sonra) + ' sonra başlar' : ''))); kuyListe.append(li); });
   kuy.append(kuyListe);
   // (c) ekleme formu
   const form = el('form', 'kart gelistirme-form ong-form'); form.autocomplete = 'off';
