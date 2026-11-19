@@ -89,6 +89,11 @@ tanımın tamamı kuyruk kapasitesini tüketmez.
   argümanlı koşuda `~/.local/state/beyin/kosular/<ts>-<is>.gorev.json` yazar (`gorev`, yuvarlanmamış `maliyet_usd`,
   `ts`); motor deneme başlangıcından sonraki kayıtları toplar (`hat_maliyeti` olayı). Kayıt yoksa (eski hat, Codex)
   tahmin gerçekleşmiş sayılır. Sınır aşılacaksa adım başlamaz, koşu `inceleme` (`butce`) olur.
+- **Maliyet modeli (V2):** yukarıdaki tahmin *statik* tahmindir. Aynı akışın aynı adımının en az 5 ölçülmüş denemesi
+  varsa (son 50; yalnız `maliyet_usd > 0` gerçek ölçüm, iptal/ölçülemeyen sayılmaz) bütçe kontrolü p90 kullanır
+  (en yakın sıra; görülmüş bir değer). p90 statik tahminin %10'unun altına inmez; statikten yüksekse yüksek olan
+  kullanılır. `adim_basladi` olayında `tahmin_kaynagi` (`statik`|`p90`); `/api/akis` tanım başına `maliyet_modeli`
+  (`n`, `p50`, `p90`, `statik`, `kullanilan`, `kaynak`).
 
 ## Hata politikası ve retry
 
