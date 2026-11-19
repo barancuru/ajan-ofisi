@@ -106,6 +106,21 @@ class SaklamaTest(MotorTabani):
         self.assertFalse(os.path.exists(eski))
         self.assertTrue(os.path.exists(yeni) and os.path.exists(yabanci))
 
+    def test_arsivden_sonra_eklenen_satir_silinmez(self):
+        k, _ = self.kosu()
+        self.eskit(k)
+        gercek = akis_saklama._arsiv_yaz
+
+        def araya_gir(kosu_id, veri):
+            yol = gercek(kosu_id, veri)
+            self.depo.baglanti().execute("INSERT INTO olaylar (kosu_id, anahtar, tur, veri_json, zaman_ts) "
+                                         "VALUES (?, 'gec', 'x', '{}', 0)", (kosu_id,))
+            return yol
+        with mock.patch.object(akis_saklama, "_arsiv_yaz", araya_gir):
+            r = self.calistir(uygula=True)
+        self.assertEqual(r["atlanan"][0]["neden"], "arşivden sonra satır değişti")
+        self.assertGreater(self.satir_sayisi(k), 0)
+
     def test_cok_kisa_sure_reddedilir(self):
         with self.assertRaises(ValueError):
             self.calistir(gun=0, uygula=True)

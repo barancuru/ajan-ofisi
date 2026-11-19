@@ -125,6 +125,10 @@ def calistir(depo=None, gun=VARSAYILAN_GUN, uygula=False, saat=time.time):
             if kosu_id not in adaylar(depo, sinir):
                 rapor["atlanan"].append({"run_id": kosu_id, "neden": "koşul değişti"})
                 continue
+            # arşivlenmemiş satır silinmesin: arşivden sonra eklenen olay/deneme varsa bu tur atlanır
+            if {t: len(v) for t, v in _satirlar(b, kosu_id).items()} != {t: len(v) for t, v in veri.items()}:
+                rapor["atlanan"].append({"run_id": kosu_id, "neden": "arşivden sonra satır değişti"})
+                continue
             for t in ("olaylar", "denemeler", "adimlar"):
                 b.execute(f"DELETE FROM {t} WHERE kosu_id=?", (kosu_id,))
             b.execute("DELETE FROM kosular WHERE id=?", (kosu_id,))
