@@ -90,7 +90,8 @@ class KosucuIptalTest(HesapOrtami):
 
         def uzun_surec(komut, **kw):
             kw.pop("env", None)
-            p = gercek([sys.executable, "-c", "import time\nprint('{}', flush=True)\ntime.sleep(60)"], **kw)
+            mesaj = json.dumps({"type": "assistant", "message": {"id": "m1", "usage": {"input_tokens": 1000, "output_tokens": 2000}}})
+            p = gercek([sys.executable, "-c", f"import time\nprint({mesaj!r}, flush=True)\ntime.sleep(60)"], **kw)
             cocuklar.append(p)
             return p
         ajan = {"id": "a", "ad": "A", "oda": "o", "model": "sonnet", "cwd": self.d}
@@ -102,12 +103,18 @@ class KosucuIptalTest(HesapOrtami):
                 mock.patch.object(kosucu, "api_anahtari", return_value=(None, None)), \
                 mock.patch.object(kosucu.subprocess, "Popen", side_effect=uzun_surec), \
                 mock.patch.object(kosucu, "yedek_kos") as yedek, \
-                mock.patch.object(kosucu, "limit_bekleyen_yaz") as limit:
+                mock.patch.object(kosucu, "limit_bekleyen_yaz") as limit, \
+                mock.patch.object(kosucu, "token_isle", side_effect=lambda m, b, s: s["tekil"].isle(m.get("id"), m.get("usage"))):
             zamanlayici.start()
             t0 = time.time()
             kosucu.kos(arg)
         self.assertLess(time.time() - t0, 20)
         self.assertEqual(self.bitis["hata"], kosucu.IPTAL_HATASI)
+        # öldürülen claude result yazmadı: görülen usage'tan kısmi maliyet (sonnet liste fiyatı)
+        self.assertAlmostEqual(self.bitis["sonuc"]["total_cost_usd"], kosucu.token_sayac.usd_tahmini(
+            {"input_tokens": 1000, "output_tokens": 2000}, "sonnet"))
+        self.assertGreater(self.bitis["sonuc"]["total_cost_usd"], 0)
+        self.assertTrue(self.bitis["sonuc"]["is_error"])
         self.assertEqual(len(cocuklar), 1)                 # ikinci hesap/yedek denenmedi
         self.assertIsNotNone(cocuklar[0].poll())           # claude süreci yetim kalmadı
         yedek.assert_not_called()
@@ -141,6 +148,33 @@ class MotorIptalNotuTest(unittest.TestCase):
                 d = self_.m.iptal(k)
                 self_.assertEqual(self_.ortam.durdurulan, [self_.son_ref()])
                 self_.assertTrue(any("durdurma sinyali gönderildi" in n for n in d["notlar"]), d["notlar"])
+        r = unittest.TestResult()
+        T().run(r)
+        self.assertTrue(r.wasSuccessful(), r.failures + r.errors)
+
+
+class GecMaliyetTest(unittest.TestCase):
+    def test_iptal_edilen_kosunun_gec_maliyeti_yazilir_gecis_yok(self):
+        from test_akis_motor import MotorTabani
+
+        class T(MotorTabani):
+            def runTest(self_):
+                from test_akis_birim import taban_tanim
+                t = self_.tanim(taban_tanim())
+                with mock.patch.object(akis_motor, "ETKIN_AKISLAR", (t["id"],)):
+                    k = self_.m.baslat(t["id"], {"konu": "x"})["run_id"]
+                self_.m.tur()
+                self_.m.iptal(k)
+                self_.ajan_bitir(self_.son_ref(), "", durum="hata", hata=kosucu.IPTAL_HATASI, maliyet=0.0421)
+                self_.m.tur()
+                d = self_.detay(k)
+                self_.assertEqual(d["durum"], "iptal")
+                self_.assertAlmostEqual(d["maliyet_usd"], 0.0421)
+                self_.assertTrue(any(o["tur"] == "gec_maliyet" for o in d["olaylar"]), [o["tur"] for o in d["olaylar"]])
+                self_.m.tur()                                          # tekrar gelen sonuç iki kez sayılmaz
+                self_.assertAlmostEqual(self_.detay(k)["maliyet_usd"], 0.0421)
+                # yok sayılan deneme maliyet modeline örnek olmaz (yalnız basarili/basarisiz)
+                self_.assertEqual(self_.m.maliyet_modeli(t["id"])["a"]["n"], 0)
         r = unittest.TestResult()
         T().run(r)
         self.assertTrue(r.wasSuccessful(), r.failures + r.errors)

@@ -11,7 +11,7 @@ Her kalem ayrı dal + PR; Aşama 1/2 sabitleri V2 PR'larında değişmez. Kalem 
 2. [x] V1.1 #7 canlı iptal denemesi (`r1b825e849ab1`): sinyal → claude 9 sn'de durdu, iptal sonucu, yedek/limit yok.
 3. [~] HomeOS aşama 2: taslak PR #5 (`akis-asama2`, 1.0.90). Merge = pilotu açma kararı (kullanıcı); ön koşul `.zip.kimlik`.
 4. [x] V2 maliyet modeli (p50/p90, bu dal).
-5. [ ] İptal edilen denemenin maliyeti: claude öldürülünce `total_cost_usd` yok → deneme 0/None sayılır. Bütçede
+5. [x] İptal edilen denemenin maliyeti (kosucu kısmi maliyet + motor `gec_maliyet` taraması): claude öldürülünce `total_cost_usd` yok → deneme 0/None sayılır. Bütçede
        iptal anına dek harcama görünmez (koşu zaten iptal, risk düşük); `stream-json` usage'tan kısmi maliyet.
 6. [x] V2 zamanlayıcı tetiklemesi → 7. [ ] olay tetiklemesi (yeni yetki eklemez).
 8. [ ] V2 dinamik fan-out → 9. [ ] `workflow_call` (derinlik ≤ 2).

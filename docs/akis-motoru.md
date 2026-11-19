@@ -189,6 +189,10 @@ kosucu sonucu `son: false` yazar; motor aynı denemeyi beklemeyi sürdürür, ke
   sinyali yalnız `akis_ref`'li koşuda dinler: claude sürecini öldürür, iptal hatasıyla bitiş yazar, ikinci hesaba,
   API/Codex yedeğine ya da limit kuyruğuna geçmez. Yarım kalmış yan etki olabilir: not bunu söyler, operatör kontrol
   eder (koşu zaten `iptal`). Hat görevi sürer ve Geliştirme sekmesinden yönetilir.
+- İptal maliyeti (V2): öldürülen claude `total_cost_usd` yazmaz; kosucu iptal anına dek gördüğü usage'tan liste
+  fiyatıyla kısmi maliyet yazar (`maliyet_kismi`, tahmin). Motor turda, son 24 saatte `iptal` olmuş ve maliyeti
+  işlenmemiş denemelerin sonuç dosyasını bir kez okur, maliyeti koşuya ekler (`gec_maliyet` olayı; geçiş yok). Sonuç
+  1 saatte gelmezse 0 yazılıp taranmaz. İptal edilen deneme maliyet modeline örnek olmaz.
 
 ## Zamanlayıcı tetiklemesi (V2)
 Öngörülebilirlik'te tekrar eden iş türü **Workflow**: `{akis, girdiler, cron}` (`durum/tekrarlar.json`, aynı systemd

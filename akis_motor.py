@@ -792,6 +792,10 @@ class Motor:
         except Exception:  # noqa: BLE001
             self._kuyruk_refleri = None
         try:
+            try:
+                self._iptal_maliyetleri()
+            except Exception as e:  # noqa: BLE001 - muhasebe taraması motoru durdurmaz
+                self._motor_hatasi("iptal-maliyet", e)
             for k in self.depo.kosular(durumlar=akis_db.AKTIF_KOSU, sinir=MAKS_AKTIF_KOSU * 4):
                 try:
                     self._kosu_isle(k["id"])
@@ -799,6 +803,37 @@ class Motor:
                     self._motor_hatasi(k["id"], e)
         finally:
             self._kuyruk_refleri = None
+
+    IPTAL_MALIYET_PENCERE_SN = 24 * 3600
+    IPTAL_MALIYET_BEKLE_SN = 3600
+
+    def _iptal_maliyetleri(self):
+        """İptal anında `iptal` olan ajan denemesinin sonucu (kosucu SIGUSR1 sonrası kısmi maliyet) sonradan gelir:
+        maliyet bir kez koşuya ve denemeye yazılır (geçiş yok, yalnız muhasebe). maliyet_usd NULL = işlenmedi;
+        sonuç gelmezse BEKLE süresinden sonra 0 yazılıp taranmaz. Boşta tek indeksli SQL sorgusu."""
+        simdi = self.saat()
+        rows = self.depo.baglanti().execute(
+            "SELECT id, kosu_id, adim_id, deneme, iterasyon, ref, bitis_ts FROM denemeler WHERE durum='iptal' "
+            "AND maliyet_usd IS NULL AND bitis_ts > ? ORDER BY id LIMIT 20", (simdi - self.IPTAL_MALIYET_PENCERE_SN,)).fetchall()
+        for d in rows:
+            veri = _json_oku(os.path.join(sonuc_dizini(), f"{d['ref']}.json"))
+            m = veri.get("maliyet_usd") if isinstance(veri, dict) and veri.get("son") else None
+            m = m if isinstance(m, (int, float)) and not isinstance(m, bool) and 0 < m < 1e6 else None
+            if m is None and isinstance(veri, dict) and veri.get("son"):
+                m = 0.0                                   # sonuç geldi, maliyet yok
+            elif m is None:
+                if simdi - (d["bitis_ts"] or simdi) < self.IPTAL_MALIYET_BEKLE_SN:
+                    continue
+                m = 0.0                                   # hiç sonuç gelmedi (kuyruktan çekilmiş / hat denemesi)
+            with self._islem() as b:
+                c = b.execute("UPDATE denemeler SET maliyet_usd=? WHERE id=? AND durum='iptal' AND maliyet_usd IS NULL",
+                              (m, d["id"]))
+                if c.rowcount != 1 or not m:
+                    continue
+                kosu = self._kosu_al(b, d["kosu_id"])
+                self._kosu_yaz(b, d["kosu_id"], maliyet_usd=kosu["maliyet_usd"] + m)
+                self._olay(b, self._kosu_al(b, d["kosu_id"]), "gec_maliyet", adim=d["adim_id"], deneme=d["deneme"],
+                           durum="iptal", iterasyon=d["iterasyon"], cost_usd=m)
 
     MOTOR_HATASI_ARALIK_SN = 600
 
@@ -1694,7 +1729,13 @@ class Motor:
                                    iterasyon=d["iterasyon"])
                     return
             if kosu["durum"] in akis_db.SON_KOSU:
-                self._deneme_bitir(b, deneme_id, "yok_sayildi")
+                # kapanmış koşu (ör. iptal) geç sonucu: geçiş yok, yalnız harcanan maliyet koşuya yazılır (muhasebe)
+                m = veri.get("maliyet_usd") if durum == "bitti" and adim["tur"] == "agent_task" and isinstance(veri, dict) else None
+                m = m if isinstance(m, (int, float)) and not isinstance(m, bool) and 0 < m < 1e6 else None
+                if self._deneme_bitir(b, deneme_id, "yok_sayildi", maliyet_usd=m) and m:
+                    self._kosu_yaz(b, kosu_id, maliyet_usd=kosu["maliyet_usd"] + m)
+                    self._olay(b, self._kosu_al(b, kosu_id), "gec_maliyet", adim=d["adim_id"], deneme=d["deneme"],
+                               durum="yok_sayildi", iterasyon=d["iterasyon"], cost_usd=m)
                 return
             if adim["tur"] == "agent_task" and durum == "bitti":
                 sinif, cikti, maliyet, hata = self._ajan_sonucunu_isle(b, kosu, tanim, adim, d, veri)
