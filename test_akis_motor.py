@@ -939,6 +939,9 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
             b.execute("UPDATE adimlar SET durum='hazir' WHERE kosu_id=? AND adim_id='duzeltme'", (k,))
         self.m.tur()
         self.assertEqual(self.ortam.reddler, [])
+        d = self.detay(k)
+        self.assertEqual(d["durum"], "inceleme")
+        self.assertIn("bilinmiyor", d["neden"]["metin"])
 
     def test_duzeltme_hedef_karti_uat_degilse_yeniden_dene_409(self):
         k = self.hat_incelemede()
@@ -948,6 +951,9 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
             b.execute("INSERT INTO denemeler(kosu_id, adim_id, iterasyon, deneme, ref, durum, tutamac_json, baslangic_ts) "
                       "VALUES (?,?,?,?,?,?,?,?)", (k, "uygulama", 0, 9, "ak-00000000ffff", "basarili",
                                                    json.dumps({"dosya": "G0.md"}), 0))
+            b.execute("UPDATE adimlar SET cikti_json=? WHERE kosu_id=? AND adim_id='uygulama'",
+                      (json.dumps({"durum": "uat", "dosya": "G0.md", "surum": "0.10.1", "dal": "beyin/1118-x",
+                                   "sha256": "a" * 64}), k))
         self.ortam.gorevler["G0.md"]["durum"] = "calisiyor"
         with self.assertRaises(akis_motor.AkisHatasi) as c:
             self.m.devam(k, "yeniden_dene")

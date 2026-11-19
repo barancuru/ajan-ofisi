@@ -554,8 +554,10 @@ class KuyrukIptalSiralamaTest(OfisTabani):
                 f.write(sunucu.on_bilgi_yaz(m, "sha256", "c" * 64))
             return asil(metin, not_, kimden)
         with mock.patch.object(sunucu, "geri_bildirim_ekle", hat_araya_girdi):
-            with self.assertRaises(akis_motor.BaslatmaHatasi):
+            with self.assertRaises(akis_motor.BaslatmaHatasi) as c:
                 self.ortam.gelistirme_reddet(dosya, "düzelt", "a" * 64)
+        self.assertEqual(c.exception.kod, 409)
+        self.assertIn("değişti", str(c.exception))
         fm = self.ortam.gelistirme_oku(dosya)
         self.assertEqual((fm["sha256"], fm["onay"]), ("c" * 64, "bekliyor"))   # hattın yazdığı korunur
 

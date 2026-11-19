@@ -379,13 +379,13 @@ class Motor:
                             if fm.get("onay") == "evet" or fm.get("durum") == "bitti":
                                 raise AkisHatasi(409, "düzeltilecek kart onaylanmış ya da yayına çıkmış: düzeltme yapılamaz; "
                                                       "başarısız say ya da iptal et")
+                            test_edilen = (self._son_basarili_cikti(b, kosu_id, kaynak_adim["hedef_adim"]) or {}).get("sha256")
+                            if not test_edilen:   # kalıcı: geçici 'UAT değil' mesajından önce (boşuna bekletmesin)
+                                raise AkisHatasi(409, "kalite kapısının test ettiği paket bilinmiyor; düzeltme yapılmaz. "
+                                                      "Başarısız say/iptal et ya da yeni koşu başlat")
                             if fm.get("durum") != "uat":
                                 raise AkisHatasi(409, f"düzeltilecek kart UAT'de değil (durum {fm.get('durum') or '-'}): "
                                                       "kart UAT'ye gelince yeniden dene")
-                            test_edilen = (self._son_basarili_cikti(b, kosu_id, kaynak_adim["hedef_adim"]) or {}).get("sha256")
-                            if not test_edilen:   # gönderimle aynı kural: test edilen paket bilinmiyorsa düzeltme yok
-                                raise AkisHatasi(409, "kalite kapısının test ettiği paket bilinmiyor; düzeltme yapılmaz. "
-                                                      "Başarısız say/iptal et ya da yeni koşu başlat")
                             if fm.get("sha256") != test_edilen:
                                 raise AkisHatasi(409, "kart yeni bir sürümde: kalite kapısı bu sürümü test etmedi; eski "
                                                       "rapora göre reddedilmez. Başarısız say/iptal et ya da yeni koşu başlat")
