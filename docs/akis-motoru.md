@@ -1,5 +1,7 @@
 # Workflow & Loop Engine (V1) — mimari
 
+> Ürün vizyonu ve yol haritası: `akis-vizyon.md`. Sıradaki işler: `akis-backlog.md`.
+
 Ajan Ofisi'nin mevcut tek-koşu düzenini (buton/CEO → `gorev_baslat()` → kuyruk → tmux → `kosucu.py` → `claude -p`)
 değiştirmeden üstüne kurulan, sıralı ve koşullu akış motoru. Yalnız Python standart kütüphanesi ve SQLite.
 
@@ -82,8 +84,11 @@ tanımın tamamı kuyruk kapasitesini tüketmez.
   (`dongu_siniri`, yeniden denenemez) ya da fail.
 - Koşu başına `max_ajan_cagrisi`, `max_sure_sn`, `max_maliyet_usd`. Maliyet her ajan/hat adımından **önce** kontrol edilir:
   gerçekleşen maliyet + açık tahminler + sıradaki tahmin. Ajan tahmini `tahmini_usd`, yoksa ajanın `butce_usd`'si
-  (opus'ta 2 katı). Hat turu varsayılan 6 $ (sonnet 3 $ tavan + hattın kendi düzeltme turu). Hat maliyeti
-  `olaylar.jsonl`'e dönmediği için tahmin olarak kalır. Sınır aşılacaksa adım başlamaz, koşu `inceleme` (`butce`) olur.
+  (opus'ta 2 katı). Hat turu varsayılan 6 $ (sonnet 3 $ tavan + hattın kendi düzeltme turu). Hat turu bitince
+  (UAT, takıldı ya da ret) tahmin, hattın göreve bağladığı gerçek maliyetle değişir (V1.1): beyin `kos()` görev
+  argümanlı koşuda `~/.local/state/beyin/kosular/<ts>-<is>.gorev.json` yazar (`gorev`, yuvarlanmamış `maliyet_usd`,
+  `ts`); motor deneme başlangıcından sonraki kayıtları toplar (`hat_maliyeti` olayı). Kayıt yoksa (eski hat, Codex)
+  tahmin gerçekleşmiş sayılır. Sınır aşılacaksa adım başlamaz, koşu `inceleme` (`butce`) olur.
 
 ## Hata politikası ve retry
 
@@ -172,8 +177,35 @@ kosucu sonucu `son: false` yazar; motor aynı denemeyi beklemeyi sürdürür, ke
 - Sonuç işleme `UPDATE denemeler ... WHERE durum IN (uçuşta)` ile tek seferliktir. `olaylar.anahtar` UNIQUE olduğu
   için aynı olay iki kez yayınlanmaz.
 - Duraklatma yeni adım başlatmaz, uçuştaki sonuçları toplamayı sürdürür.
-- İptal kuyruktaki denemeyi kuyruktan ve limit-bekleyen'den çıkarır. Çalışan ajan koşusu **durdurulmaz**; sonucu
-  `yok_sayildi` olur. Hat görevi sürer ve Geliştirme sekmesinden yönetilir. Panel ve olaylar bunu açıkça söyler.
+- İptal kuyruktaki denemeyi kuyruktan ve limit-bekleyen'den çıkarır. Çalışan ajan koşusuna (V1.1) `SIGUSR1` gider:
+  süreç kosucu'nun `<ref>.basladi.json` işaretinden bulunur ve `/proc/<pid>/cmdline` ile doğrulanır (bu koşunun arg
+  dosyasıyla `kosucu.py`); doğrulanamazsa sinyal gönderilmez ve not "durdurulamadı" der, sonuç yok sayılır. kosucu
+  sinyali yalnız `akis_ref`'li koşuda dinler: claude sürecini öldürür, iptal hatasıyla bitiş yazar, ikinci hesaba,
+  API/Codex yedeğine ya da limit kuyruğuna geçmez. Yarım kalmış yan etki olabilir: not bunu söyler, operatör kontrol
+  eder (koşu zaten `iptal`). Hat görevi sürer ve Geliştirme sekmesinden yönetilir.
+
+## Operatör kararları (V1.1)
+
+- **Adımı başarılı say** (`karar: basarili_say, adim, gerekce, cikti`): yalnız ofis girişi (`X-Ofis-Kapi`; motor da
+  denetler), gerekçe 10–300 karakter (sır taraması). Yalnız inceleme sebebi `adim` ya da `sir` olan, satırı
+  `inceleme` durumundaki ve uçuşta denemesi olmayan **agent_task** adımı. Kapı, onay, hat ve koşul adımı başarılı
+  sayılamaz (kanıtları komut çıkışı ya da insan onayıdır); tanım yönlendirmesi (`tanim`), `kaynak`, sınırlar,
+  `erken_onay`, `kapali` da hayır. Tanımın zorunlu çıktı alanlarını operatör verir (aynı tür/boyut doğrulaması).
+  Tanımın normal `sonraki` geçişi uygulanır; `operator_basarili_saydi` olayı gerekçeyi taşır.
+- **Ek bütçe** (`karar: ek_butce, ek_usd, ek_cagri, gerekce`): kapı + gerekçe, yalnız `butce` incelemesinde. Toplam ek
+  tanım sınırını aşamaz (bütçe ve çağrı en çok iki katı). Tanım anlık görüntüsü değişmez: ek, DB migration 4
+  sütunlarında (`ek_maliyet_usd`, `ek_ajan_cagrisi`); etkin sınır = tanım + ek. Adım `hazir` olur ve başlatmadan önceki
+  bütçe kontrolünden yeniden geçer. `butce` yine `yeniden_dene` ile açılmaz. `ek_butce` olayı denetim izidir.
+  Geri dönüşte (1.0.88) eski kod sütunları okumaz: ek bütçe yok sayılır.
+
+## Saklama (V1.1)
+
+`python3 akis_saklama.py [--gun 90] [--uygula]`. Varsayılan kuru koşudur: neyin kaldırılacağını JSON olarak yazar,
+hiçbir şeye dokunmaz. `--uygula` her koşu için önce `durum/akis-arsiv/<run>.json.gz` (0600, fsync, atomik ad) yazar,
+sonra tek işlemde koşulları yeniden kontrol edip DB satırlarını, ardından `durum/akis-sonuc/<ref>*` dosyalarını siler.
+Arşiv yazılamazsa koşu silinmez. Yalnız bitmiş (`basarili|basarisiz|iptal`) ve uçuşta denemesi kalmamış koşular;
+`--gun` en az 7. Sahipsiz sonuç dosyası (ref DB'de yok) yalnız süreden eskiyse. Silinen koşunun idempotency anahtarı
+serbest kalır; ona bağlı eski Geliştirme kartı "kapı durumu okunamadı" gösterir. Zamanlanmış değildir.
 
 ## Veri güvenliği
 
@@ -206,7 +238,7 @@ kosucu sonucu `son: false` yazar; motor aynı denemeyi beklemeyi sürdürür, ke
 | `GET /api/akis/detay?id=r…` | — | adımlar, denemeler, olaylar (istem/ham çıktı yok) |
 | `POST /api/akis/baslat` | `{akis, girdiler, idem_anahtari?}` | 202; aynı anahtar → aynı koşu (`tekrar: true`) |
 | `POST /api/akis/duraklat` | `{run_id}` | |
-| `POST /api/akis/devam` | `{run_id, karar?: yeniden_dene \| basarisiz_say}` | inceleme için karar zorunlu |
+| `POST /api/akis/devam` | `{run_id, karar?: yeniden_dene \| basarisiz_say \| basarili_say \| ek_butce}` | inceleme için karar zorunlu; son ikisi kapı + `gerekce` ister |
 | `POST /api/akis/iptal` | `{run_id}` | |
 | `POST /api/akis/onay` | `{run_id, adim, karar: evet \| hayir, not?}` | hassas kategori kapı ister; dağıtım onayı burada verilmez |
 

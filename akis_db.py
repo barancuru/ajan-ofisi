@@ -86,6 +86,12 @@ MIGRATIONLAR = [
     UPDATE kosular SET bekleme_baslangic_ts=guncelleme_ts
         WHERE durum IN ('inceleme','duraklatildi') AND bekleme_baslangic_ts IS NULL
     """,
+    # 4 (V1.1 #9): operatörün verdiği ek bütçe. Tanım anlık görüntüsü (tanim_json) değişmez; etkin sınır = tanım + ek.
+    # Eski kod (1.0.88) bu sütunları okumaz: geri dönüşte ek bütçe yok sayılır (sınır daralır, fail-closed).
+    """
+    ALTER TABLE kosular ADD COLUMN ek_maliyet_usd REAL NOT NULL DEFAULT 0;
+    ALTER TABLE kosular ADD COLUMN ek_ajan_cagrisi INTEGER NOT NULL DEFAULT 0
+    """,
 ]
 
 AKTIF_KOSU = ("calisiyor", "duraklatildi", "inceleme")

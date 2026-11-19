@@ -1,10 +1,12 @@
-# Workflow backlog (V2, V3)
+# Workflow backlog (V1.1, V2, V3)
+
+> Kavramsal tasarım ve başarı ölçütleri: `akis-vizyon.md`.
 
 > Bilinçli olarak `~/beyin/gorevler/` görevi olarak açılmadı: hat `durum: hazir` görevleri kendiliğinden alır ve
 > ajan-ofisi oto-onaylı olabilir. Bir kalem seçilince Geliştirme sekmesinden (ya da elle) görev açılır.
 
 ## V1.1 (öncelikli)
-1. **Hat maliyet eşlemesi** (kullanıcı kararı 2026-11-19: V1.1). Koşu başına gerçek maliyet var
+1. ~~**Hat maliyet eşlemesi**~~ — V1.1: beyin dalı `hat-maliyet-esleme` (`adc0346`, `maliyet_kimligi_yaz`) + ofis `hat_maliyeti`; kabul: iki haiku turu 0,0105 $ (tahmin 12 $): (kullanıcı kararı 2026-11-19: V1.1). Koşu başına gerçek maliyet var
    (`~/.local/state/beyin/kosular/<zaman>-gelistir.json` → `total_cost_usd`, `.cache/kayit-tam.jsonl` → `maliyet`) ama
    görev yolu yok; paralel hatlarda göreve bağlanamaz. Öneri: `~/beyin/bin/calistir` `kos()` `kayit`'e ve JSON yanına
    `gorev` (4. argüman, görev dosyası) yazsın; adaptör bunu okuyup tahmini (6 $/tur) gerçekleşenle değiştirsin.
@@ -17,14 +19,14 @@
 5. **Dış çağrıda kilit tutma**: motor, iptal yarışını kapatmak için `gorev_baslat`/görev dosyası yazımı süresince
    kendi kilidini tutuyor; `baslatma.lock` doluysa API birkaç saniye bekleyebilir (kilitlenme yolu yok: kuyruk tarafı
    motor kilidini almaz). Daha dar çözüm: denemeyi DB'de "sahiplenildi" işaretle, çağrıdan sonra yeniden kontrol et.
-6. **UAT kartında workflow uyarısı**: `kaynak: akis` görevlerinde Geliştirme kartı "kalite kapısı bekleniyor" göstersin.
+6. ~~**UAT kartında workflow uyarısı**~~ — V1.1: `Motor.hat_karti_durumu` + kart uyarısı (kapı bekleniyor / onay bekliyor / kapandı / okunamadı):: `kaynak: akis` görevlerinde Geliştirme kartı "kalite kapısı bekleniyor" göstersin.
    Şu an kapıdan önce elle onay yalnız sonradan `erken_onay` olarak işaretleniyor.
-7. **Çalışan koşuyu iptal**: iptal şimdilik çalışan ajanı durdurmuyor. tmux penceresini kapatmak + `kosucu` sinyal
+7. ~~**Çalışan koşuyu iptal**~~ — V1.1: doğrulanmış SIGUSR1 + kosucu iptal yolu (yedeğe/limite geçmez):: iptal şimdilik çalışan ajanı durdurmuyor. tmux penceresini kapatmak + `kosucu` sinyal
    yakalayıp bitiş yazmak (yarım yan etkiler için yine manual_review).
-8. **Hat ara durumları**: hat `calisiyor`/`deneme` alanlarını motor adım ilerlemesine yansıtsın (şimdi yalnız son durum).
-9. **Operatör kararları**: `inceleme`de "adımı başarılı say (gerekçe zorunlu, kapı imzalı)" ve "ek bütçe ver" eylemleri.
-10. **Saklama**: bitmiş koşular ve `durum/akis-sonuc/*` için 90 gün sonra arşiv/silme.
-11. **SSE süzgeci**: `/api/olaylar?tur=akis` ile yalnız workflow olayları; panel sayfa yenilemek yerine satır günceller.
+8. ~~**Hat ara durumları**~~ — V1.1: deneme tutamacında `hat: {durum, deneme}`, değişince `hat_ilerledi` olayı; karar vermez:: hat `calisiyor`/`deneme` alanlarını motor adım ilerlemesine yansıtsın (şimdi yalnız son durum).
+9. ~~**Operatör kararları**~~ — V1.1: `basarili_say` (yalnız başarısız agent_task, kapı + gerekçe) ve `ek_butce` (migration 4, en çok 2×):: `inceleme`de "adımı başarılı say (gerekçe zorunlu, kapı imzalı)" ve "ek bütçe ver" eylemleri.
+10. ~~**Saklama**~~ — V1.1: `akis_saklama.py` (varsayılan kuru koşu; `--uygula` arşivler `durum/akis-arsiv/<run>.json.gz` sonra siler; zamanlanmadı, açılması kullanıcı kararı):: bitmiş koşular ve `durum/akis-sonuc/*` için 90 gün sonra arşiv/silme.
+11. ~~**SSE süzgeci**~~ — V1.1: `?tur=` (geçmiş + canlı), Workflow sekmesi ayrı akış açar ve olay gelen koşu satırını yerinde günceller; önceden `akis` olayı istemcide hiç dinlenmiyordu:: `/api/olaylar?tur=akis` ile yalnız workflow olayları; panel sayfa yenilemek yerine satır günceller.
 
 ## V2 — agentic orchestration (deterministik çekirdeğin üstünde)
 - **Planlayıcı adım türü (`plan_step`)**: model, tanımın izin verdiği alt-grafik şablonlarından birini ve parametresini

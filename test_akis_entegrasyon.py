@@ -211,6 +211,45 @@ class HatAdaptoruTest(OfisTabani):
         self.assertNotIn("onay", fm)                              # gövdedeki 'onay: evet' alan sayılmaz
         self.assertEqual(self.ortam.gelistirme_bul(REF), dosya)
 
+    def test_gelistirme_kartinda_workflow_kapi_durumu(self):
+        """V1.1 #6: kaynak: akis kartı motor durumunu taşır; motor okunamazsa 'bilinmiyor' (kapı geçmiş sayılmaz)."""
+        with mock.patch.object(sunucu, "gelistirme_projeleri", lambda: ["homeos"]):
+            dosya = self.ortam.gelistirme_yaz("homeos", "Rapor", "x", "sonnet", REF)
+            sunucu.gelistirme_gorevi_yaz("homeos", "Elle", "x", "sonnet")
+            sahte = mock.Mock()
+            sahte.hat_karti_durumu.return_value = {"run_id": "r1", "kosu_durumu": "calisiyor", "durum": "kapi_bekleniyor"}
+            with mock.patch.object(sunucu, "motor", lambda: sahte):
+                kartlar = {g["dosya"]: g for g in sunucu.gelistirme_yaniti()["gorevler"]}
+            self.assertEqual(kartlar[dosya]["akis"]["durum"], "kapi_bekleniyor")
+            sahte.hat_karti_durumu.assert_called_once_with(REF)
+            self.assertNotIn("akis", kartlar["Elle.md"])
+            self.assertNotIn("akis_ref", kartlar[dosya])
+            sahte.hat_karti_durumu.side_effect = OSError("db yok")
+            with mock.patch.object(sunucu, "motor", lambda: sahte):
+                kartlar = {g["dosya"]: g for g in sunucu.gelistirme_yaniti()["gorevler"]}
+            self.assertEqual(kartlar[dosya]["akis"], {"durum": "bilinmiyor"})
+
+    def test_hat_maliyeti_kimlik_dosyalarindan(self):
+        """V1.1 #1: beyin kos() <ts>-<is>.gorev.json biçimi; yalnız bu görev, başlangıçtan sonra, geçerli sayı."""
+        d = os.path.join(self.d, "beyin-kosular")
+        os.makedirs(d)
+        t0 = time.time()
+        kayitlar = {"20261119-101010-11-gelistir.gorev.json": {"gorev": "R.md", "maliyet_usd": 0.00525, "ts": t0 + 5},
+                    "20261119-101011-12-teshis.gorev.json": {"gorev": "R.md", "maliyet_usd": 0.00525, "ts": t0 + 9},
+                    "20261119-101012-13-gelistir.gorev.json": {"gorev": "Baska.md", "maliyet_usd": 9, "ts": t0 + 5},
+                    "20261119-101013-14-gelistir.gorev.json": {"gorev": "R.md", "maliyet_usd": 9, "ts": t0 - 100},
+                    "20261119-101014-15-gelistir.gorev.json": {"gorev": "R.md", "maliyet_usd": True, "ts": t0 + 5},
+                    "yabanci.gorev.json": {"gorev": "R.md", "maliyet_usd": 9, "ts": t0 + 5}}
+        for ad, v in kayitlar.items():
+            with open(os.path.join(d, ad), "w") as f:
+                json.dump(v, f)
+        with mock.patch.object(akis_ofis.OfisOrtami, "HAT_KOSU_DIZINI", d):
+            self.assertAlmostEqual(self.ortam.hat_maliyeti("R.md", t0), 0.0105)
+            self.assertIsNone(self.ortam.hat_maliyeti("Yok.md", t0))
+            self.assertIsNone(self.ortam.hat_maliyeti("../R.md", t0))
+        with mock.patch.object(akis_ofis.OfisOrtami, "HAT_KOSU_DIZINI", os.path.join(self.d, "yok")):
+            self.assertIsNone(self.ortam.hat_maliyeti("R.md", t0))
+
     def test_reddet_yalniz_uat_ve_onaysiz(self):
         with mock.patch.object(sunucu, "gelistirme_projeleri", lambda: ["homeos"]):
             dosya = self.ortam.gelistirme_yaz("homeos", "Rapor", "x", "sonnet", REF)
@@ -677,7 +716,7 @@ class KuyrukIptalSiralamaTest(OfisTabani):
         self.assertEqual(baslatma_anindaki_durum, ["calisiyor"])        # iptal commit'inden sonra başlatma yok
         d = self.m.detay(k)
         self.assertEqual(d["durum"], "iptal")
-        self.assertIn("çalışan ajan koşusu durdurulmadı", d["neden"]["metin"])   # dürüst not: koşu açılmıştı
+        self.assertIn("çalışan ajan koşusu durdurulamadı", d["neden"]["metin"])   # dürüst not: koşu açılmıştı
         self.assertEqual(sunucu.kuyruk_oku(), [])
 
 
@@ -866,6 +905,42 @@ class ApiTest(OfisTabani):
         self.assertEqual(self.iste("POST", "/api/akis/devam", {"run_id": run})[1]["durum"], "calisiyor")
         self.assertEqual(self.iste("POST", "/api/akis/iptal", {"run_id": run})[1]["durum"], "iptal")
         self.assertEqual(self.iste("POST", "/api/akis/iptal", {"run_id": run})[0], 409)
+
+    def test_sse_tur_suzgeci(self):
+        """V1.1 #11: /api/olaylar?tur=akis geçmişte ve canlı akışta yalnız workflow olaylarını yollar."""
+        import socket
+        with open(ortak.OLAYLAR, "w") as f:
+            for o in ({"tur": "hata", "metin": "x"}, {"tur": "akis", "run_id": "r1"}, {"tur": "kosu_bitti", "kosu_id": "k"}):
+                f.write(json.dumps(o) + "\n")
+        c = socket.create_connection(self.s.server_address, timeout=5)
+        self.addCleanup(c.close)
+        c.sendall(b"GET /api/olaylar?son=10&tur=akis HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+        dosya = c.makefile("rb")
+
+        def sonraki_olay():
+            while True:
+                satir = dosya.readline()
+                if not satir:
+                    return None
+                if satir.startswith(b"data: "):
+                    return json.loads(satir[6:])
+        self.assertEqual(sonraki_olay()["run_id"], "r1")
+        time.sleep(0.5)
+        with open(ortak.OLAYLAR, "a") as f:
+            for o in ({"tur": "hata", "metin": "y"}, "bozuk", {"tur": "akis", "run_id": "r2"}):
+                f.write((o if isinstance(o, str) else json.dumps(o)) + "\n")
+        self.assertEqual(sonraki_olay(), {"tur": "akis", "run_id": "r2"})
+        self.assertIsNone(sunucu.sse_tur_suzgeci({}))
+        self.assertIsNone(sunucu.sse_tur_suzgeci({"tur": ["../x"]}))
+        self.assertEqual(sunucu.sse_tur_suzgeci({"tur": ["akis,hata,X"]}), {"akis", "hata"})
+
+    def test_operator_kararlari_kapisiz_403(self):
+        """V1.1 #9: localhost (kapısız) istek başarılı sayamaz ve ek bütçe veremez."""
+        for govde in ({"run_id": "r000000000000", "karar": "basarili_say", "adim": "a", "gerekce": "x" * 20},
+                      {"run_id": "r000000000000", "karar": "ek_butce", "ek_usd": 1, "gerekce": "x" * 20}):
+            kod, v = self.iste("POST", "/api/akis/devam", govde)
+            self.assertEqual(kod, 403, v)
+        self.assertEqual(self.iste("POST", "/api/akis/devam", {"run_id": "r000000000000", "karar": "onayla"})[0], 400)
 
     def test_girdi_dogrulama(self):
         for govde, kod in (({"akis": "../x"}, 400), ({"akis": "yok-boyle"}, 404),

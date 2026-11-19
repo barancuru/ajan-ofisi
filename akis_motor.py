@@ -63,6 +63,9 @@ MAKS_ISTEM = ortak.MAKS_GIRDI
 UYANMA_AKTIF_SN = 5
 # Bu incelemelerde "yeniden dene" aynı sonucu verir ya da sınırı aşar. 'tanim' (tanım @inceleme'ye yönlendirdi) ayrıca
 # kaynak adıma göre karar verilir: yan etkisiz adım yeniden denenebilir, yan etkili adım (hat görevi, yazabilen ajan) değil.
+HAT_ARA_DURUMLARI = ("hazir", "sirada", "calisiyor", "uat")   # hat kartının gösterilen ara durumları (V1.1 #8)
+OPERATOR_BASARILI_SEBEPLER = ("adim", "sir")   # "başarılı say" yalnız adımın kendisi başarısız olduğunda (izin listesi)
+GEREKCE_MIN, GEREKCE_MAKS = 10, 300   # denetim olayı alanı da 300 karakter: gerekçe kesilmeden saklanır
 YENIDEN_DENENEMEZ = ("dongu_siniri", "butce", "sure", "erken_onay", "kapali")   # yayin_takildi denenebilir: onay adımı yan etkisiz
 UYANMA_BOS_SN = 30
 DEGER_DESENLERI = {"surum": re.compile(r"^[0-9.]{1,24}$"), "dal": re.compile(r"^beyin/[a-z0-9-]{1,80}$"),
@@ -446,6 +449,123 @@ class Motor:
         self._uyandir.set()
         return self.detay(kosu_id)
 
+    @staticmethod
+    def etkin_sinirlar(kosu, tanim):
+        """Tanım sınırları + operatörün verdiği ek (V1.1 #9). Tanım anlık görüntüsü değişmez."""
+        s = dict(tanim["sinirlar"])
+        s["max_maliyet_usd"] = s["max_maliyet_usd"] + float(kosu.get("ek_maliyet_usd") or 0)
+        s["max_ajan_cagrisi"] = s["max_ajan_cagrisi"] + int(kosu.get("ek_ajan_cagrisi") or 0)
+        return s
+
+    @staticmethod
+    def _gerekce(gerekce):
+        if not isinstance(gerekce, str):
+            raise AkisHatasi(400, f"gerekçe zorunlu ({GEREKCE_MIN}–{GEREKCE_MAKS} karakter)")
+        g = akis_veri.kontrol_karakteri_temizle(gerekce).strip()
+        if not GEREKCE_MIN <= len(g) <= GEREKCE_MAKS:
+            raise AkisHatasi(400, f"gerekçe zorunlu ({GEREKCE_MIN}–{GEREKCE_MAKS} karakter)")
+        if akis_veri.sir_bul(g):
+            raise AkisHatasi(400, "gerekçede sır görünümlü değer var")
+        return g
+
+    def _bekleme_kapat(self, kosu):
+        if kosu.get("bekleme_baslangic_ts"):
+            return {"bekleme_sn": (kosu.get("bekleme_sn") or 0) + max(self.saat() - kosu["bekleme_baslangic_ts"], 0),
+                    "bekleme_baslangic_ts": None}
+        return {}
+
+    def basarili_say(self, kosu_id, adim_id, gerekce, cikti=None, kapi_ok=False):
+        """V1.1 #9 operatör kararı: incelemedeki agent_task adımını başarılı sayar ve tanımın normal 'sonraki'
+        geçişini uygular. Yalnız ofis girişi (kapı), gerekçe zorunlu, yalnız adımın kendisi başarısız olduğunda
+        (OPERATOR_BASARILI_SEBEPLER). Kapı, onay, hat ve koşul adımı başarılı sayılamaz: kanıtları komut çıkışı ya da
+        insan onayıdır. Tanımın zorunlu çıktı alanları varsa operatör hepsini verir (aynı doğrulama + sır taraması)."""
+        if not kapi_ok:
+            raise AkisHatasi(403, "başarılı sayma yalnız ofis girişinden (web) yapılabilir")
+        g = self._gerekce(gerekce)
+        if cikti is not None and not isinstance(cikti, dict):
+            raise AkisHatasi(400, "cikti bir nesne olmalı")
+        with self._islem() as b:
+            kosu = self._kosu_kontrol(b, kosu_id)
+            if kosu["durum"] != "inceleme":
+                raise AkisHatasi(409, f"koşu incelemede değil (durum: {kosu['durum']})")
+            neden = json.loads(kosu["neden"] or "{}")
+            if neden.get("sebep") not in OPERATOR_BASARILI_SEBEPLER:
+                raise AkisHatasi(409, "bu inceleme başarılı sayılamaz (sınır, kaynak, tanım yönlendirmesi, elle onay ya da "
+                                      "kapalı adım): yeniden dene, ek bütçe, başarısız say ya da iptal")
+            if not isinstance(adim_id, str) or adim_id != neden.get("adim"):
+                raise AkisHatasi(409, "incelemedeki adım bu değil")
+            tanim = self._tanim(kosu)
+            adim = akis_tanim.adim_bul(tanim, adim_id)
+            if not adim or adim["tur"] != "agent_task":
+                raise AkisHatasi(409, "yalnız ajan adımı başarılı sayılabilir (kapı, onay ve hat adımının kanıtı komut "
+                                      "çıkışı ya da insan onayıdır)")
+            satir = self._adim_al(b, kosu_id, adim_id)
+            if satir["durum"] != "inceleme":
+                raise AkisHatasi(409, "adım incelemede değil")
+            if any(d["adim_id"] == adim_id for d in self._ucusta(b, kosu_id)):
+                raise AkisHatasi(409, "adımın sonucu hâlâ bekleniyor")
+            veri = {}
+            try:
+                for ad, alan in adim["cikti_alanlari"].items():
+                    if ad not in (cikti or {}):
+                        if alan.get("zorunlu", True):
+                            raise akis_veri.VeriHatasi("cikti_gecersiz", f"{ad}: zorunlu çıktı alanı eksik")
+                        continue
+                    veri[ad] = akis_veri.alan_dogrula(ad, alan, cikti[ad])
+            except akis_veri.VeriHatasi as e:
+                raise AkisHatasi(400, str(e)) from e
+            if akis_veri.sir_bul(json.dumps(veri, ensure_ascii=False)):
+                raise AkisHatasi(400, "çıktıda sır görünümlü değer var")
+            self._kosu_yaz(b, kosu_id, durum="calisiyor", neden=None, **self._bekleme_kapat(kosu))
+            kosu = self._kosu_al(b, kosu_id)
+            self._olay(b, kosu, "operator_basarili_saydi", adim=adim_id, deneme=satir["deneme"], durum="basarili",
+                       iterasyon=satir["iterasyon"], gerekce=g, anahtar=f"{kosu_id}:basarili_say:{adim_id}:{self.saat()}")
+            self._adim_basarili(b, kosu, tanim, adim, veri)
+            if self._adim_al(b, kosu_id, adim_id)["durum"] == "basarili":   # geçiş aynı adımı yeniden açmadıysa
+                self._adim_yaz(b, kosu_id, adim_id, hata="operatör başarılı saydı: " + akis_veri.maskele(g)[:300])
+        self._uyandir.set()
+        return self.detay(kosu_id)
+
+    def ek_butce(self, kosu_id, gerekce, ek_usd=0, ek_cagri=0, kapi_ok=False):
+        """V1.1 #9 operatör kararı: bütçe incelemesindeki koşuya sınırlı ek bütçe. Toplam ek, tanımdaki sınırı
+        aşamaz (en çok iki katı). Takılan adım 'hazir' olur; başlatmadan önceki bütçe kontrolü yeniden yapılır."""
+        if not kapi_ok:
+            raise AkisHatasi(403, "ek bütçe yalnız ofis girişinden (web) verilebilir")
+        g = self._gerekce(gerekce)
+        for ad, v, tur in (("ek_usd", ek_usd, (int, float)), ("ek_cagri", ek_cagri, int)):
+            if isinstance(v, bool) or not isinstance(v, tur) or v < 0 or v != v:
+                raise AkisHatasi(400, f"{ad} sıfır ya da pozitif sayı olmalı")
+        if not (ek_usd > 0 or ek_cagri > 0):
+            raise AkisHatasi(400, "ek_usd ya da ek_cagri verilmeli")
+        with self._islem() as b:
+            kosu = self._kosu_kontrol(b, kosu_id)
+            if kosu["durum"] != "inceleme":
+                raise AkisHatasi(409, f"koşu incelemede değil (durum: {kosu['durum']})")
+            neden = json.loads(kosu["neden"] or "{}")
+            if neden.get("sebep") != "butce":
+                raise AkisHatasi(409, "ek bütçe yalnız bütçe/çağrı sınırı incelemesinde verilir")
+            tanim = self._tanim(kosu)
+            s = tanim["sinirlar"]
+            toplam_usd = round(float(kosu.get("ek_maliyet_usd") or 0) + float(ek_usd), 4)
+            toplam_cagri = int(kosu.get("ek_ajan_cagrisi") or 0) + int(ek_cagri)
+            if toplam_usd > s["max_maliyet_usd"] + 1e-9 or toplam_cagri > s["max_ajan_cagrisi"]:
+                raise AkisHatasi(409, f"toplam ek bütçe tanım sınırını aşamaz (en çok +{s['max_maliyet_usd']} $, "
+                                      f"+{s['max_ajan_cagrisi']} çağrı): yeni koşu başlat ya da tanımı değiştir")
+            adim_id = neden.get("adim")
+            if not adim_id or not self._adim_al(b, kosu_id, adim_id):
+                raise AkisHatasi(409, "bekleyen adım yok")
+            a = self._adim_al(b, kosu_id, adim_id)
+            self._kosu_yaz(b, kosu_id, durum="calisiyor", neden=None, ek_maliyet_usd=toplam_usd,
+                           ek_ajan_cagrisi=toplam_cagri, **self._bekleme_kapat(kosu))
+            if a["durum"] in ("hazir", "inceleme"):
+                self._adim_yaz(b, kosu_id, adim_id, durum="hazir", deneme=a["deneme"], sonraki_ts=0, hata=None)
+            kosu = self._kosu_al(b, kosu_id)
+            self._olay(b, kosu, "ek_butce", adim=adim_id, durum="verildi", ek_usd=float(ek_usd), ek_cagri=int(ek_cagri),
+                       toplam_ek_usd=toplam_usd, toplam_ek_cagri=toplam_cagri, gerekce=g,
+                       anahtar=f"{kosu_id}:ek_butce:{self.saat()}")
+        self._uyandir.set()
+        return self.detay(kosu_id)
+
     def iptal(self, kosu_id):
         """Kilit sırası: motor kilidi → başlatma kilidi (BASLATMA_KILIDI + baslatma.lock) → DB commit → kuyruk temizliği.
         Kuyruğu işleyen taraf (kuyrugu_isle) geçerlilik kontrolünü ve tmux başlatmayı aynı başlatma kilidi altında yapar;
@@ -468,8 +588,17 @@ class Motor:
                     notlar.append(f"{d['adim_id']}: kuyruktan çıkarıldı")
                     if d["durum"] == "kuyrukta":   # hiç koşmadı: tahmini maliyeti serbest bırak
                         iade += d["tahmini_usd"] or 0
+                    continue
+                # V1.1 #7: çalışan koşuya doğrulanmış iptal sinyali; doğrulanamazsa dokunulmaz (fail-closed)
+                try:
+                    durdu, neden = self.ortam.ajan_durdur(d["ref"])
+                except Exception as e:  # noqa: BLE001 - iptal commit edildi
+                    durdu, neden = False, type(e).__name__
+                if durdu:
+                    notlar.append(f"{d['adim_id']}: çalışan ajan koşusuna durdurma sinyali gönderildi; "
+                                  "yarım kalmış yan etki olabilir, kontrol et")
                 else:
-                    notlar.append(f"{d['adim_id']}: çalışan ajan koşusu durdurulmadı; bitince sonucu yok sayılır")
+                    notlar.append(f"{d['adim_id']}: çalışan ajan koşusu durdurulamadı ({neden}); bitince sonucu yok sayılır")
         # iptal commit edildi: bundan sonraki hata yanıtı 500'e çevirmemeli (tekrar deneyen 409 alırdı)
         try:
             self._islem_iade(kosu_id, iade, "; ".join(notlar) or "operatör iptal etti")
@@ -547,7 +676,8 @@ class Motor:
                 "olusturma": k["olusturma_ts"], "bitis": k["bitis_ts"], "ajan_cagrisi": k["ajan_cagrisi"],
                 "maliyet_usd": round(k["maliyet_usd"], 4), "tahmini_usd": round(k["tahmini_usd"], 2),
                 "ilerleme": {"biten": biten, "toplam": len(tanim["adimlar"])},
-                "dongu": json.loads(k["dongu_json"]), "sinirlar": tanim["sinirlar"]}
+                "dongu": json.loads(k["dongu_json"]), "sinirlar": self.etkin_sinirlar(k, tanim),
+                "ek": {"maliyet_usd": float(k.get("ek_maliyet_usd") or 0), "ajan_cagrisi": int(k.get("ek_ajan_cagrisi") or 0)}}
 
     def detay(self, kosu_id):
         if not isinstance(kosu_id, str) or not KOSU_ID_DESENI.match(kosu_id):
@@ -567,6 +697,8 @@ class Motor:
                 "id": a["id"], "ad": a["ad"], "tur": a["tur"], "durum": d["durum"], "iterasyon": d["iterasyon"],
                 "deneme": d["deneme"], "sonraki_ts": d["sonraki_ts"] or None, "hata": d["hata"],
                 **({"ajan": a["ajan"]} if a.get("ajan") else {}),
+                # operatörün "başarılı say" formu için alan şeması (tanım verisi; değer değil)
+                **({"cikti_alanlari": a["cikti_alanlari"]} if a["tur"] == "agent_task" else {}),
                 **({"kategori": a["kategori"], "mesaj": a["mesaj"], "izle": bool(a.get("izle_adim"))} if a["tur"] == "approval" else {}),
                 # çıktı değerleri kısaltılır; ham çıktı ve istem gösterilmez
                 "cikti": {kk: (vv[:600] if isinstance(vv, str) else vv) for kk, vv in (cikti or {}).items()},
@@ -574,11 +706,33 @@ class Motor:
                                "siniflama": x["siniflama"], "hata": x["hata"], "maliyet_usd": x["maliyet_usd"],
                                "sure_sn": round(x["bitis_ts"] - x["baslangic_ts"], 1) if x["bitis_ts"] else None,
                                "tutamac": {kk: vv for kk, vv in json.loads(x["tutamac_json"]).items()
-                                           if kk in ("kosu_id", "kuyruk_id", "dosya")}}
+                                           if kk in ("kosu_id", "kuyruk_id", "dosya", "hat")}}
                               for x in denemeler if x["adim_id"] == a["id"]]})
         sonuc["olaylar"] = [{"tur": o["tur"], "zaman": o["zaman_ts"], **json.loads(o["veri_json"])}
                             for o in self.depo.olaylar(kosu_id, 100)]
         return sonuc
+
+    def hat_karti_durumu(self, ref):
+        """Geliştirme kartı için (V1.1 #6): workflow'un açtığı hat görevinin kapı durumu. Salt okuma, motor kilidi yok.
+        Dönen: {run_id, durum: kapi_bekleniyor | onay_bekliyor | kapandi, kosu_durumu} ya da None (ref bilinmiyor).
+        'onay_bekliyor' = kartı izleyen dağıtım onayı adımı açıldı (kalite kapısı geçti). Bilgi amaçlıdır: onay
+        kararı yine kapıdan ve mühürlü paketle verilir."""
+        if not isinstance(ref, str) or not REF_DESENI.match(ref):
+            return None
+        r = self.depo.baglanti().execute("SELECT d.kosu_id, d.adim_id, k.durum AS kd, k.tanim_json FROM denemeler d "
+                                         "JOIN kosular k ON k.id=d.kosu_id WHERE d.ref=?", (ref,)).fetchone()
+        if not r:
+            return None
+        sonuc = {"run_id": r["kosu_id"], "kosu_durumu": r["kd"]}
+        if r["kd"] in akis_db.SON_KOSU:
+            return {**sonuc, "durum": "kapandi"}
+        tanim = json.loads(r["tanim_json"])
+        hedefler = {r["adim_id"]} | {a["id"] for a in tanim["adimlar"]
+                                     if a["tur"] == "gelistirme_gorevi" and a.get("hedef_adim") == r["adim_id"]}
+        adimlar = self.depo.adimlar(r["kosu_id"])
+        acik = any(a["tur"] == "approval" and a.get("izle_adim") in hedefler
+                   and a["id"] in adimlar and adimlar[a["id"]]["durum"] == "onay_bekliyor" for a in tanim["adimlar"])
+        return {**sonuc, "durum": "onay_bekliyor" if acik else "kapi_bekleniyor"}
 
     # ------------------------------------------------------------------ motor döngüsü
     def baslat_thread(self):
@@ -908,7 +1062,7 @@ class Motor:
             # ajan/hat adımları: bütçe ve çağrı sınırı başlatmadan önce
             if adim["tur"] in ("agent_task", "gelistirme_gorevi"):
                 tahmin = self._tahmin(adim)
-                s = tanim["sinirlar"]
+                s = self.etkin_sinirlar(kosu, tanim)
                 if kosu["ajan_cagrisi"] + 1 > s["max_ajan_cagrisi"]:
                     self._incelemeye_al(b, kosu, "butce", f"ajan çağrısı sınırı ({s['max_ajan_cagrisi']}) aşılacaktı", adim_id)
                     return True
@@ -1259,7 +1413,16 @@ class Motor:
                 return ("kaynak", "UAT paketi hattın mührüyle uyuşmuyor: kart değişmiş, mühür henüz yazılıyor ya da aynı "
                                   "sürüm başka bir görevde mühürlenmiş. Kartı kontrol et; 'Yeniden dene' aynı kartı yeniden izler")
             return ("bitti", cikti)
-        return ("bekle", None)   # hazir / calisiyor / sirada / uat+onay:hayir (ret sırada)
+        # hazir / calisiyor / sirada / uat+onay:hayir (ret sırada). V1.1 #8: hattın ara durumu (yalnız bilinen
+        # değerler) adım ilerlemesine yansır; karar vermez, yalnız gösterilir
+        try:
+            deneme = max(0, min(int(fm.get("deneme") or 0), 99))
+        except ValueError:
+            deneme = None
+        hat = {"durum": durum if durum in HAT_ARA_DURUMLARI else "?", "deneme": deneme}
+        if t.get("reddedildi") and durum == "uat":
+            hat["durum"] = "ret_isleniyor"
+        return ("bekle", {"hat": hat})
 
     # ---- quality_gate (gerçek komut, çıkış kodu)
     def _kapi_degerleri(self, hazirlik):
@@ -1440,6 +1603,15 @@ class Motor:
                 if self.saat() - d["baslangic_ts"] > adim["zaman_asimi_sn"]:
                     durum, veri = "bilinmeyen", "adım zaman aşımı"
                 else:
+                    if isinstance(veri, dict) and isinstance(veri.get("hat"), dict):
+                        t = json.loads(d["tutamac_json"] or "{}")
+                        if t.get("hat") != veri["hat"]:
+                            t["hat"] = veri["hat"]
+                            b.execute("UPDATE denemeler SET tutamac_json=? WHERE id=?", (json.dumps(t), deneme_id))
+                            self._olay(b, kosu, "hat_ilerledi", adim=d["adim_id"], deneme=d["deneme"],
+                                       durum=veri["hat"]["durum"], iterasyon=d["iterasyon"],
+                                       hat_deneme=veri["hat"]["deneme"],
+                                       anahtar=f"{kosu['id']}:hat:{d['id']}:{veri['hat']['durum']}:{veri['hat']['deneme']}")
                     return
             if durum in ("kuyrukta", "calisiyor"):
                 if self.saat() - d["baslangic_ts"] > adim["zaman_asimi_sn"]:
@@ -1485,6 +1657,8 @@ class Motor:
             if adim["tur"] == "gelistirme_gorevi" and durum == "bitti":
                 if not self._deneme_bitir(b, deneme_id, "basarili", siniflama="basarili"):
                     return
+                self._hat_maliyeti_uygula(b, kosu_id, d)
+                kosu = self._kosu_al(b, kosu_id)
                 if adim["mod"] == "duzeltme":
                     # yeni paket (sha, uyarı) hedef adımın çıktısı olur: {{adim.uygulama.*}} ve kapılar güncel paketi görür
                     self._adim_yaz(b, kosu_id, adim["hedef_adim"], cikti_json=json.dumps(veri, ensure_ascii=False))
@@ -1497,10 +1671,31 @@ class Motor:
             if not self._deneme_bitir(b, deneme_id, "bilinmeyen" if sinif == "bilinmeyen" else "basarisiz",
                                       siniflama=sinif, hata=str(veri)[:300]):
                 return
+            if adim["tur"] == "gelistirme_gorevi":
+                self._hat_maliyeti_uygula(b, kosu_id, d)   # takılan/reddedilen tur da harcandı
+                kosu = self._kosu_al(b, kosu_id)
             if adim["tur"] == "agent_task" and sinif == "bilinmeyen":
                 kaldir.append(d["ref"])   # bu işlem kapattı; temizlik commit'ten sonra
             self._adim_hatasi(b, kosu, tanim, adim, sinif, veri)
         self._uyandir.set()
+
+    def _hat_maliyeti_uygula(self, b, kosu_id, d):
+        """V1.1 #1: biten hat denemesinin tahmini (6 $/tur) hattın göreve bağladığı gerçek maliyetle değişir.
+        Kimlik yoksa tahmin gerçekleşmiş sayılır (eski davranış; bütçe tavanı fail-closed kalır)."""
+        t = json.loads(d["tutamac_json"] or "{}")
+        try:
+            m = self.ortam.hat_maliyeti(t.get("dosya"), d["baslangic_ts"]) if t.get("dosya") else None
+        except Exception:  # noqa: BLE001 - maliyet okunamazsa tahmin kalır
+            m = None
+        if m is None:
+            return None
+        kosu = self._kosu_al(b, kosu_id)
+        b.execute("UPDATE denemeler SET maliyet_usd=? WHERE id=?", (m, d["id"]))
+        self._kosu_yaz(b, kosu_id, maliyet_usd=kosu["maliyet_usd"] + m,
+                       tahmini_usd=max(kosu["tahmini_usd"] - (d["tahmini_usd"] or 0), 0))
+        self._olay(b, self._kosu_al(b, kosu_id), "hat_maliyeti", adim=d["adim_id"], deneme=d["deneme"], durum="gercek",
+                   iterasyon=d["iterasyon"], cost_usd=m, tahmini_usd=d["tahmini_usd"])
+        return m
 
     @staticmethod
     def _aralar(ref):

@@ -93,6 +93,13 @@ class SahteOrtam:
     def arg_dosyasi_var(self, ref):
         return ref in self.arglar
 
+    def hat_maliyeti(self, dosya, baslangic_ts):
+        return getattr(self, "hat_maliyetleri", {}).get(dosya)
+
+    def ajan_durdur(self, ref):
+        self.durdurulan = getattr(self, "durdurulan", []) + [ref]
+        return getattr(self, "durdur_sonucu", (False, "süreç yok"))
+
     def ajan_ciktisi_oku(self, yol):
         return self.ciktilar[yol]
 
@@ -866,6 +873,89 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         self.m.tur()
         self.assertEqual(self.adim(k, "uat_onayi")["durum"], "onay_bekliyor")
         return k
+
+    def test_hat_karti_durumu_kapi_ve_onay(self):
+        """V1.1 #6: Geliştirme kartı workflow kapısının geçip geçmediğini gösterir (salt okuma)."""
+        tanimlar, _ = akis_tanim.tanimlari_yukle()
+        self.tanimlar.update(tanimlar)
+        k = self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"})["run_id"]
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"plan": "p", "risk": "dusuk", "yetki_gerekli": False}) + '</akis_cikti>')
+        self.m.tur()
+        ref = self.ortam.gorevler["G0.md"]["akis_adim"]
+        self.assertEqual(self.m.hat_karti_durumu(ref), {"run_id": k, "kosu_durumu": "calisiyor", "durum": "kapi_bekleniyor"})
+        self.ortam.hat_uat("G0.md")
+        self.m.tur()
+        self.assertEqual(self.m.hat_karti_durumu(ref)["durum"], "kapi_bekleniyor")   # UAT'de ama kapı daha koşmadı
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"karar": "gecti", "bulgular": "-"}) + '</akis_cikti>')
+        self.m.tur()
+        self.m.tur()
+        self.assertEqual(self.m.hat_karti_durumu(ref)["durum"], "onay_bekliyor")
+        self.m.iptal(k)
+        self.assertEqual(self.m.hat_karti_durumu(ref), {"run_id": k, "kosu_durumu": "iptal", "durum": "kapandi"})
+        self.assertIsNone(self.m.hat_karti_durumu("ak-000000000000"))
+        self.assertIsNone(self.m.hat_karti_durumu("../x"))
+
+    def test_hat_ara_durumu_adima_yansir(self):
+        """V1.1 #8: hat kartının durum/deneme alanları adım denemesinde görünür; olay yalnız değişince yazılır."""
+        tanimlar, _ = akis_tanim.tanimlari_yukle()
+        self.tanimlar.update(tanimlar)
+        k = self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"})["run_id"]
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"plan": "p", "risk": "dusuk", "yetki_gerekli": False}) + '</akis_cikti>')
+        self.m.tur()
+        self.saat[0] += 120
+        self.m.tur()
+        hat = lambda: self.adim(k, "uygulama")["denemeler"][-1]["tutamac"].get("hat")
+        self.assertEqual(hat(), {"durum": "hazir", "deneme": 0})
+        self.ortam.gorevler["G0.md"].update({"durum": "calisiyor", "deneme": "1"})
+        self.m.tur()
+        self.m.tur()
+        self.assertEqual(hat(), {"durum": "calisiyor", "deneme": 1})
+        olaylar = [o for o in self.detay(k)["olaylar"] if o["tur"] == "hat_ilerledi"]
+        self.assertEqual(sorted((o["status"], o["hat_deneme"]) for o in olaylar), [("calisiyor", 1), ("hazir", 0)])
+        self.ortam.gorevler["G0.md"].update({"durum": "<script>", "deneme": "x"})
+        self.m.tur()
+        self.assertEqual(hat(), {"durum": "?", "deneme": None})
+        self.assertEqual(self.adim(k, "uygulama")["durum"], "calisiyor")   # ara durum karar vermez
+
+    def test_hat_tahmini_gercek_maliyetle_degisir(self):
+        """V1.1 #1: hat kimliği varsa 6 $ tahmin gerçekleşenle değişir; yoksa tahmin kalır (fail-closed)."""
+        tanimlar, _ = akis_tanim.tanimlari_yukle()
+        self.tanimlar.update(tanimlar)
+        k = self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"})["run_id"]
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"plan": "p", "risk": "dusuk", "yetki_gerekli": False}) + '</akis_cikti>', maliyet=0.1)
+        self.m.tur()
+        once = self.detay(k)
+        self.assertGreaterEqual(once["tahmini_usd"], 6)
+        self.ortam.hat_maliyetleri = {"G0.md": 0.00525}
+        self.ortam.hat_uat("G0.md")
+        self.m.tur()
+        d = self.detay(k)
+        self.assertAlmostEqual(d["maliyet_usd"], 0.1 + 0.00525, places=4)
+        uyg = self.adim(k, "uygulama")["denemeler"][-1]
+        self.assertAlmostEqual(uyg["maliyet_usd"], 0.00525)
+        olay = [o for o in d["olaylar"] if o["tur"] == "hat_maliyeti"]
+        self.assertEqual((olay[0]["cost_usd"], olay[0]["tahmini_usd"]), (0.00525, 6.0))
+        # 6 $ serbest kaldı; aynı turda başlayan sonraki ajan adımının tahmini (1,5 $) eklenmiş olabilir
+        self.assertLess(d["tahmini_usd"], once["tahmini_usd"] - 4)
+
+    def test_hat_kimligi_yoksa_tahmin_kalir(self):
+        tanimlar, _ = akis_tanim.tanimlari_yukle()
+        self.tanimlar.update(tanimlar)
+        k = self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"})["run_id"]
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"plan": "p", "risk": "dusuk", "yetki_gerekli": False}) + '</akis_cikti>', maliyet=0.1)
+        self.m.tur()
+        once = self.detay(k)["tahmini_usd"]
+        self.ortam.hat_uat("G0.md")
+        self.m.tur()
+        d = self.detay(k)
+        self.assertAlmostEqual(d["maliyet_usd"], 0.1, places=4)
+        self.assertGreaterEqual(d["tahmini_usd"], 6)
+        self.assertIsNone(self.adim(k, "uygulama")["denemeler"][-1]["maliyet_usd"])
 
     def test_baska_kartin_onayi_odunc_alinamaz(self):
         """Kart dosyası UAT sonrası başka (onaylı, mühürlü, daha yeni) bir sürüme çevrilirse onay kaydı sayılmaz."""

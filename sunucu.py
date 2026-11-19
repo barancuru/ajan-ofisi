@@ -1612,9 +1612,25 @@ def gorev_ozeti(yol, bitti=False):
         ozet["onizleme"] = ":8444"
     if fm.get("proje") in CANLI_YUKSELTME_ANAHTARLARI and durum == "uat":
         ozet["canli_otomatik"] = os.path.isfile(os.path.expanduser(CANLI_YUKSELTME_ANAHTARLARI[fm["proje"]]))
+    if fm.get("kaynak") == "akis" and akis_motor.REF_DESENI.match(fm.get("akis_adim") or ""):
+        ozet["akis_ref"] = fm["akis_adim"]   # kapı durumu gelistirme_yaniti'nda motordan eklenir
     if durum == "oneri":
         ozet["metin"] = govde.split("\n", 1)[1].strip()[:2500] if "\n" in govde else ""
     return ozet
+
+
+def akis_karti_durumlari(gorevler):
+    """Workflow görevlerine (kaynak: akis) motorun kapı durumunu ekler. DB okunamazsa 'bilinmiyor': kart yine
+    görünür, uyarı fail-closed (kapı geçmiş sayılmaz)."""
+    for g in gorevler:
+        ref = g.pop("akis_ref", None)
+        if not ref:
+            continue
+        try:
+            d = motor().hat_karti_durumu(ref)
+        except Exception:  # noqa: BLE001 — workflow DB sorunu Geliştirme sekmesini düşürmez
+            d = None
+        g["akis"] = d or {"durum": "bilinmiyor"}
 
 
 def gelistirme_yaniti():
@@ -1635,6 +1651,7 @@ def gelistirme_yaniti():
                     o = None
                 if o:
                     gorevler.append(o)
+    akis_karti_durumlari(gorevler)
     return {"projeler": gelistirme_projeleri(), "gorevler": gorevler, "oneri_taraniyor": oneri_taraniyor(), "oto_onay": oto_onay_durumu(),
             "alarmlar": alarmlar_oku(), "takilanlar": takilanlari_oku(), "girdi_maks": ortak.MAKS_GIRDI}
 
@@ -2456,8 +2473,14 @@ def akis_islemi(yol, veri, kapi_imzasi=""):
             return 200, m.duraklat(kosu)
         if islem == "devam":
             karar = veri.get("karar")
-            if karar is not None and karar not in ("yeniden_dene", "basarisiz_say"):
-                raise akis_motor.AkisHatasi(400, "karar: yeniden_dene | basarisiz_say")
+            if karar is not None and karar not in ("yeniden_dene", "basarisiz_say", "basarili_say", "ek_butce"):
+                raise akis_motor.AkisHatasi(400, "karar: yeniden_dene | basarisiz_say | basarili_say | ek_butce")
+            if karar == "basarili_say":   # V1.1 #9: kapı motorda da denetlenir
+                return 200, m.basarili_say(kosu, veri.get("adim"), veri.get("gerekce"), veri.get("cikti"),
+                                           kapi_ok=kapidan_geldi(kapi_imzasi))
+            if karar == "ek_butce":
+                return 200, m.ek_butce(kosu, veri.get("gerekce"), veri.get("ek_usd", 0), veri.get("ek_cagri", 0),
+                                       kapi_ok=kapidan_geldi(kapi_imzasi))
             return 200, m.devam(kosu, karar)
         if islem == "iptal":
             return 200, m.iptal(kosu)
@@ -2762,11 +2785,12 @@ class Isleyici(SimpleHTTPRequestHandler):
             son = min(int((sorgu.get("son") or ["0"])[0]), 200)
         except ValueError:
             son = 0
+        turler = sse_tur_suzgeci(sorgu)
         try:
             if son:
                 # terminal_* ve token olayları tekrar oynatılmaz (durum /api/terminaller ve /api/token'dan gelir)
                 gecmis = [o for o in olaylari_oku() if not str(o.get("tur", "")).startswith("terminal_")
-                          and o.get("tur") != "token"]
+                          and o.get("tur") != "token" and (turler is None or o.get("tur") in turler)]
                 for olay in gecmis[-son:]:
                     self._sse_yaz(olay)
             konum = os.path.getsize(ortak.OLAYLAR) if os.path.exists(ortak.OLAYLAR) else 0
@@ -2784,9 +2808,11 @@ class Isleyici(SimpleHTTPRequestHandler):
                         konum += son_satir_sonu + 1
                         for satir in parca[:son_satir_sonu].splitlines():
                             try:
-                                self._sse_yaz(json.loads(satir.decode("utf-8")))
+                                olay = json.loads(satir.decode("utf-8"))
                             except (json.JSONDecodeError, UnicodeDecodeError):
                                 continue
+                            if isinstance(olay, dict) and (turler is None or olay.get("tur") in turler):
+                                self._sse_yaz(olay)
                 if time.time() - nabiz > 15:
                     self.wfile.write(b": nabiz\n\n")
                     self.wfile.flush()
@@ -2799,6 +2825,14 @@ class Isleyici(SimpleHTTPRequestHandler):
         self.wfile.write(f"event: {olay.get('tur', 'olay')}\ndata: {json.dumps(olay, ensure_ascii=False)}\n\n"
                          .encode("utf-8"))
         self.wfile.flush()
+
+
+def sse_tur_suzgeci(sorgu):
+    """/api/olaylar?tur=akis[,hata]: yalnız bu türler (V1.1 #11). Yoksa ya da geçersizse None = süzgeç yok.
+    En çok 10 tür, her biri [a-z_]{1,30}; geçersiz değer süzgeci daraltmaz, yok sayılır."""
+    ham = (sorgu.get("tur") or [""])[0]
+    turler = {t for t in ham.split(",") if re.fullmatch(r"[a-z_]{1,30}", t)} if ham else set()
+    return turler if 0 < len(turler) <= 10 else None
 
 
 def bos_port_ile_ac():

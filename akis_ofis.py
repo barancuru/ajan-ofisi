@@ -214,6 +214,65 @@ class OfisOrtami:
                     pass
         return cikti
 
+    HAT_KOSU_DIZINI = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "beyin", "kosular")
+    MALIYET_KIMLIGI = re.compile(r"^\d{8}-\d{6}-\d{1,10}-[a-z]{1,30}\.gorev\.json$")
+
+    def hat_maliyeti(self, dosya, baslangic_ts):
+        """V1.1 #1: hattın bu görev için baslangic_ts'den sonra yaptığı koşuların gerçek maliyeti (USD) ya da None
+        (kimlik yok: eski hat, Codex ya da koşu olmadı → motor tahmini korur). Kaynak: hattın KOSU_DIZIN'deki
+        <ts>-<is>.gorev.json kayıtları (~/beyin dışı; ajan yazamaz)."""
+        if not isinstance(dosya, str) or "/" in dosya or not dosya.endswith(".md"):
+            return None
+        try:
+            adlar = os.listdir(self.HAT_KOSU_DIZINI)
+        except OSError:
+            return None
+        toplam, bulundu = 0.0, False
+        for ad in adlar:
+            if not self.MALIYET_KIMLIGI.match(ad):
+                continue
+            yol = os.path.join(self.HAT_KOSU_DIZINI, ad)
+            try:
+                if os.lstat(yol).st_mtime < baslangic_ts - 60:
+                    continue
+            except OSError:
+                continue
+            v = akis_motor._json_oku(yol) or {}
+            m, ts = v.get("maliyet_usd"), v.get("ts")
+            if v.get("gorev") != dosya or not isinstance(ts, (int, float)) or ts < baslangic_ts:
+                continue
+            if isinstance(m, bool) or not isinstance(m, (int, float)) or not 0 <= m < 1000:
+                continue
+            toplam, bulundu = toplam + float(m), True
+        return round(toplam, 6) if bulundu else None
+
+    def ajan_durdur(self, ref):
+        """V1.1 #7: çalışan workflow ajan koşusuna iptal sinyali (SIGUSR1). Süreç kosucu'nun başlangıç işaretinden
+        bulunur ve /proc'tan doğrulanır: komut satırı bu koşunun arg dosyasıyla kosucu.py olmalı (PID yeniden
+        kullanımına ve sahte işarete karşı). Doğrulanamazsa sinyal YOK: dönen (False, neden)."""
+        import signal
+        if not isinstance(ref, str) or not akis_motor.REF_DESENI.match(ref):
+            return False, "geçersiz ref"
+        isaret = akis_motor._json_oku(os.path.join(akis_motor.sonuc_dizini(), f"{ref}.basladi.json")) or {}
+        pid, kosu_id = isaret.get("pid"), isaret.get("kosu_id")
+        if isaret.get("ref") != ref or not isinstance(pid, int) or isinstance(pid, bool) or pid <= 1 \
+                or not isinstance(kosu_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,120}", kosu_id):
+            return False, "başlangıç işareti yok ya da geçersiz"
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                argv = [a.decode("utf-8", "replace") for a in f.read().split(b"\0") if a]
+        except OSError:
+            return False, "süreç yok (bitmiş olabilir)"
+        arg_yolu = os.path.join(ortak.KOSU_DIZINI, f"{kosu_id}.arg.json")
+        if not (len(argv) >= 2 and os.path.basename(argv[-2]) == "kosucu.py"
+                and os.path.realpath(argv[-1]) == os.path.realpath(arg_yolu)):
+            return False, "süreç bu koşunun kosucu'su değil"
+        try:
+            os.kill(pid, signal.SIGUSR1)
+        except OSError as e:
+            return False, f"sinyal gönderilemedi ({type(e).__name__})"
+        return True, None
+
     def arg_dosyasi_var(self, ref):
         """tmux'a verilmiş ama iz bırakmamış koşu (yeniden başlatma kurtarması). Yalnız son 2 günün dosyaları."""
         import time
