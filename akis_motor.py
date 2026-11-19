@@ -52,6 +52,17 @@ def adim_kapali_mi(adim):
     return None
 
 
+def zamanlama_engeli(tanim):
+    """V2 zamanlayıcı/olay tetiklemesi: hat görevi, kalite kapısı ya da dağıtım/yayın onayı içeren akış aşama
+    bayraklarından BAĞIMSIZ olarak kendiliğinden başlatılamaz (kademeli otonomi; açmak ayrı kullanıcı kararı)."""
+    for a in tanim["adimlar"]:
+        if a["tur"] in ("gelistirme_gorevi", "quality_gate"):
+            return f"{a['id']}: {a['tur']} içeren akış zamanlanamaz"
+        if a["tur"] == "approval" and a.get("kategori") in KAPALI_ONAY_KATEGORILERI:
+            return f"{a['id']}: {a['kategori']} onayı içeren akış zamanlanamaz"
+    return None
+
+
 def akis_engeli(tanim):
     """Başlatma engeli (metin) ya da None. Hem id izin listesi hem adım türü: yeniden adlandırılmış bir tanım geçemez."""
     if tanim["id"] not in ETKIN_AKISLAR:
@@ -70,6 +81,10 @@ OPERATOR_BASARILI_SEBEPLER = ("adim", "sir")   # "başarılı say" yalnız adım
 GEREKCE_MIN, GEREKCE_MAKS = 10, 300   # denetim olayı alanı da 300 karakter: gerekçe kesilmeden saklanır
 YENIDEN_DENENEMEZ = ("dongu_siniri", "butce", "sure", "erken_onay", "kapali")   # yayin_takildi denenebilir: onay adımı yan etkisiz
 UYANMA_BOS_SN = 30
+# V2 maliyet modeli: adım başına ölçülmüş geçmişten p90 (bütçe kontrolü). Az ölçümde statik tahmin.
+MALIYET_ORNEK_MIN = 5
+MALIYET_PENCERE = 50
+MALIYET_TABAN_ORANI = 0.1
 DEGER_DESENLERI = {"surum": re.compile(r"^[0-9.]{1,24}$"), "dal": re.compile(r"^beyin/[a-z0-9-]{1,80}$"),
                    "sha256": re.compile(r"^[0-9a-f]{64}$")}
 
@@ -86,6 +101,12 @@ class BaslatmaHatasi(Exception):
     def __init__(self, kod, mesaj):
         super().__init__(mesaj)
         self.kod = kod
+
+
+def yuzdelik(degerler, p):
+    """En yakın sıra yöntemi (interpolasyon yok: tahmin hep gerçekten görülmüş bir değerdir)."""
+    d = sorted(degerler)
+    return d[max(0, min(len(d) - 1, -(-p * len(d) // 100) - 1))]
 
 
 def sonuc_dizini():
@@ -753,6 +774,8 @@ class Motor:
                     aktif = self.depo.aktif_var_mi()
                     if aktif:
                         self.tur()
+                    else:
+                        self._iptal_maliyetleri()   # tek koşu iptal edildiyse etkin koşu kalmaz: geç maliyet yine işlenir
                 except Exception as e:  # noqa: BLE001 - motor sunucuyu düşürmesin
                     import sys
                     sys.stderr.write(f"akis motoru: {type(e).__name__}: {str(e)[:200]}\n")
@@ -773,6 +796,10 @@ class Motor:
         except Exception:  # noqa: BLE001
             self._kuyruk_refleri = None
         try:
+            try:
+                self._iptal_maliyetleri()
+            except Exception as e:  # noqa: BLE001 - muhasebe taraması motoru durdurmaz
+                self._motor_hatasi("iptal-maliyet", e)
             for k in self.depo.kosular(durumlar=akis_db.AKTIF_KOSU, sinir=MAKS_AKTIF_KOSU * 4):
                 try:
                     self._kosu_isle(k["id"])
@@ -780,6 +807,37 @@ class Motor:
                     self._motor_hatasi(k["id"], e)
         finally:
             self._kuyruk_refleri = None
+
+    IPTAL_MALIYET_PENCERE_SN = 24 * 3600
+    IPTAL_MALIYET_BEKLE_SN = 3600
+
+    def _iptal_maliyetleri(self):
+        """İptal anında `iptal` olan ajan denemesinin sonucu (kosucu SIGUSR1 sonrası kısmi maliyet) sonradan gelir:
+        maliyet bir kez koşuya ve denemeye yazılır (geçiş yok, yalnız muhasebe). maliyet_usd NULL = işlenmedi;
+        sonuç gelmezse BEKLE süresinden sonra 0 yazılıp taranmaz. Boşta tek indeksli SQL sorgusu."""
+        simdi = self.saat()
+        rows = self.depo.baglanti().execute(
+            "SELECT id, kosu_id, adim_id, deneme, iterasyon, ref, bitis_ts FROM denemeler WHERE durum='iptal' "
+            "AND maliyet_usd IS NULL AND bitis_ts > ? ORDER BY id LIMIT 20", (simdi - self.IPTAL_MALIYET_PENCERE_SN,)).fetchall()
+        for d in rows:
+            veri = _json_oku(os.path.join(sonuc_dizini(), f"{d['ref']}.json"))
+            m = veri.get("maliyet_usd") if isinstance(veri, dict) and veri.get("son") else None
+            m = m if isinstance(m, (int, float)) and not isinstance(m, bool) and 0 < m < 1e6 else None
+            if m is None and isinstance(veri, dict) and veri.get("son"):
+                m = 0.0                                   # sonuç geldi, maliyet yok
+            elif m is None:
+                if simdi - (d["bitis_ts"] or simdi) < self.IPTAL_MALIYET_BEKLE_SN:
+                    continue
+                m = 0.0                                   # hiç sonuç gelmedi (kuyruktan çekilmiş / hat denemesi)
+            with self._islem() as b:
+                c = b.execute("UPDATE denemeler SET maliyet_usd=? WHERE id=? AND durum='iptal' AND maliyet_usd IS NULL",
+                              (m, d["id"]))
+                if c.rowcount != 1 or not m:
+                    continue
+                kosu = self._kosu_al(b, d["kosu_id"])
+                self._kosu_yaz(b, d["kosu_id"], maliyet_usd=kosu["maliyet_usd"] + m)
+                self._olay(b, self._kosu_al(b, d["kosu_id"]), "gec_maliyet", adim=d["adim_id"], deneme=d["deneme"],
+                           durum="iptal", iterasyon=d["iterasyon"], cost_usd=m)
 
     MOTOR_HATASI_ARALIK_SN = 600
 
@@ -1063,7 +1121,7 @@ class Motor:
                 return True
             # ajan/hat adımları: bütçe ve çağrı sınırı başlatmadan önce
             if adim["tur"] in ("agent_task", "gelistirme_gorevi"):
-                tahmin = self._tahmin(adim)
+                tahmin, tahmin_kaynagi = self._tahmin(adim, b, kosu["akis_id"])
                 s = self.etkin_sinirlar(kosu, tanim)
                 if kosu["ajan_cagrisi"] + 1 > s["max_ajan_cagrisi"]:
                     self._incelemeye_al(b, kosu, "butce", f"ajan çağrısı sınırı ({s['max_ajan_cagrisi']}) aşılacaktı", adim_id)
@@ -1073,7 +1131,7 @@ class Motor:
                                         f"tahmini maliyet sınırı ({s['max_maliyet_usd']} $) aşılacaktı", adim_id)
                     return True
             else:
-                tahmin = 0.0
+                tahmin, tahmin_kaynagi = 0.0, None
             # atomik claim: hazir → calisiyor yalnız bir kez; deneme satırı UNIQUE
             c = b.execute("UPDATE adimlar SET durum='calisiyor', deneme=deneme+1, guncelleme_ts=? "
                           "WHERE kosu_id=? AND adim_id=? AND durum='hazir'", (self.saat(), kosu_id, adim_id))
@@ -1088,7 +1146,7 @@ class Motor:
             if adim["tur"] in ("agent_task", "gelistirme_gorevi"):
                 self._kosu_yaz(b, kosu_id, ajan_cagrisi=kosu["ajan_cagrisi"] + 1, tahmini_usd=kosu["tahmini_usd"] + tahmin)
             self._olay(b, kosu, "adim_basladi", adim=adim_id, deneme=r["deneme"], durum="gonderiliyor",
-                       iterasyon=r["iterasyon"], tahmini_usd=tahmin)
+                       iterasyon=r["iterasyon"], tahmini_usd=tahmin, tahmin_kaynagi=tahmin_kaynagi)
             baglam = self._baglam(b, kosu)
             hazirlik = None
             if adim["tur"] == "gelistirme_gorevi" and adim["mod"] == "duzeltme":
@@ -1125,7 +1183,7 @@ class Motor:
             d = b.execute("SELECT durum FROM denemeler WHERE id=?", (deneme_id,)).fetchone()
             return bool(k and k["durum"] == "calisiyor" and d and d["durum"] == "gonderiliyor")
 
-    def _tahmin(self, adim):
+    def _statik_tahmin(self, adim):
         if adim.get("tahmini_usd") is not None:
             return float(adim["tahmini_usd"])
         try:
@@ -1135,6 +1193,49 @@ class Motor:
         except Exception:  # noqa: BLE001
             butce = 0.5
         return butce * (2 if adim.get("model") == "opus" else 1)
+
+    @staticmethod
+    def _olculen_maliyetler(b, akis_id, adim_id):
+        """Aynı akışın aynı adımının son ölçülmüş deneme maliyetleri (yeniden eskiye). Yalnız gerçek ölçüm:
+        tahmin `maliyet_usd`'ye yazılmaz; sıfır/boş (iptal, ölçülemeyen) örnek sayılmaz."""
+        return [r[0] for r in b.execute(
+            "SELECT d.maliyet_usd FROM denemeler d JOIN kosular k ON k.id=d.kosu_id WHERE k.akis_id=? AND d.adim_id=? "
+            "AND d.durum IN ('basarili','basarisiz') AND d.maliyet_usd > 0 ORDER BY d.bitis_ts DESC, d.id DESC LIMIT ?",
+            (akis_id, adim_id, MALIYET_PENCERE))]
+
+    def _tahmin(self, adim, b=None, akis_id=None):
+        """Bütçe kontrolünde kullanılan tahmin → (usd, kaynak).
+        agent_task: statik tahmin = kosucu'nun `--max-budget-usd` sert tavanı ("tavan"); geçmiş ne derse desin bu kalır,
+        böylece bütçe kontrolü V1 gibi çağrı başına tavanlı kalır (p90 yalnız maliyet_modeli'nde öngörü olarak görünür).
+        gelistirme_gorevi: hat turunun sert tavanı yok, 6 $ bir tahmindir: en az MALIYET_ORNEK_MIN ölçüm varsa p90
+        ("p90"; tanımdaki `tahmini_usd` yalnız soğuk başlangıç), p90 statiğin MALIYET_TABAN_ORANI'nın altına inmez."""
+        statik = self._statik_tahmin(adim)
+        if adim["tur"] != "gelistirme_gorevi":
+            return statik, "tavan"
+        if b is None or not akis_id:
+            return statik, "statik"
+        ornek = self._olculen_maliyetler(b, akis_id, adim["id"])
+        if len(ornek) < MALIYET_ORNEK_MIN:
+            return statik, "statik"
+        return max(yuzdelik(ornek, 90), statik * MALIYET_TABAN_ORANI), "p90"
+
+    def maliyet_modeli(self, akis_id):
+        """Panel/API için adım başına {n, p50, p90, statik, kullanilan, kaynak} (salt okuma). `kullanilan` bütçe
+        kontrolünün kullandığı değerdir (ajan adımında tavan); p50/p90 her adımda öngörü olarak verilir."""
+        tanim = self.tanimlar()[0].get(akis_id)
+        if not tanim:
+            raise AkisHatasi(404, "akış yok")
+        b = self.depo.baglanti()
+        sonuc = {}
+        for a in tanim["adimlar"]:
+            if a["tur"] not in ("agent_task", "gelistirme_gorevi"):
+                continue
+            ornek = self._olculen_maliyetler(b, akis_id, a["id"])
+            usd, kaynak = self._tahmin(a, b, akis_id)
+            sonuc[a["id"]] = {"n": len(ornek), "p50": round(yuzdelik(ornek, 50), 4) if ornek else None,
+                              "p90": round(yuzdelik(ornek, 90), 4) if ornek else None,
+                              "statik": round(self._statik_tahmin(a), 4), "kullanilan": round(usd, 4), "kaynak": kaynak}
+        return sonuc
 
     def _deneme_bitir(self, b, deneme_id, durum, **alan):
         """Uçuştaki denemeyi tek kez kapatır (tekrar gelen sonuç/olay etkisiz). Dönen: kapattı mı."""
@@ -1632,7 +1733,13 @@ class Motor:
                                    iterasyon=d["iterasyon"])
                     return
             if kosu["durum"] in akis_db.SON_KOSU:
-                self._deneme_bitir(b, deneme_id, "yok_sayildi")
+                # kapanmış koşu (ör. iptal) geç sonucu: geçiş yok, yalnız harcanan maliyet koşuya yazılır (muhasebe)
+                m = veri.get("maliyet_usd") if durum == "bitti" and adim["tur"] == "agent_task" and isinstance(veri, dict) else None
+                m = m if isinstance(m, (int, float)) and not isinstance(m, bool) and 0 < m < 1e6 else None
+                if self._deneme_bitir(b, deneme_id, "yok_sayildi", maliyet_usd=m) and m:
+                    self._kosu_yaz(b, kosu_id, maliyet_usd=kosu["maliyet_usd"] + m)
+                    self._olay(b, self._kosu_al(b, kosu_id), "gec_maliyet", adim=d["adim_id"], deneme=d["deneme"],
+                               durum="yok_sayildi", iterasyon=d["iterasyon"], cost_usd=m)
                 return
             if adim["tur"] == "agent_task" and durum == "bitti":
                 sinif, cikti, maliyet, hata = self._ajan_sonucunu_isle(b, kosu, tanim, adim, d, veri)

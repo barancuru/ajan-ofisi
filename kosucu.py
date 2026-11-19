@@ -889,6 +889,13 @@ def kos(arg_dosyasi):
     except IptalIstegi:
         _IPTAL["yukselt"] = False
         sonuc, hata, limit_dustu = None, IPTAL_HATASI, False   # iptal: limit kuyruğuna ya da yedeğe gitmez
+        # öldürülen claude result yazmaz: iptal anına dek görülen usage'tan liste fiyatıyla kısmi maliyet (tahmin)
+        try:
+            kismi = token_sayac.usd_tahmini(sayac["tekil"].toplam, ajan.get("model"))
+        except Exception:  # noqa: BLE001 - maliyet hesabı iptali düşürmez
+            kismi = None
+        if kismi:
+            sonuc = {"is_error": True, "total_cost_usd": kismi, "maliyet_kismi": True}
     except Exception as e:  # koşu ne olursa olsun bitiş olayı yazılmalı
         _IPTAL["yukselt"] = False
         hata = maskele(f"{type(e).__name__}: {e}")

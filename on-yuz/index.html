@@ -4440,7 +4440,7 @@ function akisAdimlar(dt) {
   return liste;
 }
 const ONG_HIZLI = [['0 9 * * *', 'Her gün 09:00'], ['0 9 * * 1-5', 'Hafta içi 09:00'], ['0 * * * *', 'Her saat başı'], ['30 8 * * 1', 'Pazartesi 08:30']];
-const ONG_SONUC = { basladi: 'başladı', 'basladi (alt ajan)': 'alt ajanla başladı', kuyrukta: 'kuyruğa alındı',
+const ONG_SONUC = { basladi: 'başladı', 'atlandi: akış kapalı': 'atlandı: akış kapalı', 'atlandi: etkin koşu sınırı': 'atlandı: etkin koşu sınırı', 'basladi (alt ajan)': 'alt ajanla başladı', kuyrukta: 'kuyruğa alındı',
   'atlandi: mesgul': 'atlandı (ajan meşguldü)', 'atlandi: kuyruk dolu': 'atlandı (kuyruk dolu)', hata: 'hata' };
 function ongTarih(iso) {
   if (!iso) return '—';
@@ -4562,7 +4562,24 @@ async function ongorulebilirlikSayfasi() {
   const ajan = el('select'); ajan.setAttribute('aria-label', 'Ajan');
   d.ajanlar.forEach(a => { const o = el('option', null, a.ad); o.value = a.id; ajan.append(o); });
   const tur = el('select'); tur.setAttribute('aria-label', 'İş türü');
-  [['hazir', 'Hazır görev'], ['prompt', 'Serbest prompt']].forEach(([v, t]) => { const o = el('option', null, t); o.value = v; tur.append(o); });
+  [['hazir', 'Hazır görev'], ['prompt', 'Serbest prompt'], ['akis', 'Workflow']].forEach(([v, t]) => { const o = el('option', null, t); o.value = v; tur.append(o); });
+  const akislar = d.akislar || [];
+  const akisSec = el('select'); akisSec.setAttribute('aria-label', 'Workflow');
+  akislar.forEach(a => { const o = el('option', null, a.ad); o.value = a.id; akisSec.append(o); });
+  const akisGirdi = el('div', 'ong-akis-girdi');
+  const akisGirdiCiz = () => {
+    const a = akislar.find(x => x.id === akisSec.value);
+    akisGirdi.replaceChildren(...Object.entries(a ? a.girdiler : {}).map(([ad, g]) => {
+      const secimli = g.tur === 'secim' || g.tur === 'evet_hayir';
+      const i = secimli ? el('select') : el('input');
+      const secenek = g.tur === 'evet_hayir' ? [['true', 'evet'], ['false', 'hayır']] : (g.secenekler || []).map(v => [v, v]);
+      if (secimli) secenek.forEach(([v, t]) => { const o = el('option', null, t); o.value = v; i.append(o); });
+      else { i.placeholder = ad + (g.zorunlu ? '' : ' (isteğe bağlı)'); if (g.maks) i.maxLength = g.maks; }
+      i.dataset.girdi = ad; i.dataset.tur = g.tur; i.setAttribute('aria-label', ad); i.required = !!g.zorunlu; i.spellcheck = false;
+      return i;
+    }));
+  };
+  akisSec.onchange = akisGirdiCiz; akisGirdiCiz();
   const hazir = el('select'); hazir.setAttribute('aria-label', 'Hazır görev');
   const prompt = el('textarea'); prompt.placeholder = 'Ajan ne yapsın? (yayın, mail, ödeme yapamaz)'; prompt.maxLength = 4000; prompt.rows = 3;
   const cron = el('input'); cron.placeholder = 'cron: dakika saat ay-günü ay hafta-günü (ör. 0 9 * * 1-5)'; cron.setAttribute('aria-label', 'Cron ifadesi'); cron.spellcheck = false;
@@ -4574,9 +4591,15 @@ async function ongorulebilirlikSayfasi() {
     const a = d.ajanlar.find(x => x.id === ajan.value);
     const gorevler = a ? a.hazir_gorevler : [];
     hazir.replaceChildren(...gorevler.map(g => { const o = el('option', null, g); o.value = g; return o; }));
-    if (!gorevler.length) tur.value = 'prompt';
+    if (!gorevler.length && tur.value === 'hazir') tur.value = d.ajanlar.length ? 'prompt' : 'akis';
+    if (!d.ajanlar.length && akislar.length) tur.value = 'akis';
     tur.options[0].disabled = !gorevler.length;
+    tur.options[1].disabled = !d.ajanlar.length;
+    tur.options[2].disabled = !akislar.length;
+    const akisMi = tur.value === 'akis';
     hazir.hidden = tur.value !== 'hazir'; prompt.hidden = tur.value !== 'prompt';
+    ajan.hidden = akisMi; akisSec.hidden = !akisMi; akisGirdi.hidden = !akisMi;
+    akisGirdi.querySelectorAll('[data-girdi]').forEach(i => { i.disabled = !akisMi; });
   };
   ajan.onchange = turGuncelle; tur.onchange = turGuncelle; turGuncelle();
   let onizNo = 0, onizZaman = null;
@@ -4593,12 +4616,20 @@ async function ongorulebilirlikSayfasi() {
   cron.addEventListener('input', () => { clearTimeout(onizZaman); onizZaman = setTimeout(onizle, 400); });
   const satir = el('div', 'satir2'); satir.append(ajan, tur);
   form.append(el('h4', null, 'Yeni tekrar eden iş'), el('p', 'alt ong-uyari', d.uyari + ' Ajan kendi izinli araçlarıyla koşar; en sık ' + d.min_aralik_dk + ' dakikada bir.'),
-    satir, hazir, prompt, cron, hizli, onizKutu, ekle);
-  if (!d.ajanlar.length) { ekle.disabled = true; form.append(el('p', 'alt', 'Kurulu ajan yok.')); }
+    satir, hazir, prompt, akisSec, akisGirdi, cron, hizli, onizKutu, ekle);
+  if (!d.ajanlar.length && !akislar.length) { ekle.disabled = true; form.append(el('p', 'alt', 'Kurulu ajan ya da etkin workflow yok.')); }
+  else if (!d.ajanlar.length) form.append(el('p', 'alt', 'Kurulu ajan yok; yalnız workflow eklenebilir.'));
   form.onsubmit = async e => {
     e.preventDefault();
-    const govde = { islem: 'ekle', ajan: ajan.value, cron: cron.value.trim() };
-    if (tur.value === 'hazir') govde.etiket = hazir.value; else govde.prompt = prompt.value;
+    let govde = { islem: 'ekle', ajan: ajan.value, cron: cron.value.trim() };
+    if (tur.value === 'akis') {
+      const girdiler = {};
+      akisGirdi.querySelectorAll('[data-girdi]').forEach(i => {
+        const v = i.value.trim(); if (!v) return;
+        girdiler[i.dataset.girdi] = i.dataset.tur === 'sayi' ? Number(v) : i.dataset.tur === 'evet_hayir' ? v === 'true' : v;
+      });
+      govde = { islem: 'ekle', akis: akisSec.value, girdiler, cron: cron.value.trim() };
+    } else if (tur.value === 'hazir') govde.etiket = hazir.value; else govde.prompt = prompt.value;
     ekle.disabled = true;
     const tamam = await islem(govde, 'Tekrar eden iş eklendi');
     if (!tamam) ekle.disabled = false;

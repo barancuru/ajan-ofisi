@@ -5,6 +5,21 @@
 > Bilinçli olarak `~/beyin/gorevler/` görevi olarak açılmadı: hat `durum: hazir` görevleri kendiliğinden alır ve
 > ajan-ofisi oto-onaylı olabilir. Bir kalem seçilince Geliştirme sekmesinden (ya da elle) görev açılır.
 
+## İş sırası (2026-11-19, kullanıcı: "ne var ne yoksa sıraya al ve başla")
+Her kalem ayrı dal + PR; Aşama 1/2 sabitleri V2 PR'larında değişmez. Kalem bitince burada işaretlenir.
+1. [x] Eski V1 artıkları temizlendi (worktree/dal); 1.0.87 paket artıkları kullanıcıya bırakıldı.
+2. [x] V1.1 #7 canlı iptal denemesi (`r1b825e849ab1`): sinyal → claude 9 sn'de durdu, iptal sonucu, yedek/limit yok.
+3. [~] HomeOS aşama 2: taslak PR #5 (`akis-asama2`, 1.0.90). Merge = pilotu açma kararı (kullanıcı); ön koşul `.zip.kimlik`.
+4. [x] V2 maliyet modeli (p50/p90, bu dal).
+5. [x] İptal edilen denemenin maliyeti (kosucu kısmi maliyet + motor `gec_maliyet` taraması): claude öldürülünce `total_cost_usd` yok → deneme 0/None sayılır. Bütçede
+       iptal anına dek harcama görünmez (koşu zaten iptal, risk düşük); `stream-json` usage'tan kısmi maliyet.
+6. [x] V2 zamanlayıcı tetiklemesi → 7. [ ] olay tetiklemesi (yeni yetki eklemez; beyin `bin/calistir` değişikliği ister → yalnız beyin dalında, #5 canlıya alınınca anlamlı).
+8. [ ] V2 dinamik fan-out (liste çıktı türü + DB migration 5; dağıtımda tekrar timer'ları durdurulur ya da merge'den hemen sonra restart: `zamanlayici.py --tetikle` çalışma ağacından `Depo` açıp migrate eder) → 9. [ ] `workflow_call` (derinlik ≤ 2).
+10. [ ] V2 değerlendirici-iyileştirici döngüsü.
+11. [ ] V2 `plan_step` → 12. [ ] CEO workflow önerisi (model çıktısı yol seçtiği için en son).
+13. [ ] V3 görsel editör / replay.
+- #5 (dış çağrıda kilit) ertelendi: yalnız eşzamanlılık testiyle birlikte ele alınır.
+
 ## V1.1 (öncelikli)
 1. ~~**Hat maliyet eşlemesi**~~ — V1.1: beyin dalı `hat-maliyet-esleme` (`adc0346`, `maliyet_kimligi_yaz`) + ofis `hat_maliyeti`; kabul: iki haiku turu 0,0105 $ (tahmin 12 $): (kullanıcı kararı 2026-11-19: V1.1). Koşu başına gerçek maliyet var
    (`~/.local/state/beyin/kosular/<zaman>-gelistir.json` → `total_cost_usd`, `.cache/kayit-tam.jsonl` → `maliyet`) ama
@@ -35,8 +50,8 @@
 - **Değerlendirici-iyileştirici döngüsü**: LLM-as-judge puanı + mutlaka bir gerçek kontrol. Puan tek başına kapıyı geçemez.
 - **Alt workflow çağrısı** (`workflow_call`): sürüm sabitli, ayrı bütçe payı, derinlik ≤ 2.
 - **CEO entegrasyonu**: CEO atama yerine "şu workflow'u şu girdilerle başlat" önerebilir. Başlatma yine kullanıcı onayıyla.
-- **Maliyet modeli**: adım başına gerçekleşen maliyet geçmişinden p50/p90 tahmin; bütçe kontrolü p90 ile.
-- **Zamanlayıcı tetiklemesi**: `zamanlayici.py` tekrar eden işine "workflow başlat" türü (idem anahtarı = zaman dilimi).
+- ~~**Maliyet modeli**~~ — V2: hat adımında ≥5 ölçümde p90 (son 50, yalnız >0 ölçüm, statiğin %10'u taban); ajan adımında bütçe sert tavanla (`--max-budget-usd`) kalır, p50/p90 öngörü; `maliyet_modeli()` API'de; olayda `tahmin_kaynagi`.
+- ~~**Zamanlayıcı tetiklemesi**~~ — V2: tekrar eden iş `{akis, girdiler, cron}`; hat/kalite kapısı/dağıtım onayı içeren akış aşama bayraklarından bağımsız zamanlanamaz (`zamanlama_engeli`); kayıtta akış etkin + girdi doğrulaması, tetikte idem `tekrar:<iş>:<dakika>`, motor kapıları yeniden uygular; Öngörülebilirlik formunda "Workflow" türü.
 - **Olay tetiklemesi**: hat görevi `uat`/`takildi` olunca bağlı workflow'u ilerletmek için dosya izleme yerine bildirim.
 
 ## V3 — görsel workflow editörü
