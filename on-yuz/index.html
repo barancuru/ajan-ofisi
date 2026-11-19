@@ -4242,13 +4242,17 @@ function akisAkisiAc() {
 function akisSatirGuncelle(id) {
   const eski = id && sayfa.querySelector('.akis-kosu[data-run="' + CSS.escape(id) + '"]');
   if (!eski) { akisCanli(); return; }          // yeni koşu: liste baştan
-  if (akisSatirZaman.has(id)) return;
+  if (akisSatirZaman.has(id) || akisKartDolu(eski)) return;   // açık karar formundaki yazı silinmesin
   akisSatirZaman.set(id, setTimeout(async () => {
     akisSatirZaman.delete(id);
     let dt; try { dt = await getJSON('/api/akis/detay?id=' + encodeURIComponent(id)); } catch { return; }
     const simdiki = sayfa.querySelector('.akis-kosu[data-run="' + CSS.escape(id) + '"]');
-    if (simdiki && aktifSekme === 'akis') simdiki.replaceWith(akisKosuKarti(dt, dt));
+    if (simdiki && aktifSekme === 'akis' && !akisKartDolu(simdiki)) simdiki.replaceWith(akisKosuKarti(dt, dt));
   }, 700));
+}
+function akisKartDolu(kart) {   // karar formu açık ve yazılmış ya da odakta: satır yenilenmez (form kapanınca güncellenir)
+  const f = kart.querySelector('.akis-karar');
+  return !!f && (f.contains(document.activeElement) || [...f.querySelectorAll('textarea,input')].some(x => x.value.trim()));
 }
 function akisCanli() {
   if (aktifSekme !== 'akis' || akisCanliZaman) return;
@@ -4370,8 +4374,8 @@ function akisDugmeler(dt) {
 function akisKararFormu(baslik, aciklama, alanlar, gonderGovde, tamam) {
   const f = el('form', 'kart gelistirme-form akis-form akis-karar'); f.autocomplete = 'off';
   f.append(el('h4', null, baslik), el('small', 'alt', aciklama), ...alanlar);
-  const ger = el('textarea'); ger.rows = 2; ger.minLength = 10; ger.maxLength = 2000; ger.required = true;
-  ger.placeholder = 'Gerekçe (zorunlu, en az 10 karakter): neyi nasıl doğruladın?'; ger.setAttribute('aria-label', 'Gerekçe');
+  const ger = el('textarea'); ger.rows = 2; ger.minLength = 10; ger.maxLength = 300; ger.required = true;
+  ger.placeholder = 'Gerekçe (zorunlu, 10–300 karakter): neyi nasıl doğruladın?'; ger.setAttribute('aria-label', 'Gerekçe');
   const gon = el('button', 'koyu', 'Kaydet'); gon.type = 'submit';
   const vaz = el('button', 'mini', 'Vazgeç'); vaz.type = 'button'; vaz.onclick = () => sekmeAc('akis');
   const satir = el('div', 'akis-karar-dugmeler'); satir.append(gon, vaz);

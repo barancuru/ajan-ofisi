@@ -31,7 +31,7 @@ class BasariliSayTest(MotorTabani):
         with self.assertRaises(akis_motor.AkisHatasi) as c:
             self.m.basarili_say(k, "a", G, {"sonuc": "iyi"})
         self.assertEqual(c.exception.kod, 403)
-        for g in (None, "kısa", "x" * 2001, "password=hunter2hunter2 ok"):
+        for g in (None, "kısa", "x" * 301, "password=hunter2hunter2 ok"):
             with self.assertRaises(akis_motor.AkisHatasi) as c:
                 self.m.basarili_say(k, "a", g, {"sonuc": "iyi"}, kapi_ok=True)
             self.assertEqual(c.exception.kod, 400, g)

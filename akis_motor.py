@@ -65,7 +65,7 @@ UYANMA_AKTIF_SN = 5
 # kaynak adıma göre karar verilir: yan etkisiz adım yeniden denenebilir, yan etkili adım (hat görevi, yazabilen ajan) değil.
 HAT_ARA_DURUMLARI = ("hazir", "sirada", "calisiyor", "uat")   # hat kartının gösterilen ara durumları (V1.1 #8)
 OPERATOR_BASARILI_SEBEPLER = ("adim", "sir")   # "başarılı say" yalnız adımın kendisi başarısız olduğunda (izin listesi)
-GEREKCE_MIN, GEREKCE_MAKS = 10, 2000
+GEREKCE_MIN, GEREKCE_MAKS = 10, 300   # denetim olayı alanı da 300 karakter: gerekçe kesilmeden saklanır
 YENIDEN_DENENEMEZ = ("dongu_siniri", "butce", "sure", "erken_onay", "kapali")   # yayin_takildi denenebilir: onay adımı yan etkisiz
 UYANMA_BOS_SN = 30
 DEGER_DESENLERI = {"surum": re.compile(r"^[0-9.]{1,24}$"), "dal": re.compile(r"^beyin/[a-z0-9-]{1,80}$"),

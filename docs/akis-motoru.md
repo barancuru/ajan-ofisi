@@ -187,7 +187,7 @@ kosucu sonucu `son: false` yazar; motor aynı denemeyi beklemeyi sürdürür, ke
 ## Operatör kararları (V1.1)
 
 - **Adımı başarılı say** (`karar: basarili_say, adim, gerekce, cikti`): yalnız ofis girişi (`X-Ofis-Kapi`; motor da
-  denetler), gerekçe 10–2000 karakter (sır taraması). Yalnız inceleme sebebi `adim` ya da `sir` olan, satırı
+  denetler), gerekçe 10–300 karakter (sır taraması). Yalnız inceleme sebebi `adim` ya da `sir` olan, satırı
   `inceleme` durumundaki ve uçuşta denemesi olmayan **agent_task** adımı. Kapı, onay, hat ve koşul adımı başarılı
   sayılamaz (kanıtları komut çıkışı ya da insan onayıdır); tanım yönlendirmesi (`tanim`), `kaynak`, sınırlar,
   `erken_onay`, `kapali` da hayır. Tanımın zorunlu çıktı alanlarını operatör verir (aynı tür/boyut doğrulaması).
