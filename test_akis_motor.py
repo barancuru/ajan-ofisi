@@ -920,6 +920,26 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         self.assertEqual(self.adim(k, "duzeltme")["durum"], "basarili")
         self.assertEqual(self.adim(k, "uygulama")["cikti"]["sha256"], "c" * 64)
 
+    def test_test_edilen_sha_bilinmiyorsa_duzeltme_yok(self):
+        k = self.hat_incelemede()
+        with self.depo.islem() as b:
+            b.execute("UPDATE kosular SET neden=? WHERE id=?", (json.dumps({"sebep": "kaynak", "metin": "x", "adim": "duzeltme"}), k))
+            b.execute("INSERT INTO denemeler(kosu_id, adim_id, iterasyon, deneme, ref, durum, tutamac_json, baslangic_ts) "
+                      "VALUES (?,?,?,?,?,?,?,?)", (k, "uygulama", 0, 9, "ak-00000000fffe", "basarili", json.dumps({"dosya": "G0.md"}), 0))
+            b.execute("UPDATE adimlar SET cikti_json=? WHERE kosu_id=? AND adim_id='uygulama'",
+                      (json.dumps({"durum": "uat", "dosya": "G0.md", "surum": "0.10.1", "dal": "beyin/1118-x", "sha256": ""}), k))
+        self.ortam.hat_uat("G0.md")
+        with self.assertRaises(akis_motor.AkisHatasi) as c:       # devam ile gönderim aynı kuralı uygular
+            self.m.devam(k, "yeniden_dene")
+        self.assertIn("bilinmiyor", str(c.exception))
+        self.assertEqual(self.ortam.reddler, [])
+        # gönderim yolu da reddetmez
+        with self.depo.islem() as b:
+            b.execute("UPDATE kosular SET durum='calisiyor', neden=NULL WHERE id=?", (k,))
+            b.execute("UPDATE adimlar SET durum='hazir' WHERE kosu_id=? AND adim_id='duzeltme'", (k,))
+        self.m.tur()
+        self.assertEqual(self.ortam.reddler, [])
+
     def test_duzeltme_hedef_karti_uat_degilse_yeniden_dene_409(self):
         k = self.hat_incelemede()
         with self.depo.islem() as b:   # uygulama başarılı sayıldı, düzeltme adımı ön koşulda kaldı (tutamaçsız)

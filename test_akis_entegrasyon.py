@@ -537,6 +537,28 @@ class KuyrukIptalSiralamaTest(OfisTabani):
         with open(ortak.OLAYLAR) as f:
             self.assertTrue(any(json.loads(s).get("olay") == "motor_hatasi" for s in f))
 
+    def test_reddetme_okuma_yazma_arasi_degisiklik(self):
+        """Hat (ayrı süreç, kilitsiz fm_set) okuma ile yazma arasında kartı yeni pakete geçirirse ret yazılmaz."""
+        with mock.patch.object(sunucu, "gelistirme_projeleri", lambda: ["homeos"]):
+            dosya = self.ortam.gelistirme_yaz("homeos", "Rapor", "x", "sonnet", REF)
+        yol = os.path.join(self.dizin["gorevler"], dosya)
+        with open(yol) as f:
+            m = f.read()
+        m = sunucu.on_bilgi_yaz(sunucu.on_bilgi_yaz(sunucu.on_bilgi_yaz(m, "durum", "uat"), "onay", "bekliyor"), "sha256", "a" * 64)
+        with open(yol, "w") as f:
+            f.write(m)
+        asil = sunucu.geri_bildirim_ekle
+
+        def hat_araya_girdi(metin, not_, kimden="x"):
+            with open(yol, "w") as f:                          # calistir: fm_set sha256 C
+                f.write(sunucu.on_bilgi_yaz(m, "sha256", "c" * 64))
+            return asil(metin, not_, kimden)
+        with mock.patch.object(sunucu, "geri_bildirim_ekle", hat_araya_girdi):
+            with self.assertRaises(akis_motor.BaslatmaHatasi):
+                self.ortam.gelistirme_reddet(dosya, "düzelt", "a" * 64)
+        fm = self.ortam.gelistirme_oku(dosya)
+        self.assertEqual((fm["sha256"], fm["onay"]), ("c" * 64, "bekliyor"))   # hattın yazdığı korunur
+
     def test_reddetme_beklenen_sha_kilit_altinda(self):
         with mock.patch.object(sunucu, "gelistirme_projeleri", lambda: ["homeos"]):
             dosya = self.ortam.gelistirme_yaz("homeos", "Rapor", "x", "sonnet", REF)

@@ -1933,7 +1933,13 @@ def uat_reddet(dosya, not_, kimden="workflow", beklenen_sha=None):
         if beklenen_sha is not None and fm.get("sha256") != beklenen_sha:
             # okuma ile yazma arasında kart yeni pakete geçti: kalite kapısının test etmediği paket reddedilmez
             raise IstekHatasi(409, "kart bu arada yeni bir pakete geçti; test edilmeyen paket reddedilmez")
-        atomik_yaz(yol, on_bilgi_yaz(geri_bildirim_ekle(metin, not_, kimden), "onay", "hayir"))
+        yeni = on_bilgi_yaz(geri_bildirim_ekle(metin, not_, kimden), "onay", "hayir")
+        # Hat (bin/calistir fm_set) ayrı süreçte ve kilitsiz yazar: GELISTIRME_KILIDI onu durdurmaz. Yazmadan hemen önce
+        # dosya yeniden okunur; değiştiyse hattın yazdığı ezilmez. Kalan pencere yazma anıdır (V1.1: ortak dosya kilidi).
+        with open(yol, encoding="utf-8", errors="replace") as f:
+            if f.read() != metin:
+                raise IstekHatasi(409, "kart bu arada değişti (hat yazdı); ret yazılmadı, yeniden değerlendirilecek")
+        atomik_yaz(yol, yeni)
     try:   # ret yazıldı: tetik hatası (systemctl) reddi geri almaz, 5 dk zamanlayıcı yine alır
         kosucuyu_durt()
     except (OSError, subprocess.SubprocessError):
