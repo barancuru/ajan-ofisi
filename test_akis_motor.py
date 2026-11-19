@@ -64,6 +64,13 @@ class SahteOrtam:
     def yayinlandi(self, proje, surum, dal, sha):
         return (proje, surum, dal, sha) in self.yayinlar
 
+    def baslatma_kilidi(self):
+        import contextlib
+        return contextlib.nullcontext()
+
+    def kuyruktan_cikar_kilitsiz(self, ref):
+        return self.kuyruktan_cikar(ref)
+
     def kuyruktan_cikar(self, ref):
         self.cikarirken_ucusta = getattr(self, "motor", None) and self.motor.ref_ucusta(ref)
         if ref in self.kuyruk:

@@ -382,9 +382,12 @@ def limit_bekleyenleri_al(kuyruk):
                      **({"model": k["model"]} if k.get("model") in kosucu.ATAMA_MODELLERI else {}),
                      "sonra": k.get("sonra"), "limit_deneme": k.get("limit_deneme"), "zaman": ortak.simdi_iso(),
                      **({"akis_ref": k["akis_ref"]} if k.get("akis_ref") else {})}
-            if not _kuyruk_dogrula([kayit]):  # kuyruk_oku ile aynı doğrulama
+            akis_durumu = akis_ref_durumu(kayit.get("akis_ref")) if _kuyruk_dogrula([kayit]) else None
+            if akis_durumu == "bilinmiyor":
+                continue   # limit kaydı yerinde kalır: DB okununca sonraki turda karar verilir
+            if akis_durumu is None:  # kuyruk_oku ile aynı doğrulama
                 kayit = None
-            elif not akis_ref_gecerli(kayit.get("akis_ref")):
+            elif akis_durumu == "gecersiz":
                 # iptal/terk edilmiş workflow denemesi: arıza değil, hata olayı (Telegram) yazılmaz
                 try:
                     os.remove(yol)
@@ -408,17 +411,18 @@ def limit_bekleyenleri_al(kuyruk):
     return eklenen
 
 
-def akis_ref_gecerli(ref):
-    """Kuyruktaki/limit-bekleyen'deki workflow işi hâlâ bekleniyor mu? İptal edilmiş ya da terk edilmiş denemenin işi
-    (ör. iptalden sonra limite takılıp yeniden kuyruğa giren koşu) koşturulmaz. Okunamazsa güvenli tarafta: düşür."""
+def akis_ref_durumu(ref):
+    """Kuyruktaki/limit-bekleyen'deki işin workflow durumu: 'gecerli' (deneme uçuşta ya da workflow işi değil),
+    'gecersiz' (iptal/terk edilmiş: iş düşürülür) ya da 'bilinmiyor' (workflow DB okunamadı: kayıt KORUNUR ama
+    BAŞLATILMAZ, hata olayı yazılır; DB geri gelince sonraki turda karar verilir). Çağıran BASLATMA_KILIDI altındadır."""
     if not ref:
-        return True
+        return "gecerli"
     try:
-        return motor().ref_ucusta(ref)
-    except Exception as e:  # noqa: BLE001 - DB okunamadı: iş korunur (sessizce düşürmek, gerçek işi kaybettirir)
+        return "gecerli" if motor().ref_ucusta(ref) else "gecersiz"
+    except Exception as e:  # noqa: BLE001
         ortak.olay_yaz({"tur": "hata", "ajan": "ofis", "detay": f"workflow durumu okunamadı ({type(e).__name__}); "
-                        "kuyruktaki workflow işi korunuyor"})
-        return True
+                        "kuyruktaki workflow işi korunuyor, başlatılmıyor"})
+        return "bilinmiyor"
 
 
 def kuyrugu_isle():
@@ -442,7 +446,11 @@ def kuyrugu_isle():
             if k.get("sonra") and (k["sonra"] > simdi or kosucu.hepsi_limitte()):
                 kalan.append(k)
                 continue
-            if not akis_ref_gecerli(k.get("akis_ref")):
+            akis_durumu = akis_ref_durumu(k.get("akis_ref"))
+            if akis_durumu == "bilinmiyor":
+                kalan.append(k)       # korunur, başlatılmaz
+                continue
+            if akis_durumu == "gecersiz":
                 ortak.olay_yaz({"tur": "akis", "olay": "terk_edilen_is_dusuruldu", "step_id": None, "kuyruk_id": k["id"],
                                 "akis_ref": k.get("akis_ref"), "ajan": k.get("ajan")})
                 continue

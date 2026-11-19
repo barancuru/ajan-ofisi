@@ -58,8 +58,8 @@ akislar/*.json ──doğrula──▶ Motor (SQLite durum/akis.db)
   `izle_adim` zorunlu: Geliştirme sekmesindeki UAT kartını izler, API'den verilemez. Kabul için görev dosyasındaki
   `onay: evet` **yetmez** (kapısız yazılabilir): ofis girişinin mühürlü pakete bağlı canlı onay kaydı
   (`~/.config/ofis-kapi/onaylar/<proje>-<sürüm>.onay` = paket SHA-256) ya da hattın o kayıtla yaptığı yayın
-  (`durum: bitti` **ve** o sürüm için hattın paket mührü görevdeki sha'ya eşit, klonda `v<sürüm>` etiketi var, dal o
-  etikete alınmış; yeniden temellendirmede değişen sürüm/sha görevdeki güncel değerden okunur) gerekir; yoksa `onay_kaydi_yok`
+  (`durum: bitti` **ve** o sürüm için hattın paket mührü görevdeki sha'ya eşit, klonda `v<sürüm>` etiketi **tam dal
+  ucunda** (is_yayin `--ff-only` alır) ve etiket `main`'den erişilebilir; yeniden temellendirmede değişen sürüm/sha görevdeki güncel değerden okunur) gerekir; yoksa `onay_kaydi_yok`
   olayı yazılır ve beklenir.
 - **end**: `sonuc: basarili | basarisiz`.
 
@@ -121,8 +121,15 @@ kosucu sonucu `son: false` yazar; motor aynı denemeyi beklemeyi sürdürür, ke
   - yarıda kalan kapı yeniden koşulur (yan etkisiz).
 - İşaret dosyası koşuya kimlikle (`kosu_id`) bağlanır, zamanla değil: limit yüzünden yeniden kuyruğa giren önceki
   koşunun işareti yeni koşuyu temsil etmez. Süreç ölü görünürse sonuç dosyası yeniden okunur.
-- Sunucu kuyruğu (`kuyrugu_isle`, `limit_bekleyenleri_al`) `akis_ref` taşıyan işi yalnız deneme hâlâ uçuştaysa koşturur
-  (`Motor.ref_ucusta`); iptal/terk edilmiş denemenin geç gelen limit kaydı düşürülür.
+- Sunucu kuyruğu (`kuyrugu_isle`, `limit_bekleyenleri_al`) `akis_ref` taşıyan iş için `akis_ref_durumu` sorar:
+  `gecerli` (deneme uçuşta) → koşturulur; `gecersiz` (iptal/terk) → düşürülür (hata olayı yazılmaz);
+  `bilinmiyor` (workflow DB okunamadı) → kuyruk ve limit-bekleyen kaydı **korunur, başlatılmaz**, `hata` olayı yazılır;
+  DB geri gelince sonraki turda karar verilir.
+- **Kilit sırası** (kilitlenmesiz): motor kilidi → başlatma kilidi (`BASLATMA_KILIDI` + `durum/baslatma.lock`; ofis
+  sunucusu ve systemd tekrar servisi aynı dosya kilidini kullanır) → SQLite yazma. Kuyruk tarafı geçerlilik kontrolünü
+  ve tmux başlatmayı başlatma kilidi altında yapar, motor kilidini hiç almaz, DB'yi yalnız okur. İptal, commit'ini ve
+  kuyruk temizliğini aynı başlatma kilidi altında yapar: iptal commit'i kontrol ile başlatma arasına giremez; ya önce
+  olur (iş düşürülür) ya da başlatmadan sonra (koşu açılmıştır, sonucu yok sayılır, not bunu söyler).
 - Sonuç işleme `UPDATE denemeler ... WHERE durum IN (uçuşta)` ile tek seferliktir. `olaylar.anahtar` UNIQUE olduğu
   için aynı olay iki kez yayınlanmaz.
 - Duraklatma yeni adım başlatmaz, uçuştaki sonuçları toplamayı sürdürür.

@@ -92,7 +92,7 @@ class KuyrukGecisTest(OfisTabani):
         self.assertNotIn("akis_ref", self.arglar()[0])
 
     def test_mesgul_ajan_kuyruga_ref_ile_girer_ve_tasinir(self):
-        self.ucusta = mock.patch.object(sunucu, "akis_ref_gecerli", lambda ref: True)
+        self.ucusta = mock.patch.object(sunucu, "akis_ref_durumu", lambda ref: "gecerli")
         self.ucusta.start()
         self.addCleanup(self.ucusta.stop)
         self.mesgul("arastirmaci")
@@ -145,7 +145,7 @@ class KuyrukGecisTest(OfisTabani):
         self.assertTrue(kosucu.limit_bekleyen_yaz(arg))
         self.assertTrue(self.ortam.kuyrukta_mi(REF))           # limit beklerken de "kuyrukta"
         kuyruk = []
-        with mock.patch.object(sunucu, "akis_ref_gecerli", lambda ref: True):
+        with mock.patch.object(sunucu, "akis_ref_durumu", lambda ref: "gecerli"):
             sunucu.limit_bekleyenleri_al(kuyruk)
         self.assertEqual(kuyruk[0]["akis_ref"], REF)
 
@@ -299,11 +299,48 @@ class HatAdaptoruTest(OfisTabani):
             self.assertEqual(akis_kapi.main(["php-lint", wt, "main"]), 2)
             self.assertFalse(os.path.exists(iz))
 
-    def test_db_okunamazsa_is_korunur_ve_alarm(self):
+    def test_db_okunamazsa_durum_bilinmiyor_ve_alarm(self):
+        """P0-1: DB okunamazsa ne 'geçerli' ne 'geçersiz': bilinmiyor (iş korunur, başlatılmaz) + hata olayı."""
         with mock.patch.object(sunucu, "motor", side_effect=RuntimeError("db")):
-            self.assertTrue(sunucu.akis_ref_gecerli(REF))
+            self.assertEqual(sunucu.akis_ref_durumu(REF), "bilinmiyor")
+        self.assertEqual(sunucu.akis_ref_durumu(None), "gecerli")
         with open(ortak.OLAYLAR) as f:
             self.assertTrue(any(json.loads(s)["tur"] == "hata" for s in f))
+
+    def test_yayin_kaniti_gercek_yayin_bicimi(self):
+        """Ek kontrol: is_yayin dalı main'e fast-forward alır ve v<sürüm>'ü o commit'e koyar. Kanıt: etiket = dal ucu ve
+        etiket main'den erişilebilir. Kendine ait commit'i olmayan (etiketin gerisindeki) dal ya da main'e alınmamış
+        etiket kanıt sayılmaz."""
+        def git(*a):
+            subprocess.run(["git", "-C", klon, "-c", "user.name=t", "-c", "user.email=t@l", *a], check=True,
+                           capture_output=True)
+        muhur = os.path.join(self.d, "muhur")
+        os.makedirs(muhur)
+        for s_ in ("0.10.9", "0.10.10", "0.10.11"):
+            with open(os.path.join(muhur, f"homeos-{s_}.zip.sha256"), "w") as f:
+                f.write("a" * 64 + "\n")
+        with mock.patch.object(akis_ofis, "IS_DIZINI", self.d), mock.patch.object(sunucu, "PAKET_MUHUR_DIZINI", muhur):
+            wt = self.hat_worktree("1119-gercek")
+            klon = os.path.join(self.d, "homeos")
+            with open(os.path.join(wt, "a.txt"), "w") as f:
+                f.write("x")
+            subprocess.run(["git", "-C", wt, "add", "a.txt"], check=True)
+            subprocess.run(["git", "-C", wt, "-c", "user.name=t", "-c", "user.email=t@l", "commit", "-qm", "is"], check=True)
+            git("merge", "-q", "--ff-only", "beyin/1119-gercek")          # is_yayin: main ← dal (ff)
+            git("tag", "-a", "v0.10.9", "-m", "homeos 0.10.9 (beyin)")      # etiket main ucunda = dal ucu
+            git("commit", "-q", "--allow-empty", "-m", "sonraki is")       # main ilerledi: kanıt bozulmaz
+            self.assertTrue(self.ortam._yayinlandi("homeos", "0.10.9", "beyin/1119-gercek", "a" * 64))
+            # dal kendi commit'i olmadan tabanda; etiket daha ileride (ata ama dal ucu değil)
+            git("branch", "beyin/1119-bos", "v0.10.9~1")
+            git("tag", "-a", "v0.10.10", "-m", "baska")
+            self.assertFalse(self.ortam._yayinlandi("homeos", "0.10.10", "beyin/1119-bos", "a" * 64))
+            # etiket dal ucunda ama main'e alınmamış
+            git("branch", "beyin/1119-alinmadi", "main")
+            git("checkout", "-q", "beyin/1119-alinmadi")
+            git("commit", "-q", "--allow-empty", "-m", "yan")
+            git("tag", "-a", "v0.10.11", "-m", "yan")
+            git("checkout", "-q", "main")
+            self.assertFalse(self.ortam._yayinlandi("homeos", "0.10.11", "beyin/1119-alinmadi", "a" * 64))
 
     def test_canli_onay_kaydi(self):
         with mock.patch.object(sunucu, "CANLI_ONAY_DIZINI", self.d):
@@ -381,6 +418,96 @@ class UctanUcaTest(OfisTabani):
         akis = [o for o in olaylar if o["tur"] == "akis"]
         self.assertTrue(akis)
         self.assertFalse([o for o in akis if "kediler" in json.dumps(o, ensure_ascii=False)])   # istem olaya girmez
+
+
+class KuyrukIptalSiralamaTest(OfisTabani):
+    """P0-1 ve P0-2: gerçek sunucu.kuyrugu_isle / limit_bekleyenleri_al + gerçek Motor.iptal + OfisOrtami."""
+
+    def setUp(self):
+        super().setUp()
+        self.m = akis_motor.Motor(akis_db.Depo(os.path.join(self.dizin["durum"], "akis.db")), self.ortam, kapi_senkron=True)
+        for y in (mock.patch.object(sunucu, "_MOTOR", self.m), mock.patch.object(kosucu, "hepsi_limitte", lambda: False)):
+            y.start()
+            self.addCleanup(y.stop)
+
+    def kuyruktaki_kosu(self):
+        self.mesgul("akis-okuyucu")
+        k = self.m.baslat("ornek-arastirma-ozeti", {"konu": "x"})["run_id"]
+        self.m.tur()
+        d = self.m.depo.denemeler(k)[0]
+        self.assertEqual(d["durum"], "kuyrukta")
+        ortak.durum_yaz("akis-okuyucu", {"durum": "bitti"})
+        return k, d["ref"]
+
+    def hata_olaylari(self):
+        try:
+            with open(ortak.OLAYLAR) as f:
+                return [json.loads(s) for s in f if '"tur": "hata"' in s]
+        except FileNotFoundError:
+            return []
+
+    def test_db_okunamazsa_kuyruk_isi_korunur_baslatilmaz(self):
+        k, ref = self.kuyruktaki_kosu()
+        with mock.patch.object(sunucu, "motor", side_effect=RuntimeError("db kilitli")):
+            self.assertEqual(sunucu.kuyrugu_isle(), [])
+        self.assertEqual(self.tmux, [])                                    # başlatılmadı
+        self.assertEqual([x.get("akis_ref") for x in sunucu.kuyruk_oku()], [ref])   # korundu
+        self.assertTrue(self.hata_olaylari())                              # alarm
+        sunucu.kuyrugu_isle()                                              # DB geri geldi: normal akış
+        self.assertEqual(len(self.tmux), 1)
+
+    def test_db_okunamazsa_limit_kaydi_korunur_baslatilmaz(self):
+        arg = {"kosu_id": "2026-11-19-1-akis-okuyucu", "ajan": "akis-okuyucu", "prompt": "p", "kaynak": "akis",
+               "akis_ref": REF}
+        self.assertTrue(kosucu.limit_bekleyen_yaz(arg))
+        with mock.patch.object(sunucu, "motor", side_effect=RuntimeError("db kilitli")):
+            self.assertEqual(sunucu.kuyrugu_isle(), [])
+        self.assertEqual(self.tmux, [])
+        self.assertEqual(len(os.listdir(kosucu.limit_bekleyen_dizini())), 1)   # limit kaydı yerinde
+        self.assertFalse(os.path.exists(sunucu.kuyruk_yolu()))
+        self.assertTrue(self.hata_olaylari())
+
+    def test_iptal_once_commit_sonra_kuyruk_kosmaz(self):
+        k, ref = self.kuyruktaki_kosu()
+        self.m.iptal(k)
+        sunucu.kuyrugu_isle()
+        self.assertEqual(self.tmux, [])
+
+    def test_kuyruk_kontrolu_ile_baslatma_arasinda_iptal_commit_edilemez(self):
+        """P0-2: kuyruk 'geçerli' dedikten sonra iptal başlarsa, iptal commit'i başlatma bitene dek bekler.
+        Başlatma anında koşu DB'de hâlâ 'calisiyor' olmalı; iptal commit'inden SONRA hiçbir koşu başlamamalı."""
+        k, ref = self.kuyruktaki_kosu()
+        kontrol_yapildi, iptal_basladi = threading.Event(), threading.Event()
+        baslatma_anindaki_durum = []
+        asil_ucusta = self.m.ref_ucusta
+        iptal_is = threading.Thread(target=lambda: (iptal_basladi.set(), self.m.iptal(k)), name="iptal")
+
+        def ucusta_sonra_bekle(r):
+            sonuc = asil_ucusta(r)
+            kontrol_yapildi.set()
+            iptal_basladi.wait(5)
+            iptal_is.join(1.0)            # düzeltme yoksa iptal bu arada commit eder
+            return sonuc
+        self.m.ref_ucusta = ucusta_sonra_bekle
+        asil_tmux = self.sahte_tmux
+
+        def tmux_kaydet(argv, **kw):
+            if argv and argv[0] == "tmux":
+                baslatma_anindaki_durum.append(akis_db.Depo(self.m.depo.yol).kosu(k)["durum"])
+            return asil_tmux(argv, **kw)
+        with mock.patch.object(sunucu.subprocess, "run", tmux_kaydet):
+            kuyruk_is = threading.Thread(target=sunucu.kuyrugu_isle, name="kuyruk")
+            kuyruk_is.start()
+            self.assertTrue(kontrol_yapildi.wait(5))
+            iptal_is.start()
+            kuyruk_is.join(10)
+            iptal_is.join(10)
+        self.assertFalse(kuyruk_is.is_alive() or iptal_is.is_alive(), "kilitlenme")
+        self.assertEqual(baslatma_anindaki_durum, ["calisiyor"])        # iptal commit'inden sonra başlatma yok
+        d = self.m.detay(k)
+        self.assertEqual(d["durum"], "iptal")
+        self.assertIn("çalışan ajan koşusu durdurulmadı", d["neden"]["metin"])   # dürüst not: koşu açılmıştı
+        self.assertEqual(sunucu.kuyruk_oku(), [])
 
 
 class ApiTest(OfisTabani):

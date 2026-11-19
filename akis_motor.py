@@ -348,9 +348,29 @@ class Motor:
         return self.detay(kosu_id)
 
     def iptal(self, kosu_id):
-        """Önce DB'de iptal (commit): sunucu kuyruğu (ref_ucusta) bundan sonra işi koşturmaz. Kuyruk/limit kaydı
-        temizliği DB işlemi DIŞINDA yapılır (işlem açıkken BASLATMA_KILIDI beklenirse kuyruk eski durumu görürdü)."""
+        """Kilit sırası: motor kilidi → başlatma kilidi (BASLATMA_KILIDI + baslatma.lock) → DB commit → kuyruk temizliği.
+        Kuyruğu işleyen taraf (kuyrugu_isle) geçerlilik kontrolünü ve tmux başlatmayı aynı başlatma kilidi altında yapar;
+        böylece iptal commit'i ya kontrolden önce olur (iş düşürülür) ya da başlatma bittikten sonra (koşu açılmıştır,
+        sonucu yok sayılır). Kontrol ile başlatma arasına iptal giremez. Kuyruk tarafı motor kilidini hiç almaz: kilitlenme yok."""
         notlar, ajan_denemeleri = [], []
+        with self._kilit, self.ortam.baslatma_kilidi():
+            self._iptal_commit(kosu_id, notlar, ajan_denemeleri)
+            iade = 0.0
+            for d in ajan_denemeleri:
+                if self.ortam.kuyruktan_cikar_kilitsiz(d["ref"]):
+                    notlar.append(f"{d['adim_id']}: kuyruktan çıkarıldı")
+                    if d["durum"] == "kuyrukta":   # hiç koşmadı: tahmini maliyeti serbest bırak
+                        iade += d["tahmini_usd"] or 0
+                else:
+                    notlar.append(f"{d['adim_id']}: çalışan ajan koşusu durdurulmadı; bitince sonucu yok sayılır")
+        with self._islem() as b:
+            kosu = self._kosu_al(b, kosu_id)
+            self._kosu_yaz(b, kosu_id, tahmini_usd=max(kosu["tahmini_usd"] - iade, 0),
+                           neden=json.dumps({"sebep": "operator", "metin": "; ".join(notlar) or "operatör iptal etti"},
+                                            ensure_ascii=False))
+        return {**self.detay(kosu_id), "notlar": notlar}
+
+    def _iptal_commit(self, kosu_id, notlar, ajan_denemeleri):
         with self._islem() as b:
             kosu = self._kosu_kontrol(b, kosu_id)
             if kosu["durum"] in akis_db.SON_KOSU:
@@ -366,20 +386,6 @@ class Motor:
             b.execute("UPDATE adimlar SET durum='iptal' WHERE kosu_id=? AND durum IN ('hazir','calisiyor','onay_bekliyor','bekliyor','inceleme')",
                       (kosu_id,))
             self._kosu_bitir(b, kosu, "iptal", {"sebep": "operator", "metin": "operatör iptal etti"})
-        iade = 0.0
-        for d in ajan_denemeleri:
-            if self._ajan_isini_kaldir(d["ref"]):
-                notlar.append(f"{d['adim_id']}: kuyruktan çıkarıldı")
-                if d["durum"] == "kuyrukta":   # hiç koşmadı: tahmini maliyeti serbest bırak
-                    iade += d["tahmini_usd"] or 0
-            else:
-                notlar.append(f"{d['adim_id']}: çalışan ajan koşusu durdurulmadı; bitince sonucu yok sayılır")
-        with self._islem() as b:
-            kosu = self._kosu_al(b, kosu_id)
-            self._kosu_yaz(b, kosu_id, tahmini_usd=max(kosu["tahmini_usd"] - iade, 0),
-                           neden=json.dumps({"sebep": "operator", "metin": "; ".join(notlar) or "operatör iptal etti"},
-                                            ensure_ascii=False))
-        return {**self.detay(kosu_id), "notlar": notlar}
 
     def onayla(self, kosu_id, adim_id, karar, not_=None, kapi_ok=False):
         if karar not in ("evet", "hayir"):

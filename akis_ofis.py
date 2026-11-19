@@ -3,6 +3,7 @@ gorev_baslat()/kuyruk/kosucu, beyin hattı görev dosyaları, olaylar.jsonl. Yal
 
 sunucu modülü çalışma anında verilir (döngüsel import yok).
 """
+import contextlib
 import glob
 import json
 import os
@@ -87,9 +88,16 @@ class OfisOrtami:
                                      f"refs/tags/v{surum}^{{commit}}"], capture_output=True, text=True, timeout=20, env=ortam)
             if etiket.returncode != 0:
                 return False
-            ata = subprocess.run(["git", *GIT_GUVENLI, "-C", klon, "merge-base", "--is-ancestor", f"refs/heads/{dal}",
-                                  f"refs/tags/v{surum}"], capture_output=True, timeout=20, env=ortam)
-            return ata.returncode == 0
+            # is_yayin: main ← dal (--ff-only), sonra v<sürüm> main ucuna. Yani etiket TAM dal ucunda olmalı (yalnız ata
+            # olmak yetmez: kendi commit'i olmayan, etiketin gerisindeki dal da ata olurdu) ve main'den erişilebilmeli.
+            dal_ucu = subprocess.run(["git", *GIT_GUVENLI, "-C", klon, "rev-parse", "-q", "--verify",
+                                      f"refs/heads/{dal}^{{commit}}"], capture_output=True, text=True, timeout=20, env=ortam)
+            if dal_ucu.returncode != 0 or dal_ucu.stdout.strip() != etiket.stdout.strip():
+                return False
+            taban = self.taban(proje)
+            alindi = subprocess.run(["git", *GIT_GUVENLI, "-C", klon, "merge-base", "--is-ancestor", f"refs/tags/v{surum}",
+                                     f"refs/heads/{taban}"], capture_output=True, timeout=20, env=ortam)
+            return alindi.returncode == 0
         except (OSError, subprocess.TimeoutExpired):
             return False
 
@@ -107,21 +115,32 @@ class OfisOrtami:
         except OSError:
             return False
 
-    def kuyruktan_cikar(self, ref):
-        cikti = False
+    @contextlib.contextmanager
+    def baslatma_kilidi(self):
+        """Kuyruğu işleyenlerle (ofis sunucusu: iş parçacığı kilidi + dosya kilidi; systemd tekrar servisi: dosya kilidi)
+        aynı kilit. İç içe alınmaz: flock aynı süreçte ikinci kez alınırsa kilitlenir."""
         with self.s.BASLATMA_KILIDI, ortak.baslatma_kilidi():
-            kuyruk = self.s.kuyruk_oku()
-            kalan = [k for k in kuyruk if k.get("akis_ref") != ref]
-            if len(kalan) != len(kuyruk):
-                self.s.kuyruk_yaz(kalan)
-                cikti = True
-            for yol, k in self._limit_bekleyenler():
-                if k.get("akis_ref") == ref:
-                    try:
-                        os.remove(yol)
-                        cikti = True
-                    except OSError:
-                        pass
+            yield
+
+    def kuyruktan_cikar(self, ref):
+        with self.baslatma_kilidi():
+            return self.kuyruktan_cikar_kilitsiz(ref)
+
+    def kuyruktan_cikar_kilitsiz(self, ref):
+        """baslatma_kilidi() ALTINDA çağrılır."""
+        cikti = False
+        kuyruk = self.s.kuyruk_oku()
+        kalan = [k for k in kuyruk if k.get("akis_ref") != ref]
+        if len(kalan) != len(kuyruk):
+            self.s.kuyruk_yaz(kalan)
+            cikti = True
+        for yol, k in self._limit_bekleyenler():
+            if k.get("akis_ref") == ref:
+                try:
+                    os.remove(yol)
+                    cikti = True
+                except OSError:
+                    pass
         return cikti
 
     def arg_dosyasi_var(self, ref):
