@@ -38,7 +38,7 @@ Açmak yapılandırma değil gözden geçirilmiş bir kod değişikliğidir.
   (`<zip>.kimlik`: gorev, dal, sha256; `.sha256` ve `onay_gecerli` biçimi değişmez), oto-onayda kimlik kopyası,
   `hassas_degisim`'e `akis_*.py`/`akislar/` ve workflow/kimlik anahtar sözcükleri, `HAT_KORUMA_SURUMU=1` + durum klasöründe
   işaret; kilit kum havuzunda gizli, kum'a kilit fd'leri devredilmez; kilit beklenirken yazım atlanmaz (uyarıyla beklenir).
-  Commit'ler `9711e4c`, `dd145ba`, `b589973`; test: `bin/test-hat-koruma` (20/20, geçici HOME).
+  Commit'ler `9711e4c`, `dd145ba`, `b589973`, `0aca078`; test: `bin/test-hat-koruma` (22/22, geçici HOME).
   `~/beyin` `main`'ine alınması hattı **anında** değiştirir (betik çalışma ağacından koşar): hat boştayken,
   `beyin-gorev.timer` durdurularak al.
 - **Ofis tarafı** (bu dal, canlıda bayraklar kapalı): `sunucu.gorev_kilidi()` aynı kilit dosyasını alır (30 sn, sonra
