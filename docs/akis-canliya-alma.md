@@ -13,7 +13,7 @@
 4. [ ] Sürüm: dal `1.0.88`. `~/beyin/gorevler/bitti/Workflow V1 hat adaptoru kabul testi.md` 1.0.87 kullandı; çakışma yok.
 
 ## Merge ve açılış
-5. [ ] PR'ı `main`'e al (fast-forward ya da merge commit; push sonrası `~/ajan-ofisi` `receive.denyCurrentBranch=updateInstead`
+5. [ ] PR'ı `main`'e al (tercihen merge commit, `--no-ff`: tek komutla geri alınır; push sonrası `~/ajan-ofisi` `receive.denyCurrentBranch=updateInstead`
        ile güncellenir ya da `git -C ~/ajan-ofisi pull --ff-only`).
 6. [ ] `ajanlar.json`'a pilot ajanı ekle (`arastirmaci`'ya dokunma): `ajanlar.example.json` içindeki `akis-okuyucu`
        girdisini kopyala, `cwd`'yi `~/beyin` yap. Yalnız `Read`, `Glob`, `Grep`; `tarayici: false`.
@@ -35,8 +35,10 @@
 - **Kodu geri almak:**
   1. Etkin workflow koşularını iptal et (çalışan ajan durdurulmaz; bitince sonucu yok sayılır). Açık hat görevleri
      (`kaynak: akis`) normal hat görevi olarak kalır ve Geliştirme sekmesinden yönetilir.
-  2. `git -C ~/ajan-ofisi revert -m 1 <merge commit>` (ya da `reset --hard <yedek main>`; yalnız yerel, push edilmediyse)
-     ve servisi yeniden başlat.
+  2. Kodu geri al ve servisi yeniden başlat:
+     - merge commit ile alındıysa (`--no-ff`, önerilen): `git -C ~/ajan-ofisi revert -m 1 <merge commit>`;
+     - fast-forward alındıysa: `git -C ~/ajan-ofisi revert --no-edit <adım 3'teki SHA>..<alınan HEAD>`;
+     - push edilmediyse yerelde `git -C ~/ajan-ofisi reset --hard <adım 3'teki SHA>` de olur.
   3. Eski kod `durum/akis.db`'yi okumaz; dosya kalabilir (veri kaybı yok, yeniden ileri alınca devam eder).
      `durum/akis-sonuc/` işaretleri zararsızdır.
   4. Kuyruk uyumluluğu: eski kod `kaynak: "akis"` kuyruk kaydını geçersiz sayıp **sessizce düşürür**

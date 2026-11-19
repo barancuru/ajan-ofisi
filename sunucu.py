@@ -382,10 +382,18 @@ def limit_bekleyenleri_al(kuyruk):
                      **({"model": k["model"]} if k.get("model") in kosucu.ATAMA_MODELLERI else {}),
                      "sonra": k.get("sonra"), "limit_deneme": k.get("limit_deneme"), "zaman": ortak.simdi_iso(),
                      **({"akis_ref": k["akis_ref"]} if k.get("akis_ref") else {})}
-            if _kuyruk_dogrula([kayit]) and akis_ref_gecerli(kayit.get("akis_ref")):  # kuyruk_oku ile aynı doğrulama
-                kuyruk.append(kayit)
-            else:
+            if not _kuyruk_dogrula([kayit]):  # kuyruk_oku ile aynı doğrulama
                 kayit = None
+            elif not akis_ref_gecerli(kayit.get("akis_ref")):
+                # iptal/terk edilmiş workflow denemesi: arıza değil, hata olayı (Telegram) yazılmaz
+                try:
+                    os.remove(yol)
+                except OSError:
+                    pass
+                ortak.olay_yaz({"tur": "akis", "olay": "terk_edilen_is_dusuruldu", "step_id": None, "kaynak": "limit"})
+                continue
+            else:
+                kuyruk.append(kayit)
         try:
             os.remove(yol)
         except OSError:

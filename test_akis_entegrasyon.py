@@ -133,6 +133,11 @@ class KuyrukGecisTest(OfisTabani):
         self.assertEqual(baslayan, [])
         self.assertEqual(self.tmux, [])
         self.assertFalse(os.path.exists(sunucu.kuyruk_yolu()))
+        self.assertEqual(os.listdir(kosucu.limit_bekleyen_dizini()), [])
+        with open(ortak.OLAYLAR) as f:
+            olaylar = [json.loads(s) for s in f]
+        self.assertFalse([o for o in olaylar if o["tur"] == "hata"])       # bildirimci Telegram'a yollamaz
+        self.assertEqual(sum(1 for o in olaylar if o.get("olay") == "terk_edilen_is_dusuruldu"), 2)
 
     def test_limit_bekleyen_akis_ref_tasir(self):
         arg = {"kosu_id": "2026-11-18-1-arastirmaci", "ajan": "arastirmaci", "prompt": "p", "kaynak": "akis",
