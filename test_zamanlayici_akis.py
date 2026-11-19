@@ -81,7 +81,7 @@ class AkisTetikTesti(unittest.TestCase):
         hatalar = [
             ({"akis": "yok-boyle"}, "bilinmeyen akış"),
             ({"akis": "../x"}, "geçersiz akış id"),
-            ({"akis": "homeos-ozellik-gelistirme", "girdiler": {"baslik": "abc", "istek": "x"}}, "etkin değil"),
+            ({"akis": "homeos-ozellik-gelistirme", "girdiler": {"baslik": "abc", "istek": "x"}}, "zamanlanamaz"),
             ({"girdiler": {}}, "konu gerekli"),
             ({"girdiler": {"konu": "x", "fazla": 1}}, "bilinmeyen girdi"),
             ({"girdiler": {"konu": "sk-" + "a" * 30}}, "sır"),
@@ -94,6 +94,25 @@ class AkisTetikTesti(unittest.TestCase):
             self.assertIn(parca, str(c.exception), ek)
         self.assertEqual(z._yukle_ham(), [])
 
+    def test_hat_akisi_asama2_acikken_de_zamanlanamaz(self):
+        """Aşama bayrakları açılsa da (PR #5) hat/kapı/dağıtım içeren akış kendiliğinden başlatılamaz."""
+        with mock.patch.object(akis_motor, "ETKIN_AKISLAR", (AKIS, "homeos-ozellik-gelistirme")), \
+                mock.patch.object(akis_motor, "HAT_ADIMLARI_ACIK", True), mock.patch.object(akis_motor, "DAGITIM_ONAYI_ACIK", True):
+            self.assertIsNone(akis_motor.akis_engeli(self.tanimlar["homeos-ozellik-gelistirme"]))
+            with self.assertRaises(ValueError) as c:
+                self.ekle(akis="homeos-ozellik-gelistirme", girdiler={"baslik": "abc", "istek": "x"})
+            self.assertIn("zamanlanamaz", str(c.exception))
+            # elle yazılmış kayıt da yüklemede geçersiz: tetiklenmez
+            z.kaydet([{"id": "t0123456789", "akis": "homeos-ozellik-gelistirme", "girdiler": {"baslik": "abc", "istek": "x"},
+                       "cron": "0 9 * * 1", "aktif": True}])
+            self.assertIn("zamanlanamaz", z.yukle(self.tablo)[0]["hata"])
+            baslat = mock.Mock()
+            self.assertIsNone(z.tetikle("t0123456789", mock.Mock(), datetime(2026, 11, 23, 9, 0),
+                                        tablo_yukle=lambda: self.tablo, akis_baslatici=baslat))
+            baslat.assert_not_called()
+            with mock.patch.object(ortak, "ajanlari_yukle", return_value=({}, self.tablo)):
+                self.assertEqual([a["id"] for a in sunucu.ongorulebilirlik_yaniti()["akislar"]], [AKIS])
+
     def test_systemd_birimi_ajan_isiyle_ayni(self):
         is_id = self.ekle()
         with mock.patch.object(ortak, "ajanlari_yukle", return_value=({}, self.tablo)):
@@ -103,9 +122,10 @@ class AkisTetikTesti(unittest.TestCase):
 
     def test_ongorulebilirlik_yaniti_akis_secenekleri(self):
         is_id = self.ekle()
-        with mock.patch.object(ortak, "ajanlari_yukle", return_value=({}, self.tablo)):
+        with mock.patch.object(ortak, "ajanlari_yukle", return_value=({}, self.tablo)), \
+                mock.patch.object(akis_motor, "ETKIN_AKISLAR", (AKIS,)):
             y = sunucu.ongorulebilirlik_yaniti()
-        self.assertEqual([a["id"] for a in y["akislar"]], [AKIS])          # yalnız etkin akışlar
+        self.assertEqual([a["id"] for a in y["akislar"]], [AKIS])          # yalnız etkin ve zamanlanabilir akışlar
         self.assertEqual(y["akislar"][0]["girdiler"]["konu"]["tur"], "metin")
         satir = next(k for k in y["isler"] if k["id"] == is_id)
         self.assertEqual(satir["akis"], AKIS)

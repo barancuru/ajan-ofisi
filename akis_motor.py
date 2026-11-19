@@ -50,6 +50,17 @@ def adim_kapali_mi(adim):
     return None
 
 
+def zamanlama_engeli(tanim):
+    """V2 zamanlayıcı/olay tetiklemesi: hat görevi, kalite kapısı ya da dağıtım/yayın onayı içeren akış aşama
+    bayraklarından BAĞIMSIZ olarak kendiliğinden başlatılamaz (kademeli otonomi; açmak ayrı kullanıcı kararı)."""
+    for a in tanim["adimlar"]:
+        if a["tur"] in ("gelistirme_gorevi", "quality_gate"):
+            return f"{a['id']}: {a['tur']} içeren akış zamanlanamaz"
+        if a["tur"] == "approval" and a.get("kategori") in KAPALI_ONAY_KATEGORILERI:
+            return f"{a['id']}: {a['kategori']} onayı içeren akış zamanlanamaz"
+    return None
+
+
 def akis_engeli(tanim):
     """Başlatma engeli (metin) ya da None. Hem id izin listesi hem adım türü: yeniden adlandırılmış bir tanım geçemez."""
     if tanim["id"] not in ETKIN_AKISLAR:
@@ -1154,9 +1165,14 @@ class Motor:
             (akis_id, adim_id, MALIYET_PENCERE))]
 
     def _tahmin(self, adim, b=None, akis_id=None):
-        """V2 maliyet modeli: en az MALIYET_ORNEK_MIN ölçüm varsa p90, yoksa statik tahmin. p90 statik tahminin
-        MALIYET_TABAN_ORANI'nın altına inmez (bozuk/az ölçüm bütçe kontrolünü boşa çıkarmasın). Döner (usd, kaynak)."""
+        """Bütçe kontrolünde kullanılan tahmin → (usd, kaynak).
+        agent_task: statik tahmin = kosucu'nun `--max-budget-usd` sert tavanı ("tavan"); geçmiş ne derse desin bu kalır,
+        böylece `max_maliyet_usd` aşılamaz bir sınır olarak korunur (p90 yalnız maliyet_modeli'nde öngörü olarak görünür).
+        gelistirme_gorevi: hat turunun sert tavanı yok, 6 $ bir tahmindir: en az MALIYET_ORNEK_MIN ölçüm varsa p90
+        ("p90"; tanımdaki `tahmini_usd` yalnız soğuk başlangıç), p90 statiğin MALIYET_TABAN_ORANI'nın altına inmez."""
         statik = self._statik_tahmin(adim)
+        if adim["tur"] != "gelistirme_gorevi":
+            return statik, "tavan"
         if b is None or not akis_id:
             return statik, "statik"
         ornek = self._olculen_maliyetler(b, akis_id, adim["id"])
@@ -1165,7 +1181,8 @@ class Motor:
         return max(yuzdelik(ornek, 90), statik * MALIYET_TABAN_ORANI), "p90"
 
     def maliyet_modeli(self, akis_id):
-        """Panel/API için adım başına {n, p50, p90, statik, kullanilan, kaynak} (salt okuma)."""
+        """Panel/API için adım başına {n, p50, p90, statik, kullanilan, kaynak} (salt okuma). `kullanilan` bütçe
+        kontrolünün kullandığı değerdir (ajan adımında tavan); p50/p90 her adımda öngörü olarak verilir."""
         tanim = self.tanimlar()[0].get(akis_id)
         if not tanim:
             raise AkisHatasi(404, "akış yok")

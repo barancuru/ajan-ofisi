@@ -234,7 +234,7 @@ def akis_is_dogrula(ham, tanimlar=None):
     tanim = tanimlar.get(akis_id)
     if not tanim:
         raise ValueError("bilinmeyen akış")
-    engel = akis_motor.akis_engeli(tanim)
+    engel = akis_motor.zamanlama_engeli(tanim) or akis_motor.akis_engeli(tanim)
     if engel:
         raise ValueError(f"akış etkin değil: {engel}"[:200])
     try:
@@ -555,7 +555,9 @@ def main(argv):
     if len(argv) == 2 and argv[0] == "--tetikle":
         import sunucu  # sunucu sürecine değil, bu servis sürecine yüklenir (HTTP açılmaz)
         import akis_ofis
-        # workflow işi yalnız DB'ye koşu yazar; adımları sunucunun motor döngüsü gönderir (bu süreç motor döngüsü açmaz)
+        # workflow işi yalnız DB'ye koşu yazar; adımları sunucunun motor döngüsü gönderir. Motor kurmak yan etkisizdir:
+        # Depo yalnız user_version'a bakar (güncel DB'de migration yok), kurtarma/uzlaştırma yok, baslat_thread çağrılmaz;
+        # olaylar commit sonrası yalnız olaylar.jsonl'e eklenir (canlı sunucu motoruyla yarış yok, DB işlemleri BEGIN IMMEDIATE).
         sonuc = tetikle(argv[1], lambda a, e, p, k: sunucu.gorev_baslat(a, etiket=e, prompt=p, kaynak=k, havuz=True),
                         akis_baslatici=lambda a, g, i: akis_ofis.motor_kur(sunucu).baslat(a, g, i))
         try:

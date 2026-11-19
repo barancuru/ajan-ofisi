@@ -2188,7 +2188,8 @@ def ongorulebilirlik_yaniti():
     akislar = [{"id": t["id"], "ad": t["ad"],
                 "girdiler": {g: {"tur": a["tur"], "zorunlu": a["zorunlu"], "maks": a.get("maks"),
                                  "secenekler": a.get("secenekler")} for g, a in t["girdiler"].items()}}
-               for t in akis_tanimlari.values() if akis_motor.akis_engeli(t) is None]
+               for t in akis_tanimlari.values()
+               if akis_motor.zamanlama_engeli(t) is None and akis_motor.akis_engeli(t) is None]
     isler = []
     for k in zamanlayici.yukle(tablo):
         try:

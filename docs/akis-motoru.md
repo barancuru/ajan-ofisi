@@ -89,11 +89,12 @@ tanımın tamamı kuyruk kapasitesini tüketmez.
   argümanlı koşuda `~/.local/state/beyin/kosular/<ts>-<is>.gorev.json` yazar (`gorev`, yuvarlanmamış `maliyet_usd`,
   `ts`); motor deneme başlangıcından sonraki kayıtları toplar (`hat_maliyeti` olayı). Kayıt yoksa (eski hat, Codex)
   tahmin gerçekleşmiş sayılır. Sınır aşılacaksa adım başlamaz, koşu `inceleme` (`butce`) olur.
-- **Maliyet modeli (V2):** yukarıdaki tahmin *statik* tahmindir. Aynı akışın aynı adımının en az 5 ölçülmüş denemesi
-  varsa (son 50; yalnız `maliyet_usd > 0` gerçek ölçüm, iptal/ölçülemeyen sayılmaz) bütçe kontrolü p90 kullanır
-  (en yakın sıra; görülmüş bir değer). p90 statik tahminin %10'unun altına inmez; statikten yüksekse yüksek olan
-  kullanılır. `adim_basladi` olayında `tahmin_kaynagi` (`statik`|`p90`); `/api/akis` tanım başına `maliyet_modeli`
-  (`n`, `p50`, `p90`, `statik`, `kullanilan`, `kaynak`).
+- **Maliyet modeli (V2):** ajan adımının statik tahmini kosucu'nun `--max-budget-usd` **sert tavanıdır**; bütçe
+  kontrolü ajan adımında hep bunu kullanır (`tahmin_kaynagi: tavan`), böylece `max_maliyet_usd` aşılamaz kalır.
+  Hat turunun (`gelistirme_gorevi`) sert tavanı yok, 6 $ bir tahmindir: aynı akışın aynı adımının en az 5 ölçülmüş
+  denemesi varsa (son 50; yalnız `maliyet_usd > 0` gerçek ölçüm) p90 kullanılır (`p90`; en yakın sıra), statiğin
+  %10'unun altına inmez; tanımdaki `tahmini_usd` yalnız soğuk başlangıç değeridir. `/api/akis` tanım başına
+  `maliyet_modeli` (`n`, `p50`, `p90`, `statik`, `kullanilan`, `kaynak`) verir: ajan adımında p50/p90 öngörüdür.
 
 ## Hata politikası ve retry
 
@@ -191,7 +192,8 @@ kosucu sonucu `son: false` yazar; motor aynı denemeyi beklemeyi sürdürür, ke
 
 ## Zamanlayıcı tetiklemesi (V2)
 Öngörülebilirlik'te tekrar eden iş türü **Workflow**: `{akis, girdiler, cron}` (`durum/tekrarlar.json`, aynı systemd
-timer'ı). Kayıtta akış tanımlı ve **etkin** olmalı, girdiler başlatma doğrulamasından geçer (sır görünümlü değer
+timer'ı). Hat görevi, kalite kapısı ya da dağıtım/yayın onayı içeren akış aşama bayraklarından bağımsız olarak
+**zamanlanamaz** (`akis_motor.zamanlama_engeli`; kendiliğinden geliştirme/dağıtım ayrı kullanıcı kararı). Kayıtta akış tanımlı ve **etkin** olmalı, girdiler başlatma doğrulamasından geçer (sır görünümlü değer
 reddedilir); en sık 15 dk. Yüklemede her seferinde yeniden doğrulanır: akış sonradan kapanırsa iş `hata` ile durur.
 Tetikte servis süreci yalnız DB'ye koşu yazar (`motor_kur(...).baslat`, motor döngüsü açılmaz; adımları sunucunun
 döngüsü ≤30 sn içinde gönderir). İstek anahtarı `tekrar:<iş>:<YYYY-MM-DDTHH:MM>`: aynı dakikadaki ikinci tetik ya da

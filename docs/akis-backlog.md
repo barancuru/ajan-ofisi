@@ -50,8 +50,8 @@ Her kalem ayrı dal + PR; Aşama 1/2 sabitleri V2 PR'larında değişmez. Kalem 
 - **Değerlendirici-iyileştirici döngüsü**: LLM-as-judge puanı + mutlaka bir gerçek kontrol. Puan tek başına kapıyı geçemez.
 - **Alt workflow çağrısı** (`workflow_call`): sürüm sabitli, ayrı bütçe payı, derinlik ≤ 2.
 - **CEO entegrasyonu**: CEO atama yerine "şu workflow'u şu girdilerle başlat" önerebilir. Başlatma yine kullanıcı onayıyla.
-- ~~**Maliyet modeli**~~ — V2: `Motor._tahmin` ≥5 ölçümde p90 (son 50, yalnız >0 ölçüm, statiğin %10'u taban), `maliyet_modeli()` API'de tanım başına; olayda `tahmin_kaynagi`.
-- ~~**Zamanlayıcı tetiklemesi**~~ — V2: tekrar eden iş `{akis, girdiler, cron}`; kayıtta akış etkin + girdi doğrulaması, tetikte idem `tekrar:<iş>:<dakika>`, motor kapıları yeniden uygular; Öngörülebilirlik formunda "Workflow" türü.
+- ~~**Maliyet modeli**~~ — V2: hat adımında ≥5 ölçümde p90 (son 50, yalnız >0 ölçüm, statiğin %10'u taban); ajan adımında bütçe sert tavanla (`--max-budget-usd`) kalır, p50/p90 öngörü; `maliyet_modeli()` API'de; olayda `tahmin_kaynagi`.
+- ~~**Zamanlayıcı tetiklemesi**~~ — V2: tekrar eden iş `{akis, girdiler, cron}`; hat/kalite kapısı/dağıtım onayı içeren akış aşama bayraklarından bağımsız zamanlanamaz (`zamanlama_engeli`); kayıtta akış etkin + girdi doğrulaması, tetikte idem `tekrar:<iş>:<dakika>`, motor kapıları yeniden uygular; Öngörülebilirlik formunda "Workflow" türü.
 - **Olay tetiklemesi**: hat görevi `uat`/`takildi` olunca bağlı workflow'u ilerletmek için dosya izleme yerine bildirim.
 
 ## V3 — görsel workflow editörü
