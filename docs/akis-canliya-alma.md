@@ -127,14 +127,18 @@ systemctl --user start beyin-gorev.timer
 - `~/beyin/sistem/yayin/ajan-ofisi-1.0.87.zip` + `.sha256`, `~/.local/state/beyin/paket-muhur/ajan-ofisi-1.0.87.zip*`
 - `~/beyin/gorevler/bitti/Workflow V1 hat adaptoru kabul testi.md` (reddedildi)
 
-## V1.1 (dal `akis-v1.1`, 1.0.89)
+## V1.1 (1.0.89, canlı 2026-11-19: PR #3 `cd14a8e`, beyin `adc0346`)
 Kapsam: backlog #1, #6, #7, #8, #9, #10, #11 (#5 ertelendi). Aşama 1 sabitleri (`ETKIN_AKISLAR`, `HAT_ADIMLARI_ACIK`,
 `DAGITIM_ONAYI_ACIK`, `YAZAN_AJAN_ACIK`) **değişmedi**: HomeOS akışı yine kapalı.
 
 Ön koşullar ve sıra:
 1. `SURUM` 1.0.89 (kullanıcı kararı, 2026-11-19).
 2. **DB migration 4** (`kosular.ek_maliyet_usd`, `ek_ajan_cagrisi`) yeniden başlatmada kendiliğinden koşar (yalnız
-   `ALTER TABLE ADD COLUMN`). Önce yedek: `sqlite3 ~/ajan-ofisi/durum/akis.db ".backup ~/akis.db.1.0.88.bak"`.
+   `ALTER TABLE ADD COLUMN`). Önce yedek (makinede `sqlite3` komutu yok; Python ile, bütünlük kontrolüyle):
+   ```bash
+   python3 -c "import sqlite3,os; y=os.path.expanduser; k=sqlite3.connect(y('~/ajan-ofisi/durum/akis.db')); h=sqlite3.connect(y('~/akis.db.1.0.88.bak')); k.backup(h); print(h.execute('PRAGMA integrity_check').fetchone(), h.execute('PRAGMA user_version').fetchone())"
+   chmod 600 ~/akis.db.1.0.88.bak   # beklenen: ('ok',) (3,)
+   ```
 3. `kosucu.py` değişti (SIGUSR1 iptal yolu): restart'tan önce tmux'ta çalışan workflow koşusu olmamalı (eski kosucu
    sinyali dinlemez; varsayılan eylem süreci öldürür). `tmux list-windows -t ofis` + `/api/akis` etkin koşu kontrolü.
 4. Beyin dalı `hat-maliyet-esleme` (`adc0346`, `bin/test-hat-koruma` 25/25) ofisten bağımsızdır: önce ya da sonra
