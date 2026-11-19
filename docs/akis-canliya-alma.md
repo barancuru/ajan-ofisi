@@ -155,7 +155,9 @@ Kapı mekanizması testleri aşama 1 değerleriyle (`asama1()`) koşmaya devam e
 
 Durum (2026-11-19):
 - [x] Beyin hat koruması canlıda (`~/beyin` `adc0346`, `HAT_KORUMA_SURUMU=1`, işaret dosyası var).
-- [x] HomeOS oto-onayı kapalı (`/api/gelistirme`: `homeos.acik = false`): pilot paketi her durumda insana düşer.
+- [x] Pilot paketi oto-onaylanmaz: HomeOS oto-onayı kullanıcı kararıyla AÇIK (2026-11-19 22:39, 30 gün), ama workflow'un
+      açtığı her hat görevi `oto_onay: hayir` taşır (`akis_ofis.gelistirme_yaz`) ve canlı `bin/calistir oto_onay_dene` bunu
+      ilk satırda okuyup çıkar (gerçek `fm_get` ile doğrulandı). Dağıtım onayı yalnız Geliştirme UAT kartından (kapı).
 - [ ] **Yeni hatla bir HomeOS görevi UAT'ye gelip `sistem/yayin/homeos-<sürüm>.zip.kimlik` yazıldı** (henüz yok: 2026-11-16'dan
       beri HomeOS görevi koşmadı). Bu görülmeden merge edilmemeli; motor kimliksiz paketi zaten kabul etmez (fail-closed),
       ama ilk gerçek kimlik dosyasının biçimi canlıda bir kez gözle doğrulanmalı.
