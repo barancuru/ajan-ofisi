@@ -52,6 +52,25 @@ class OfisOrtami:
         refler |= {k.get("akis_ref") for _, k in self._limit_bekleyenler() if k.get("akis_ref")}
         return refler
 
+    def yayinlandi(self, proje, surum, dal):
+        """'durum: bitti' kapısız yazılabilir: yayın kanıtı hattın klonundaki v<sürüm> etiketi ve dalın o etikete
+        alınmış olması (ajan klonun ref'lerine yazamaz; is_yayin yalnız geçerli onayla etiketler)."""
+        if proje not in ("homeos", "turnusol", "ajan-ofisi") or not isinstance(surum, str) \
+                or not re.fullmatch(r"[0-9.]{1,24}", surum) or not re.fullmatch(r"beyin/[a-z0-9-]{1,80}", dal or ""):
+            return False
+        klon = os.path.join(IS_DIZINI, proje)
+        ortam = guvenli_git_ortami({"PATH": "/usr/bin:/bin", "HOME": os.path.expanduser("~"), "LANG": "C.UTF-8"})
+        try:
+            etiket = subprocess.run(["git", *GIT_GUVENLI, "-C", klon, "rev-parse", "-q", "--verify",
+                                     f"refs/tags/v{surum}^{{commit}}"], capture_output=True, text=True, timeout=20, env=ortam)
+            if etiket.returncode != 0:
+                return False
+            ata = subprocess.run(["git", *GIT_GUVENLI, "-C", klon, "merge-base", "--is-ancestor", f"refs/heads/{dal}",
+                                  f"refs/tags/v{surum}"], capture_output=True, timeout=20, env=ortam)
+            return ata.returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+
     def kuyrukta_mi(self, ref):
         return ref in self.kuyruktaki_refler()
 

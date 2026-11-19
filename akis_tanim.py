@@ -31,6 +31,9 @@ GELISTIRME_PROJELERI = ("homeos", "turnusol", "ajan-ofisi")
 
 # Kalite kapısı komutları: shell yok, yalnız bu çalıştırılabilirler. python3 yalnız ofisin kendi kapı betiğini koşar.
 KAPI_KOMUTLARI = ("git", "php", "sha256sum", "python3", "test")
+GIT_ALT_KOMUTLARI = ("diff", "status", "ls-files", "log", "rev-parse", "show", "merge-base", "diff-index", "diff-tree")
+GIT_YASAK_SECENEKLER = ("-c", "-C", "--config", "--exec-path", "--git-dir", "--work-tree", "--output", "--ext-diff",
+                        "--textconv", "--upload-pack", "--namespace", "--super-prefix")
 KAPI_YER_TUTUCULAR = ("worktree", "taban", "paket", "paket_sha", "yayin", "ofis")
 KAPI_CWD = ("{worktree}", "{yayin}", "{ofis}")
 YER_TUTUCU = re.compile(r"\{([a-z_]+)\}")
@@ -187,6 +190,16 @@ def _kontroller(deger, ne):
             raise TanimHatasi(f"{n}.komut: yalnız {KAPI_KOMUTLARI}")
         if komut[0] == "python3" and (len(komut) < 2 or komut[1] != "{ofis}/akis_kapi.py"):
             raise TanimHatasi(f"{n}.komut: python3 yalnız {{ofis}}/akis_kapi.py çalıştırabilir")
+        # worktree'yi ajan yazar: oradaki kodu çalıştıran ya da git güvenlik ayarlarını ezen argümanlar reddedilir
+        if komut[0] == "php" and (len(komut) != 3 or komut[1] != "-l"):
+            raise TanimHatasi(f"{n}.komut: php yalnız 'php -l <dosya>' (sözdizimi denetimi) olabilir")
+        if komut[0] == "test" and (len(komut) != 3 or komut[1] not in ("-f", "-d", "-e", "-s")):
+            raise TanimHatasi(f"{n}.komut: test yalnız -f/-d/-e/-s <yol>")
+        if komut[0] == "git":
+            if len(komut) < 2 or komut[1] not in GIT_ALT_KOMUTLARI:
+                raise TanimHatasi(f"{n}.komut: git alt komutu yalnız {GIT_ALT_KOMUTLARI}")
+            if any(x == "-c" or x.startswith(GIT_YASAK_SECENEKLER) for x in komut[1:]):
+                raise TanimHatasi(f"{n}.komut: git yapılandırma/çıktı/harici diff seçenekleri yasak")
         for x in komut:
             for ad in YER_TUTUCU.findall(x):
                 if ad not in KAPI_YER_TUTUCULAR:

@@ -382,7 +382,7 @@ def limit_bekleyenleri_al(kuyruk):
                      **({"model": k["model"]} if k.get("model") in kosucu.ATAMA_MODELLERI else {}),
                      "sonra": k.get("sonra"), "limit_deneme": k.get("limit_deneme"), "zaman": ortak.simdi_iso(),
                      **({"akis_ref": k["akis_ref"]} if k.get("akis_ref") else {})}
-            if _kuyruk_dogrula([kayit]):  # kuyruk_oku ile aynı doğrulama
+            if _kuyruk_dogrula([kayit]) and akis_ref_gecerli(kayit.get("akis_ref")):  # kuyruk_oku ile aynı doğrulama
                 kuyruk.append(kayit)
             else:
                 kayit = None
@@ -397,6 +397,17 @@ def limit_bekleyenleri_al(kuyruk):
         ortak.olay_yaz({"tur": "kuyruga_alindi", "ajan": kayit["ajan"], "kuyruk_id": kayit["id"], "kaynak": "limit",
                         "sira": len(kuyruk), "sonra": kayit["sonra"], "onceki_kosu": k.get("onceki_kosu")})
     return eklenen
+
+
+def akis_ref_gecerli(ref):
+    """Kuyruktaki/limit-bekleyen'deki workflow işi hâlâ bekleniyor mu? İptal edilmiş ya da terk edilmiş denemenin işi
+    (ör. iptalden sonra limite takılıp yeniden kuyruğa giren koşu) koşturulmaz. Okunamazsa güvenli tarafta: düşür."""
+    if not ref:
+        return True
+    try:
+        return motor().ref_ucusta(ref)
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def kuyrugu_isle():
@@ -419,6 +430,9 @@ def kuyrugu_isle():
         for k in kuyruk:
             if k.get("sonra") and (k["sonra"] > simdi or kosucu.hepsi_limitte()):
                 kalan.append(k)
+                continue
+            if not akis_ref_gecerli(k.get("akis_ref")):
+                ortak.olay_yaz({"tur": "akis", "olay": "terk_edilen_is_dusuruldu", "step_id": None, "kuyruk_id": k["id"]})
                 continue
             ajan = tablo.get(k["ajan"])
             if not ajan or k["ajan"] in ortak.ATANAMAZ or not ajan["kurulu"]:

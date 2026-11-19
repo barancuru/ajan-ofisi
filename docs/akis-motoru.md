@@ -55,7 +55,8 @@ akislar/*.json ──doğrula──▶ Motor (SQLite durum/akis.db)
   `izle_adim` zorunlu: Geliştirme sekmesindeki UAT kartını izler, API'den verilemez. Kabul için görev dosyasındaki
   `onay: evet` **yetmez** (kapısız yazılabilir): ofis girişinin mühürlü pakete bağlı canlı onay kaydı
   (`~/.config/ofis-kapi/onaylar/<proje>-<sürüm>.onay` = paket SHA-256) ya da hattın o kayıtla yaptığı yayın
-  (`durum: bitti`) gerekir; yoksa `onay_kaydi_yok` olayı yazılır ve beklenir.
+  (`durum: bitti` **ve** hattın klonunda `v<sürüm>` etiketi, dal o etikete alınmış) gerekir; yoksa `onay_kaydi_yok`
+  olayı yazılır ve beklenir.
 - **end**: `sonuc: basarili | basarisiz`.
 
 Özel hedef `@inceleme`: koşu PAUSED / manual_review olur.
@@ -114,6 +115,10 @@ kosucu sonucu `son: false` yazar; motor aynı denemeyi beklemeyi sürdürür, ke
   - hiç iz yoksa → `baslamadi` (güvenli tekrar);
   - hat görevinde `akis_adim` alanı aranır;
   - yarıda kalan kapı yeniden koşulur (yan etkisiz).
+- İşaret dosyası koşuya kimlikle (`kosu_id`) bağlanır, zamanla değil: limit yüzünden yeniden kuyruğa giren önceki
+  koşunun işareti yeni koşuyu temsil etmez. Süreç ölü görünürse sonuç dosyası yeniden okunur.
+- Sunucu kuyruğu (`kuyrugu_isle`, `limit_bekleyenleri_al`) `akis_ref` taşıyan işi yalnız deneme hâlâ uçuştaysa koşturur
+  (`Motor.ref_ucusta`); iptal/terk edilmiş denemenin geç gelen limit kaydı düşürülür.
 - Sonuç işleme `UPDATE denemeler ... WHERE durum IN (uçuşta)` ile tek seferliktir. `olaylar.anahtar` UNIQUE olduğu
   için aynı olay iki kez yayınlanmaz.
 - Duraklatma yeni adım başlatmaz, uçuştaki sonuçları toplamayı sürdürür.

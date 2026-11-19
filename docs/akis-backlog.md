@@ -9,7 +9,10 @@
    görev yolu yok; paralel hatlarda göreve bağlanamaz. Öneri: `~/beyin/bin/calistir` `kos()` `kayit`'e ve JSON yanına
    `gorev` (4. argüman, görev dosyası) yazsın; adaptör bunu okuyup tahmini (6 $/tur) gerçekleşenle değiştirsin.
    Kabul ölçümü: iki haiku hat turu gerçekte ≈0,0105 $, motor tahmini 12 $. Bütçe tavanı (30 $) değişmez.
-2. **UAT kartında workflow uyarısı**: `kaynak: akis` görevlerinde Geliştirme kartı "kalite kapısı bekleniyor" göstersin.
+2. **Dış çağrıda kilit tutma**: motor, iptal yarışını kapatmak için `gorev_baslat`/görev dosyası yazımı süresince
+   kendi kilidini tutuyor; `baslatma.lock` doluysa API birkaç saniye bekleyebilir (kilitlenme yolu yok: kuyruk tarafı
+   motor kilidini almaz). Daha dar çözüm: denemeyi DB'de "sahiplenildi" işaretle, çağrıdan sonra yeniden kontrol et.
+3. **UAT kartında workflow uyarısı**: `kaynak: akis` görevlerinde Geliştirme kartı "kalite kapısı bekleniyor" göstersin.
    Şu an kapıdan önce elle onay yalnız sonradan `erken_onay` olarak işaretleniyor.
 3. **Çalışan koşuyu iptal**: iptal şimdilik çalışan ajanı durdurmuyor. tmux penceresini kapatmak + `kosucu` sinyal
    yakalayıp bitiş yazmak (yarım yan etkiler için yine manual_review).

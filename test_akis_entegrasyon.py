@@ -92,6 +92,9 @@ class KuyrukGecisTest(OfisTabani):
         self.assertNotIn("akis_ref", self.arglar()[0])
 
     def test_mesgul_ajan_kuyruga_ref_ile_girer_ve_tasinir(self):
+        self.ucusta = mock.patch.object(sunucu, "akis_ref_gecerli", lambda ref: True)
+        self.ucusta.start()
+        self.addCleanup(self.ucusta.stop)
         self.mesgul("arastirmaci")
         r = self.ortam.ajan_baslat("arastirmaci", "p", None, REF)
         self.assertTrue(r["kuyrukta"])
@@ -116,13 +119,29 @@ class KuyrukGecisTest(OfisTabani):
         self.assertEqual(sunucu._kuyruk_dogrula([k]), [k])
         self.assertEqual(sunucu._kuyruk_dogrula([{**k, "akis_ref": "kotu"}]), [])
 
+    def test_terk_edilen_deneme_kuyruktan_kosmaz(self):
+        """İkinci inceleme: iptal/terk edilmiş denemenin kuyruk ya da limit-bekleyen kaydı koşturulmaz."""
+        self.mesgul("arastirmaci")
+        self.ortam.ajan_baslat("arastirmaci", "p", None, REF)
+        arg = {"kosu_id": "2026-11-18-1-arastirmaci", "ajan": "arastirmaci", "prompt": "p", "kaynak": "akis",
+               "akis_ref": "ak-0123456789ac"}
+        self.assertTrue(kosucu.limit_bekleyen_yaz(arg))
+        ortak.durum_yaz("arastirmaci", {"durum": "bitti"})
+        m = akis_motor.Motor(akis_db.Depo(os.path.join(self.dizin["durum"], "akis.db")), self.ortam)
+        with mock.patch.object(sunucu, "_MOTOR", m), mock.patch.object(kosucu, "hepsi_limitte", lambda: False):
+            baslayan = sunucu.kuyrugu_isle()
+        self.assertEqual(baslayan, [])
+        self.assertEqual(self.tmux, [])
+        self.assertFalse(os.path.exists(sunucu.kuyruk_yolu()))
+
     def test_limit_bekleyen_akis_ref_tasir(self):
         arg = {"kosu_id": "2026-11-18-1-arastirmaci", "ajan": "arastirmaci", "prompt": "p", "kaynak": "akis",
                "akis_ref": REF}
         self.assertTrue(kosucu.limit_bekleyen_yaz(arg))
         self.assertTrue(self.ortam.kuyrukta_mi(REF))           # limit beklerken de "kuyrukta"
         kuyruk = []
-        sunucu.limit_bekleyenleri_al(kuyruk)
+        with mock.patch.object(sunucu, "akis_ref_gecerli", lambda ref: True):
+            sunucu.limit_bekleyenleri_al(kuyruk)
         self.assertEqual(kuyruk[0]["akis_ref"], REF)
 
     def test_workflow_ceo_ve_ykb_baslatamaz(self):
@@ -210,6 +229,15 @@ class HatAdaptoruTest(OfisTabani):
         wt = os.path.join(self.d, "wt", f"homeos-{ad}")
         subprocess.run(["git", "-C", klon, "worktree", "add", "-q", "-b", f"beyin/{ad}", wt], check=True)
         return wt
+
+    def test_yayin_kaniti_etiket_ve_dal(self):
+        with mock.patch.object(akis_ofis, "IS_DIZINI", self.d):
+            self.hat_worktree("1119-z")
+            klon = os.path.join(self.d, "homeos")
+            self.assertFalse(self.ortam.yayinlandi("homeos", "0.10.9", "beyin/1119-z"))
+            subprocess.run(["git", "-C", klon, "tag", "v0.10.9", "beyin/1119-z"], check=True)
+            self.assertTrue(self.ortam.yayinlandi("homeos", "0.10.9", "beyin/1119-z"))
+            self.assertFalse(self.ortam.yayinlandi("homeos", "0.10.9", "beyin/../x"))
 
     def test_worktree_isaretcisi_dogrulanir(self):
         with mock.patch.object(akis_ofis, "IS_DIZINI", self.d):

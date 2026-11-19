@@ -91,6 +91,21 @@ class TanimTest(unittest.TestCase):
         t["adimlar"][2]["kontroller"][0]["komut"] = ["git", "status", "{ev}"]
         self.hata(t, "yer tutucu")
 
+    def test_kapi_argumanlari_sinirli(self):
+        def kapi(komut):
+            t = taban_tanim()
+            t["adimlar"].insert(2, {"id": "g", "tur": "quality_gate", "sonraki": "son",
+                                    "kontroller": [{"ad": "x", "komut": komut, "cwd": "{ofis}"}]})
+            t["adimlar"][1]["dogru"] = "g"
+            return t
+        for kotu in (["php", "{ofis}/x.php"], ["php", "-r", "system('id');"], ["git", "-c", "core.fsmonitor=./x", "status"],
+                     ["git", "commit", "-m", "x"], ["git", "diff", "--output=/tmp/x"], ["git", "diff", "--ext-diff"],
+                     ["git", "-C", "/", "status"], ["test", "-x", "/bin/sh"]):
+            with self.assertRaises(akis_tanim.TanimHatasi, msg=kotu):
+                akis_tanim.dogrula(kapi(kotu))
+        for iyi in (["php", "-l", "{ofis}/akis_kapi.py"], ["git", "diff", "--check", "main...HEAD"], ["test", "-f", "{ofis}/x"]):
+            akis_tanim.dogrula(kapi(iyi))
+
     def test_dagitim_onayi_izlemeli(self):
         t = taban_tanim()
         t["adimlar"].insert(2, {"id": "o", "tur": "approval", "kategori": "dagitim", "mesaj": "m", "sonraki": "son"})
