@@ -537,13 +537,18 @@ class KuyrukIptalSiralamaTest(OfisTabani):
         with open(ortak.OLAYLAR) as f:
             self.assertTrue(any(json.loads(s).get("olay") == "motor_hatasi" for s in f))
 
-    def test_kuyruktan_baslatilamayan_is_motora_baslamadi_yazilir(self):
-        k, ref = self.kuyruktaki_kosu()
-        with mock.patch.object(sunucu, "_baslat_kilitli", side_effect=sunucu.IstekHatasi(500, "koşu başlatılamadı")):
-            sunucu.kuyrugu_isle()
-        with open(os.path.join(akis_motor.sonuc_dizini(), f"{ref}.json")) as f:
-            s = json.load(f)
-        self.assertEqual((s["son"], s["baslamadi"]), (True, True))
+    def test_reddetme_beklenen_sha_kilit_altinda(self):
+        with mock.patch.object(sunucu, "gelistirme_projeleri", lambda: ["homeos"]):
+            dosya = self.ortam.gelistirme_yaz("homeos", "Rapor", "x", "sonnet", REF)
+        yol = os.path.join(self.dizin["gorevler"], dosya)
+        with open(yol) as f:
+            m = f.read()
+        m = sunucu.on_bilgi_yaz(sunucu.on_bilgi_yaz(sunucu.on_bilgi_yaz(m, "durum", "uat"), "onay", "bekliyor"), "sha256", "b" * 64)
+        with open(yol, "w") as f:
+            f.write(m)
+        with self.assertRaises(akis_motor.BaslatmaHatasi):
+            self.ortam.gelistirme_reddet(dosya, "düzelt", "a" * 64)   # test edilen A, kart artık B
+        self.assertEqual(self.ortam.gelistirme_oku(dosya)["onay"], "bekliyor")
 
     def test_reddetme_sonrasi_tetik_hatasi_basarisizlik_sayilmaz(self):
         with mock.patch.object(sunucu, "gelistirme_projeleri", lambda: ["homeos"]):

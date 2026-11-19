@@ -106,10 +106,12 @@ class SahteOrtam:
     def gelistirme_bul(self, ref):
         return next((d for d, fm in self.gorevler.items() if fm.get("akis_adim") == ref), None)
 
-    def gelistirme_reddet(self, dosya, not_):
+    def gelistirme_reddet(self, dosya, not_, beklenen_sha=None):
         fm = self.gorevler[dosya]
         if fm["durum"] != "uat":
             raise akis_motor.BaslatmaHatasi(409, "UAT değil")
+        if beklenen_sha is not None and fm.get("sha256") != beklenen_sha:
+            raise akis_motor.BaslatmaHatasi(409, "yeni paket")
         fm["onay"] = "hayir"
         self.reddler.append((dosya, not_))
 
@@ -849,22 +851,6 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         self.assertEqual(c.exception.kod, 409)
         self.assertIn("iptal edilmiş", str(c.exception))
 
-    def test_kuyruktan_baslatilamayan_is_baslamadi_sayilir(self):
-        """Sunucu kuyruktaki işi başlatamazsa motora 'başlamadı' sonucu yazar: iade + güvenli yeniden deneme."""
-        self.tanim(taban_tanim())
-        k = self.m.baslat("deneme", {"konu": "x"})["run_id"]
-        self.ortam.davranis = ["kuyruk"]
-        self.m.tur()
-        ref = self.son_ref()
-        self.ortam.kuyruk.discard(ref)
-        os.makedirs(akis_motor.sonuc_dizini(), exist_ok=True)
-        with open(os.path.join(akis_motor.sonuc_dizini(), f"{ref}.json"), "w") as f:
-            json.dump({"ref": ref, "son": True, "durum": "hata", "baslamadi": True, "hata": "kuyruktan başlatılamadı (500)"}, f)
-        self.m.tur()
-        d = self.detay(k)
-        self.assertEqual(self.adim(k, "a")["denemeler"][0]["siniflama"], "baslamadi")
-        self.assertEqual((d["durum"], d["ajan_cagrisi"]), ("calisiyor", 0))   # yan etkili adım bile: başlamamış, iade
-
     def test_baslatma_on_kosul_hatasi_butce_harcamaz(self):
         """Hat adımı ön koşulda (kart UAT değil) başlamazsa ayrılan çağrı/tahmin iade edilir."""
         tanimlar, _ = akis_tanim.tanimlari_yukle()
@@ -909,6 +895,30 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
             self.m.devam(k, "yeniden_dene")
         self.assertIn("test etmedi", str(c.exception))
         self.assertEqual(self.ortam.reddler, [])
+
+    def test_duzeltme_reddettikten_sonra_donen_yeni_paket_sonuc_sayilir(self):
+        """Düzeltme A'yı reddetti, hat takıldı, operatör çözdü, kart C ile döndü: C düzeltmenin sonucudur (yeniden izleme)."""
+        tanimlar, _ = akis_tanim.tanimlari_yukle()
+        self.tanimlar.update(tanimlar)
+        k = self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"})["run_id"]
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"plan": "p", "risk": "dusuk", "yetki_gerekli": False}) + '</akis_cikti>')
+        self.m.tur()
+        self.ortam.hat_uat("G0.md", sha="a" * 64)
+        lint = iter([1])
+        self.ortam.komut_kodu = lambda argv: next(lint, 0) if "php-lint" in argv else 0
+        self.m.tur()                                              # A kaldı → düzeltme A'yı reddetti
+        self.assertEqual(len(self.ortam.reddler), 1)
+        self.ortam.gorevler["G0.md"]["durum"] = "takildi"         # hat düzeltirken takıldı
+        self.m.tur()
+        self.assertEqual(self.detay(k)["durum"], "inceleme")
+        self.ortam.hat_uat("G0.md", sha="c" * 64)                 # operatör çözdü, kart C ile döndü
+        self.m.devam(k, "yeniden_dene")
+        self.m.tur()
+        self.m.tur()
+        self.assertEqual(len(self.ortam.reddler), 1)              # C yeniden reddedilmedi
+        self.assertEqual(self.adim(k, "duzeltme")["durum"], "basarili")
+        self.assertEqual(self.adim(k, "uygulama")["cikti"]["sha256"], "c" * 64)
 
     def test_duzeltme_hedef_karti_uat_degilse_yeniden_dene_409(self):
         k = self.hat_incelemede()

@@ -471,13 +471,6 @@ def akis_ref_durumu(ref):
         return "bilinmiyor"
 
 
-def _akis_baslamadi(k, metin):
-    """Kuyruktan düşürülen workflow işi hiç başlamadı: motor 'bilinmeyen' saymasın, iade edip güvenle yeniden denesin."""
-    if k.get("akis_ref"):
-        kosucu.akis_isaret_yaz({"akis_ref": k["akis_ref"], "kosu_id": None}, "",
-                               {"son": True, "durum": "hata", "baslamadi": True, "hata": metin})
-
-
 def kuyrugu_isle():
     """Kuyruktaki işleri sırayla dener; ajan (ya da alt yuvası) boşsa başlatır. Model çağırmaz, yalnız koşu açar.
     Limit yüzünden yeniden kuyruğa giren iş (sonra) sıfırlanma saatine ve bir Pro hesabı açılana dek bekler."""
@@ -511,7 +504,6 @@ def kuyrugu_isle():
             if not ajan or k["ajan"] in ortak.ATANAMAZ or not ajan["kurulu"]:
                 ortak.olay_yaz({"tur": "hata", "ajan": k["ajan"], "kuyruk_id": k["id"],
                                 "detay": "kuyruktaki iş düşürüldü: ajan yok ya da kurulu değil"})
-                _akis_baslamadi(k, "kuyruktaki iş düşürüldü: ajan yok ya da kurulu değil")
                 continue
             try:
                 b = _baslat_kilitli(ajan, k["etiket"], k["prompt"], k["kaynak"], None, k["ust"], True, kuyruktan=True,
@@ -523,7 +515,6 @@ def kuyrugu_isle():
                 else:
                     ortak.olay_yaz({"tur": "hata", "ajan": k["ajan"], "kuyruk_id": k["id"],
                                     "detay": f"kuyruktan başlatılamadı ({e.kod})"})
-                    _akis_baslamadi(k, f"kuyruktan başlatılamadı ({e.kod})")
                 continue
             baslayan.append(b)
             ortak.olay_yaz({"tur": "kuyruktan_basladi", "ajan": k["ajan"], "kuyruk_id": k["id"],
@@ -1924,7 +1915,7 @@ def geri_bildirim_ekle(metin, not_, kimden="ofisten"):
     return metin.rstrip("\n") + f"\n\n## Geri bildirim\n_{datetime.now():%Y-%m-%d %H:%M} · {kimden}_\n\n{not_.strip()}\n"
 
 
-def uat_reddet(dosya, not_, kimden="workflow"):
+def uat_reddet(dosya, not_, kimden="workflow", beklenen_sha=None):
     """UAT'deki hat görevini geri bildirimle reddeder (ofisteki 'reddet' ile aynı alanlar). Onay VERMEZ."""
     if not isinstance(dosya, str) or not DOSYA_DESENI.match(dosya) or dosya.startswith("."):
         raise IstekHatasi(400, "geçersiz dosya")
@@ -1939,6 +1930,9 @@ def uat_reddet(dosya, not_, kimden="workflow"):
             raise IstekHatasi(409, f"görev UAT'de değil (durum: {fm.get('durum') or '-'})")
         if fm.get("onay") == "evet":
             raise IstekHatasi(409, "görev onaylanmış")
+        if beklenen_sha is not None and fm.get("sha256") != beklenen_sha:
+            # okuma ile yazma arasında kart yeni pakete geçti: kalite kapısının test etmediği paket reddedilmez
+            raise IstekHatasi(409, "kart bu arada yeni bir pakete geçti; test edilmeyen paket reddedilmez")
         atomik_yaz(yol, on_bilgi_yaz(geri_bildirim_ekle(metin, not_, kimden), "onay", "hayir"))
     try:   # ret yazıldı: tetik hatası (systemctl) reddi geri almaz, 5 dk zamanlayıcı yine alır
         kosucuyu_durt()

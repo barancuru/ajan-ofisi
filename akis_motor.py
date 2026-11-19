@@ -1085,8 +1085,6 @@ class Motor:
                 return ("basarili", cikti, maliyet, None)
             except akis_veri.VeriHatasi as e:
                 return ("sir" if e.tur == "sir" else "kalici", None, maliyet, str(e))
-        if sonuc.get("baslamadi") is True:   # sunucu kuyruğu yazdı: koşu hiç başlamadı
-            return ("baslamadi", None, None, sonuc.get("hata") or "kuyruktan başlatılamadı")
         return (hata_sinifla(sonuc.get("hata")), None, maliyet, sonuc.get("hata") or "ajan hata ile bitti")
 
     # ---- gelistirme_gorevi (beyin hattı adaptörü)
@@ -1122,11 +1120,15 @@ class Motor:
                     raise BaslatmaHatasi(423, "görev elle onaylandı ya da yayına geçti; workflow reddetmez")
                 if fm.get("durum") != "uat":
                     raise BaslatmaHatasi(409, f"görev UAT'de değil (durum: {fm.get('durum') or '-'})")
-                if hedef_tutamac.get("test_edilen_sha") and fm.get("sha256") != hedef_tutamac["test_edilen_sha"]:
+                test_edilen = hedef_tutamac.get("test_edilen_sha")
+                if not test_edilen:
+                    raise BaslatmaHatasi(409, "kalite kapısının test ettiği paket bilinmiyor; düzeltme yapılmaz")
+                if fm.get("sha256") != test_edilen:
                     raise BaslatmaHatasi(409, "kart yeni bir sürümde: kalite kapısı bu sürümü test etmedi, eski rapora göre "
                                               "reddedilmez")
                 not_, _ = self._sablon(adim["geri_bildirim"], baglam, alinti=True)
-                self.ortam.gelistirme_reddet(dosya, f"(workflow {ref})\n\n{not_}"[:ortak.MAKS_GIRDI])
+                # beklenen sha görev kilidi altında yeniden denetlenir (okuma-yazma arası yeni paket)
+                self.ortam.gelistirme_reddet(dosya, f"(workflow {ref})\n\n{not_}"[:ortak.MAKS_GIRDI], test_edilen)
                 tutamac = {"dosya": dosya, "onceki_sha": fm.get("sha256"), "reddedildi": True}
         except BaslatmaHatasi as e:
             sinif = "erken_onay" if e.kod == 423 else "kaynak"
@@ -1399,8 +1401,6 @@ class Motor:
                 if sinif == "basarili":
                     self._adim_basarili(b, kosu, tanim, adim, cikti)
                 else:
-                    if sinif == "baslamadi":
-                        kosu = self._baslamayan_cagriyi_dus(b, kosu, d)
                     self._adim_hatasi(b, kosu, tanim, adim, sinif, hata)
                 return
             if adim["tur"] == "gelistirme_gorevi" and durum == "bitti":

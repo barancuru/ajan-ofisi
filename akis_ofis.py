@@ -218,9 +218,9 @@ class OfisOrtami:
                     return os.path.basename(yol)
         return None
 
-    def gelistirme_reddet(self, dosya, not_):
+    def gelistirme_reddet(self, dosya, not_, beklenen_sha=None):
         try:
-            self.s.uat_reddet(dosya, not_)
+            self.s.uat_reddet(dosya, not_, beklenen_sha=beklenen_sha)
         except self.s.IstekHatasi as e:
             raise akis_motor.BaslatmaHatasi(e.kod, str(e)) from e
 
