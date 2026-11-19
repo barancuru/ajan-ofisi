@@ -867,6 +867,29 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         self.assertEqual(self.adim(k, "uat_onayi")["durum"], "onay_bekliyor")
         return k
 
+    def test_hat_karti_durumu_kapi_ve_onay(self):
+        """V1.1 #6: Geliştirme kartı workflow kapısının geçip geçmediğini gösterir (salt okuma)."""
+        tanimlar, _ = akis_tanim.tanimlari_yukle()
+        self.tanimlar.update(tanimlar)
+        k = self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"})["run_id"]
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"plan": "p", "risk": "dusuk", "yetki_gerekli": False}) + '</akis_cikti>')
+        self.m.tur()
+        ref = self.ortam.gorevler["G0.md"]["akis_adim"]
+        self.assertEqual(self.m.hat_karti_durumu(ref), {"run_id": k, "kosu_durumu": "calisiyor", "durum": "kapi_bekleniyor"})
+        self.ortam.hat_uat("G0.md")
+        self.m.tur()
+        self.assertEqual(self.m.hat_karti_durumu(ref)["durum"], "kapi_bekleniyor")   # UAT'de ama kapı daha koşmadı
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"karar": "gecti", "bulgular": "-"}) + '</akis_cikti>')
+        self.m.tur()
+        self.m.tur()
+        self.assertEqual(self.m.hat_karti_durumu(ref)["durum"], "onay_bekliyor")
+        self.m.iptal(k)
+        self.assertEqual(self.m.hat_karti_durumu(ref), {"run_id": k, "kosu_durumu": "iptal", "durum": "kapandi"})
+        self.assertIsNone(self.m.hat_karti_durumu("ak-000000000000"))
+        self.assertIsNone(self.m.hat_karti_durumu("../x"))
+
     def test_baska_kartin_onayi_odunc_alinamaz(self):
         """Kart dosyası UAT sonrası başka (onaylı, mühürlü, daha yeni) bir sürüme çevrilirse onay kaydı sayılmaz."""
         k = self.pilot_onaya_kadar()

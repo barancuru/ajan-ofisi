@@ -580,6 +580,28 @@ class Motor:
                             for o in self.depo.olaylar(kosu_id, 100)]
         return sonuc
 
+    def hat_karti_durumu(self, ref):
+        """Geliştirme kartı için (V1.1 #6): workflow'un açtığı hat görevinin kapı durumu. Salt okuma, motor kilidi yok.
+        Dönen: {run_id, durum: kapi_bekleniyor | onay_bekliyor | kapandi, kosu_durumu} ya da None (ref bilinmiyor).
+        'onay_bekliyor' = kartı izleyen dağıtım onayı adımı açıldı (kalite kapısı geçti). Bilgi amaçlıdır: onay
+        kararı yine kapıdan ve mühürlü paketle verilir."""
+        if not isinstance(ref, str) or not REF_DESENI.match(ref):
+            return None
+        r = self.depo.baglanti().execute("SELECT d.kosu_id, d.adim_id, k.durum AS kd, k.tanim_json FROM denemeler d "
+                                         "JOIN kosular k ON k.id=d.kosu_id WHERE d.ref=?", (ref,)).fetchone()
+        if not r:
+            return None
+        sonuc = {"run_id": r["kosu_id"], "kosu_durumu": r["kd"]}
+        if r["kd"] in akis_db.SON_KOSU:
+            return {**sonuc, "durum": "kapandi"}
+        tanim = json.loads(r["tanim_json"])
+        hedefler = {r["adim_id"]} | {a["id"] for a in tanim["adimlar"]
+                                     if a["tur"] == "gelistirme_gorevi" and a.get("hedef_adim") == r["adim_id"]}
+        adimlar = self.depo.adimlar(r["kosu_id"])
+        acik = any(a["tur"] == "approval" and a.get("izle_adim") in hedefler
+                   and a["id"] in adimlar and adimlar[a["id"]]["durum"] == "onay_bekliyor" for a in tanim["adimlar"])
+        return {**sonuc, "durum": "onay_bekliyor" if acik else "kapi_bekleniyor"}
+
     # ------------------------------------------------------------------ motor döngüsü
     def baslat_thread(self):
         """Daemon: etkin koşu yoksa yalnız ucuz bir SQL sorgusu; model çağrısı yok."""

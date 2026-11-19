@@ -211,6 +211,24 @@ class HatAdaptoruTest(OfisTabani):
         self.assertNotIn("onay", fm)                              # gövdedeki 'onay: evet' alan sayılmaz
         self.assertEqual(self.ortam.gelistirme_bul(REF), dosya)
 
+    def test_gelistirme_kartinda_workflow_kapi_durumu(self):
+        """V1.1 #6: kaynak: akis kartı motor durumunu taşır; motor okunamazsa 'bilinmiyor' (kapı geçmiş sayılmaz)."""
+        with mock.patch.object(sunucu, "gelistirme_projeleri", lambda: ["homeos"]):
+            dosya = self.ortam.gelistirme_yaz("homeos", "Rapor", "x", "sonnet", REF)
+            sunucu.gelistirme_gorevi_yaz("homeos", "Elle", "x", "sonnet")
+            sahte = mock.Mock()
+            sahte.hat_karti_durumu.return_value = {"run_id": "r1", "kosu_durumu": "calisiyor", "durum": "kapi_bekleniyor"}
+            with mock.patch.object(sunucu, "motor", lambda: sahte):
+                kartlar = {g["dosya"]: g for g in sunucu.gelistirme_yaniti()["gorevler"]}
+            self.assertEqual(kartlar[dosya]["akis"]["durum"], "kapi_bekleniyor")
+            sahte.hat_karti_durumu.assert_called_once_with(REF)
+            self.assertNotIn("akis", kartlar["Elle.md"])
+            self.assertNotIn("akis_ref", kartlar[dosya])
+            sahte.hat_karti_durumu.side_effect = OSError("db yok")
+            with mock.patch.object(sunucu, "motor", lambda: sahte):
+                kartlar = {g["dosya"]: g for g in sunucu.gelistirme_yaniti()["gorevler"]}
+            self.assertEqual(kartlar[dosya]["akis"], {"durum": "bilinmiyor"})
+
     def test_reddet_yalniz_uat_ve_onaysiz(self):
         with mock.patch.object(sunucu, "gelistirme_projeleri", lambda: ["homeos"]):
             dosya = self.ortam.gelistirme_yaz("homeos", "Rapor", "x", "sonnet", REF)

@@ -1612,9 +1612,25 @@ def gorev_ozeti(yol, bitti=False):
         ozet["onizleme"] = ":8444"
     if fm.get("proje") in CANLI_YUKSELTME_ANAHTARLARI and durum == "uat":
         ozet["canli_otomatik"] = os.path.isfile(os.path.expanduser(CANLI_YUKSELTME_ANAHTARLARI[fm["proje"]]))
+    if fm.get("kaynak") == "akis" and akis_motor.REF_DESENI.match(fm.get("akis_adim") or ""):
+        ozet["akis_ref"] = fm["akis_adim"]   # kapı durumu gelistirme_yaniti'nda motordan eklenir
     if durum == "oneri":
         ozet["metin"] = govde.split("\n", 1)[1].strip()[:2500] if "\n" in govde else ""
     return ozet
+
+
+def akis_karti_durumlari(gorevler):
+    """Workflow görevlerine (kaynak: akis) motorun kapı durumunu ekler. DB okunamazsa 'bilinmiyor': kart yine
+    görünür, uyarı fail-closed (kapı geçmiş sayılmaz)."""
+    for g in gorevler:
+        ref = g.pop("akis_ref", None)
+        if not ref:
+            continue
+        try:
+            d = motor().hat_karti_durumu(ref)
+        except Exception:  # noqa: BLE001 — workflow DB sorunu Geliştirme sekmesini düşürmez
+            d = None
+        g["akis"] = d or {"durum": "bilinmiyor"}
 
 
 def gelistirme_yaniti():
@@ -1635,6 +1651,7 @@ def gelistirme_yaniti():
                     o = None
                 if o:
                     gorevler.append(o)
+    akis_karti_durumlari(gorevler)
     return {"projeler": gelistirme_projeleri(), "gorevler": gorevler, "oneri_taraniyor": oneri_taraniyor(), "oto_onay": oto_onay_durumu(),
             "alarmlar": alarmlar_oku(), "takilanlar": takilanlari_oku(), "girdi_maks": ortak.MAKS_GIRDI}
 

@@ -369,6 +369,7 @@ td.sayi,th.sayi{text-align:right}
 .ara-baslik{font-family:"Space Grotesk",sans-serif;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--soluk);margin:14px 0 8px}
 .gelistirme-izgara{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
 .rozet{font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:rgba(59,52,44,.08);color:var(--murekkep)}
+.akis-uyari{margin:.4rem 0;padding:.35rem .5rem;border-left:3px solid #c98a14;background:#fff6e0;color:#6b4a0c;font-size:.85rem}.akis-uyari.tamam{border-color:#2f7d4f;background:#e4f4ea;color:#1f5a37}
 .rozet.uat{background:#ffe1d6;color:#b5401f}.rozet.calisiyor{background:#fff0c9;color:#8a5a14}
 .rozet.bitti{background:#dcefe1;color:#2f6e44}.rozet.oneri{background:#e4e1fb;color:#4b3fa8}
 .oneri-metin{font-size:12.5px;line-height:1.45;color:#5d5348;margin-top:6px;max-height:220px;overflow:auto}
@@ -3503,6 +3504,16 @@ function gelistirmeKarti(g) {
     }
   }
   const kararBekliyor = g.durum === 'uat' && g.onay !== 'evet';
+  if (g.akis && !g.bitti) {
+    const ad = g.akis.durum;
+    const metin = ad === 'onay_bekliyor' ? 'Workflow: kalite kapısı geçti, dağıtım onayı bekleniyor.'
+      : ad === 'kapandi' ? 'Workflow koşusu kapandı (' + (g.akis.kosu_durumu || '?') + '); kart artık izlenmiyor.'
+      : ad === 'bilinmiyor' ? 'Workflow görevi; kapı durumu okunamadı. Onaylamadan önce Workflow sekmesine bak.'
+      : 'Workflow: kalite kapısı bekleniyor. Şimdi onaylarsan koşu incelemeye (erken onay) düşer.';
+    const uy = el('p', 'akis-uyari' + (ad === 'onay_bekliyor' ? ' tamam' : ''), metin);
+    if (g.akis.run_id) uy.title = 'Koşu ' + g.akis.run_id;
+    k.append(uy);
+  }
   if (g.son_bolum) {
     const raporPopAc = () => akisPopAc((g.baslik || 'Görev') + ' · son rapor', g.son_bolum,
       DEMO ? '' : '/api/gelistirme/rapor?dosya=' + encodeURIComponent(g.dosya), kararBekliyor ? (kap, kapat) => {
