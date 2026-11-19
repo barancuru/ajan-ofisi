@@ -847,6 +847,42 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         with self.assertRaises(akis_motor.AkisHatasi) as c:
             self.m.devam(k, "yeniden_dene")
         self.assertEqual(c.exception.kod, 409)
+        self.assertIn("iptal edilmiş", str(c.exception))
+
+    def test_baslatma_on_kosul_hatasi_butce_harcamaz(self):
+        """Hat adımı ön koşulda (kart UAT değil) başlamazsa ayrılan çağrı/tahmin iade edilir."""
+        tanimlar, _ = akis_tanim.tanimlari_yukle()
+        self.tanimlar.update(tanimlar)
+        k = self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"})["run_id"]
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"plan": "p", "risk": "dusuk", "yetki_gerekli": False}) + '</akis_cikti>')
+        self.m.tur()
+        self.ortam.hat_uat("G0.md")
+
+        def kapi(argv):
+            if "php-lint" in argv:
+                self.ortam.gorevler["G0.md"]["durum"] = "calisiyor"   # kart bu arada hat'a döndü
+                return 1
+            return 0
+        self.ortam.komut_kodu = kapi
+        self.m.tur()                                     # uygulama bitti, test kaldı, düzeltme ön koşulda kaldı
+        d = self.detay(k)
+        self.assertEqual((d["durum"], d["neden"]["sebep"]), ("inceleme", "kaynak"))
+        self.assertEqual(d["ajan_cagrisi"], 2)             # planlama + uygulama; düzeltme sayılmadı
+        self.assertAlmostEqual(d["tahmini_usd"], 6.0)      # yalnız uygulamanın hat tahmini
+
+    def test_duzeltme_hedef_karti_uat_degilse_yeniden_dene_409(self):
+        k = self.hat_incelemede()
+        with self.depo.islem() as b:   # uygulama başarılı sayıldı, düzeltme adımı ön koşulda kaldı (tutamaçsız)
+            b.execute("UPDATE kosular SET neden=? WHERE id=?",
+                      (json.dumps({"sebep": "kaynak", "metin": "x", "adim": "duzeltme"}), k))
+            b.execute("INSERT INTO denemeler(kosu_id, adim_id, iterasyon, deneme, ref, durum, tutamac_json, baslangic_ts) "
+                      "VALUES (?,?,?,?,?,?,?,?)", (k, "uygulama", 0, 9, "ak-00000000ffff", "basarili",
+                                                   json.dumps({"dosya": "G0.md"}), 0))
+        self.ortam.gorevler["G0.md"]["durum"] = "calisiyor"
+        with self.assertRaises(akis_motor.AkisHatasi) as c:
+            self.m.devam(k, "yeniden_dene")
+        self.assertIn("UAT", str(c.exception))
 
     def test_yayina_cikmis_kartta_yeniden_dene_kopya_acmaz(self):
         k = self.hat_incelemede()

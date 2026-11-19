@@ -148,7 +148,9 @@ kosucu sonucu `son: false` yazar; motor aynı denemeyi beklemeyi sürdürür, ke
 - Hat adımında "Yeniden dene": aynı iterasyonda açılmış kart canlıysa (bitti dahil) **aynı kart yeniden izlenir**
   (yeni görev, çağrı, tahmin yok); yalnız iptal edilmiş (`reddedildi`) kart yeni görev açtırır (bütçeli). Kart
   okunamıyor ya da takılıysa, düzeltmede hedef kart iptal edilmişse "Yeniden dene" 409 verir (başarısız say/iptal ya
-  da yeni koşu); devam ile tur arasında yeniden takılan/okunamayan kart için deneme harcanmadan `kaynak` incelemesi.
+  da yeni koşu); düzeltme adımında hedef kart UAT'de değil ya da onaylıysa da 409. Devam ile tur arasında yeniden
+  takılan/okunamayan kart için deneme harcanmadan `kaynak` incelemesi. Başlatma hatasında (ön koşul, yetki, tmux,
+  istem; dış işlem yapılmamış) ayrılan ajan çağrısı ve tahmin her zaman iade edilir.
 - Yayın kanıtı eksikse (`durum: bitti` ama mühür/etiket yok) `yayin_kaniti_yok` olayı bir kez yazılır, onay verilmez.
 - Güvenilen paket: motor UAT'de kartın (sürüm, sha) değerini hattın paket mührüyle doğrulayıp kaydeder (uyuşmazsa
   `kaynak` incelemesi). **Onay kaydı yalnız bu paketle aranır**: kayıtlar proje-sürüme bağlıdır, göreve değil; kart

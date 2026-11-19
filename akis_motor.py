@@ -363,14 +363,23 @@ class Motor:
                         # "yeniden dene" yalnız işe yarayabilecekse kabul edilir: aksi hâlde sessiz döngü ya da boşa bütçe
                         fm = self.ortam.gelistirme_oku(onceki["dosya"])
                         if not fm:
-                            raise AkisHatasi(409, f"hat kartı okunamıyor ({onceki['dosya']}; silinmiş ya da taşınmış "
-                                                  "olabilir): başarısız say ya da iptal et; gerekirse yeni koşu başlat")
+                            raise AkisHatasi(409, f"hat kartı okunamıyor ({onceki['dosya']}; silinmiş, taşınmış ya da şu an "
+                                                  "okunamıyor): kart geri gelince yeniden dene; gelmezse başarısız say ya "
+                                                  "da iptal et ve gerekirse yeni koşu başlat")
                         if fm.get("durum") == "takildi":
                             raise AkisHatasi(409, "hat kartı hâlâ takılı: önce Geliştirme sekmesinden yeniden dene ya da "
                                                   "iptal et, sonra bu koşuyu yeniden dene")
                         if kaynak_adim.get("mod") == "duzeltme" and fm.get("durum") == "reddedildi":
                             raise AkisHatasi(409, "düzeltilecek hat kartı iptal edilmiş: düzeltme yapılamaz; başarısız say "
                                                   "ya da iptal et")
+                        tutamaci_yok = not self._onceki_hat_karti(b, kosu_id, adim_id,
+                                                                  self._adim_al(b, kosu_id, adim_id)["iterasyon"])
+                        if kaynak_adim.get("mod") == "duzeltme" and tutamaci_yok and (
+                                fm.get("durum") != "uat" or fm.get("onay") == "evet"):
+                            # _gelistirme_gonder ön koşulları: yeniden deneme ancak kart UAT'de ve onaysızsa işe yarar
+                            raise AkisHatasi(409, f"düzeltilecek kart UAT'de değil ya da onaylı (durum "
+                                                  f"{fm.get('durum') or '-'}, onay {fm.get('onay') or '-'}): kart UAT'ye "
+                                                  "gelince yeniden dene")
                 if neden.get("sebep") == "yayin_takildi":
                     izle = akis_tanim.adim_bul(self._tanim(kosu), adim_id).get("izle_adim")
                     t = self._son_tutamac(b, kosu_id, izle) if izle else None
@@ -817,8 +826,9 @@ class Motor:
                     # Yalnız İPTAL edilmiş (reddedildi) kart yeni görev açtırır (bütçeli). Okunamayan ya da hâlâ takılı kart:
                     # kopya kart açılmaz, deneme harcanmaz → el kararı. Diğer her durum (bitti dahil) aynı kart izlenir.
                     if not fm or fm.get("durum") == "takildi":
-                        neden = ("hat kartı okunamadı" if not fm else "hat kartı yine takıldı") + \
-                                f" ({onceki['dosya']}); Geliştirme sekmesinden kontrol et, sonra yeniden dene"
+                        neden = (f"hat kartı okunamadı ({onceki['dosya']}): kart geri gelince yeniden dene, gelmezse "
+                                 "başarısız say/iptal et" if not fm else
+                                 f"hat kartı yine takıldı ({onceki['dosya']}): Geliştirme sekmesinden çöz, sonra yeniden dene")
                         self._adim_yaz(b, kosu_id, adim_id, durum="inceleme", hata=neden)
                         self._incelemeye_al(b, kosu, "kaynak", f"{adim_id}: {neden}", adim_id)
                         return True
@@ -924,8 +934,10 @@ class Motor:
             if not self._deneme_bitir(b, deneme_id, "basarisiz", siniflama=siniflama, hata=metin[:300]):
                 return
             d = b.execute("SELECT tahmini_usd FROM denemeler WHERE id=?", (deneme_id,)).fetchone()
+            # başlatma hatası = dış işlem yapılmadı (ön koşul, yetki, tmux, istem): ayrılan çağrı ve tahmin iade edilir
+            sayildi = adim["tur"] in ("agent_task", "gelistirme_gorevi")
             self._kosu_yaz(b, kosu_id, tahmini_usd=max(kosu["tahmini_usd"] - (d["tahmini_usd"] or 0), 0),
-                           ajan_cagrisi=max(kosu["ajan_cagrisi"] - (1 if siniflama == "baslamadi" else 0), 0))
+                           ajan_cagrisi=max(kosu["ajan_cagrisi"] - (1 if sayildi else 0), 0))
             kosu = self._kosu_al(b, kosu_id)
             if kosu["durum"] in akis_db.SON_KOSU:
                 return
