@@ -46,7 +46,10 @@ akislar/*.json ──doğrula──▶ Motor (SQLite durum/akis.db)
   `{taban}`, `{paket}`, `{paket_sha}`, `{yayin}`, `{ofis}`; değerler hattın yazdığı alanlardan desenle doğrulanır.
   Worktree `realpath` ile `~/beyin-is/wt/` altında olmalı ve `.git` işaretçisi (symlink değil) hattın klonundaki
   `~/beyin-is/<proje>/.git/worktrees/` kaydına göstermeli. Git `core.fsmonitor`, `core.hooksPath`, `diff.external`,
-  pager ve protokoller kapalı, sistem/global yapılandırma okunmadan koşar. Ortam sırsızdır. İsteğe bağlı `kosullar`
+  pager ve protokoller kapalı, sistem/global yapılandırma okunmadan koşar. Depo yapılandırmasında `.gitattributes` ile
+  tetiklenen bir sürücü (`filter.*.clean/smudge/process`, `diff.*.textconv/command`, `merge.*.driver`) tanımlıysa kapı
+  git'i hiç çalıştırmaz (çıkış 126/2). Komut argümanları da kısıtlı: `php -l`, `test -f|-d|-e|-s`, git yalnız salt
+  okunur alt komutlar. Ortam sırsızdır. İsteğe bağlı `kosullar`
   önceki çıktılara bakar ama tek başına yetmez. Kapı geçmezse `basarisizsa` geçişi uygulanır.
 - **condition**: `kosullar` (eq, ne, in, not_in, lt, le, gt, ge, var) hepsi doğruysa `dogru`, değilse `yanlis`.
   Eksik değer yanlış sayılır.
@@ -55,7 +58,8 @@ akislar/*.json ──doğrula──▶ Motor (SQLite durum/akis.db)
   `izle_adim` zorunlu: Geliştirme sekmesindeki UAT kartını izler, API'den verilemez. Kabul için görev dosyasındaki
   `onay: evet` **yetmez** (kapısız yazılabilir): ofis girişinin mühürlü pakete bağlı canlı onay kaydı
   (`~/.config/ofis-kapi/onaylar/<proje>-<sürüm>.onay` = paket SHA-256) ya da hattın o kayıtla yaptığı yayın
-  (`durum: bitti` **ve** hattın klonunda `v<sürüm>` etiketi, dal o etikete alınmış) gerekir; yoksa `onay_kaydi_yok`
+  (`durum: bitti` **ve** o sürüm için hattın paket mührü görevdeki sha'ya eşit, klonda `v<sürüm>` etiketi var, dal o
+  etikete alınmış; yeniden temellendirmede değişen sürüm/sha görevdeki güncel değerden okunur) gerekir; yoksa `onay_kaydi_yok`
   olayı yazılır ve beklenir.
 - **end**: `sonuc: basarili | basarisiz`.
 

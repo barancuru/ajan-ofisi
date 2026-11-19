@@ -11,6 +11,25 @@ import subprocess
 import sys
 
 
+SURUCU_DESENI = r"^(filter\..*\.(clean|smudge|process)|diff\..*\.(textconv|command)|merge\..*\.driver)$"
+
+
+def git_suruculeri(wt):
+    """Depo yapılandırmasındaki, .gitattributes ile tetiklenip komut çalıştıran sürücüler (textconv, filter, merge).
+    Ajan worktree'deki .gitattributes'ı yazabilir; sürücü tanımlıysa kapı git'i çalıştırmaz. Okunamazsa güvenli tarafta."""
+    ortam = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null"}
+    try:
+        p = subprocess.run(["git", "-C", wt, "config", "--get-regexp", SURUCU_DESENI], capture_output=True, text=True,
+                           timeout=20, env=ortam)
+    except (OSError, subprocess.TimeoutExpired):
+        return ["git config okunamadı"]
+    if p.returncode == 1:      # eşleşme yok
+        return []
+    if p.returncode != 0:
+        return ["git config okunamadı"]
+    return [satir.split()[0] for satir in p.stdout.splitlines() if satir.strip()]
+
+
 def php_lint(wt, taban):
     if not re.fullmatch(r"[A-Za-z0-9_./-]{1,100}", taban) or taban.startswith("-"):
         print("geçersiz taban")
@@ -20,6 +39,10 @@ def php_lint(wt, taban):
                    "-c", "diff.external=true", "-c", "protocol.allow=never"]
         ortam = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_OPTIONAL_LOCKS": "0"}
         return subprocess.run(["git", *guvenli, "-C", wt, *a], capture_output=True, text=True, timeout=60, env=ortam)
+    suruculer = git_suruculeri(wt)
+    if suruculer:
+        print("git yapılandırmasında komut çalıştıran sürücü var, denetlenmedi: " + ", ".join(suruculer)[:200])
+        return 2
     mb = git("merge-base", taban, "HEAD")
     if mb.returncode != 0:
         print("merge-base bulunamadı")

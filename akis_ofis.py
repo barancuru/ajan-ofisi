@@ -9,7 +9,11 @@ import os
 import re
 import subprocess
 
+import time
+
+import akis_kapi
 import akis_motor
+import akis_tanim
 import akis_veri
 import ortak
 
@@ -52,11 +56,29 @@ class OfisOrtami:
         refler |= {k.get("akis_ref") for _, k in self._limit_bekleyenler() if k.get("akis_ref")}
         return refler
 
-    def yayinlandi(self, proje, surum, dal):
-        """'durum: bitti' kapısız yazılabilir: yayın kanıtı hattın klonundaki v<sürüm> etiketi ve dalın o etikete
-        alınmış olması (ajan klonun ref'lerine yazamaz; is_yayin yalnız geçerli onayla etiketler)."""
-        if proje not in ("homeos", "turnusol", "ajan-ofisi") or not isinstance(surum, str) \
-                or not re.fullmatch(r"[0-9.]{1,24}", surum) or not re.fullmatch(r"beyin/[a-z0-9-]{1,80}", dal or ""):
+    def yayinlandi(self, proje, surum, dal, sha):
+        """'durum: bitti' kapısız yazılabilir. Yayın kanıtı üç parça: (1) hattın paket mühürü (ajanların yazamadığı
+        ~/.local/state/beyin/paket-muhur) bu sürüm için bu sha, (2) klonda v<sürüm> etiketi, (3) dal o etikete alınmış.
+        Olumsuz sonuç 60 sn önbellekte: bekleyen kart her turda git çalıştırmasın."""
+        anahtar = (proje, surum, dal, sha)
+        onbellek = self.__dict__.setdefault("_yayin_onbellek", {})
+        if anahtar in onbellek and time.time() - onbellek[anahtar] < 60:
+            return False
+        sonuc = self._yayinlandi(proje, surum, dal, sha)
+        if not sonuc:
+            onbellek[anahtar] = time.time()
+        return sonuc
+
+    def _yayinlandi(self, proje, surum, dal, sha):
+        if proje not in akis_tanim.GELISTIRME_PROJELERI or not isinstance(surum, str) or not isinstance(sha, str) \
+                or not akis_motor.DEGER_DESENLERI["surum"].match(surum) or not akis_motor.DEGER_DESENLERI["sha256"].match(sha) \
+                or not akis_motor.DEGER_DESENLERI["dal"].match(dal or ""):
+            return False
+        try:
+            with open(os.path.join(self.s.PAKET_MUHUR_DIZINI, f"{proje}-{surum}.zip.sha256"), encoding="utf-8") as f:
+                if f.read().split()[0:1] != [sha]:
+                    return False
+        except (OSError, IndexError):
             return False
         klon = os.path.join(IS_DIZINI, proje)
         ortam = guvenli_git_ortami({"PATH": "/usr/bin:/bin", "HOME": os.path.expanduser("~"), "LANG": "C.UTF-8"})
@@ -191,7 +213,7 @@ class OfisOrtami:
 
     def worktree_coz(self, proje, dal):
         """Hattın worktree'si: $IS_DIZIN/wt/<proje>-<dal adı>. realpath ile kök dışına çıkış reddedilir."""
-        if proje not in ("homeos", "turnusol", "ajan-ofisi") or not re.fullmatch(r"beyin/[a-z0-9-]{1,80}", dal or ""):
+        if proje not in akis_tanim.GELISTIRME_PROJELERI or not akis_motor.DEGER_DESENLERI["dal"].match(dal or ""):
             return None
         kok = os.path.realpath(os.path.join(IS_DIZINI, "wt"))
         yol = os.path.realpath(os.path.join(kok, f"{proje}-{dal[len('beyin/'):]}"))
@@ -220,6 +242,9 @@ class OfisOrtami:
         ortam = guvenli_git_ortami({"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": os.path.expanduser("~"),
                                     "LANG": "C.UTF-8"})
         if argv and argv[0] == "git":
+            suruculer = akis_kapi.git_suruculeri(cwd)
+            if suruculer:
+                return 126, "git yapılandırmasında komut çalıştıran sürücü tanımlı, kapı koşmadı: " + ", ".join(suruculer)[:200]
             argv = ["git", *GIT_GUVENLI, *argv[1:]]
         try:
             p = subprocess.run(argv, cwd=cwd, stdin=subprocess.DEVNULL, capture_output=True, text=True,

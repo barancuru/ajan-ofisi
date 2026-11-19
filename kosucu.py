@@ -414,9 +414,12 @@ def akis_isaret_yaz(arg, ad, veri):
 def akis_sonuc_yaz(arg, olay, son=True):
     if not olay:
         return
-    akis_isaret_yaz(arg, "", {"son": son, "durum": olay.get("durum"), "hata": olay.get("hata"),
-                              "sure_sn": olay.get("sure_sn"), "maliyet_usd": olay.get("maliyet_usd"),
-                              "cikti": olay.get("cikti")})
+    veri = {"son": son, "durum": olay.get("durum"), "hata": olay.get("hata"), "sure_sn": olay.get("sure_sn"),
+            "maliyet_usd": olay.get("maliyet_usd"), "cikti": olay.get("cikti")}
+    if not son and re.fullmatch(r"[A-Za-z0-9_-]{1,120}", str(arg.get("kosu_id") or "")):
+        # limitte yarıda kalan koşunun maliyeti ayrı dosyada: sonraki koşunun sonucu üzerine yazınca kaybolmasın
+        akis_isaret_yaz(arg, f".ara-{arg['kosu_id']}", veri)
+    akis_isaret_yaz(arg, "", veri)
 
 
 def limit_bekleyen_yaz(arg, log_yolu=None):

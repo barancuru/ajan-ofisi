@@ -31,8 +31,9 @@ BASLAMADI_MAKS = 5             # hiç başlamamış (tmux/kuyruk dolu/kilit) den
 MAKS_AKTIF_KOSU = 5
 MAKS_ISTEM = ortak.MAKS_GIRDI
 UYANMA_AKTIF_SN = 5
-# Bu incelemelerde "yeniden dene" aynı sonucu verir ya da tamamlanmış yan etkiyi tekrarlar (ör. tanım @inceleme'ye yönlendirdi)
-YENIDEN_DENENEMEZ = ("dongu_siniri", "butce", "sure", "erken_onay", "tanim")
+# Bu incelemelerde "yeniden dene" aynı sonucu verir ya da sınırı aşar. 'tanim' (tanım @inceleme'ye yönlendirdi) ayrıca
+# kaynak adıma göre karar verilir: yan etkisiz adım yeniden denenebilir, yan etkili adım (hat görevi, yazabilen ajan) değil.
+YENIDEN_DENENEMEZ = ("dongu_siniri", "butce", "sure", "erken_onay")
 UYANMA_BOS_SN = 30
 DEGER_DESENLERI = {"surum": re.compile(r"^[0-9.]{1,24}$"), "dal": re.compile(r"^beyin/[a-z0-9-]{1,80}$"),
                    "sha256": re.compile(r"^[0-9a-f]{64}$")}
@@ -326,6 +327,14 @@ class Motor:
                 adim_id = neden.get("adim")
                 if not adim_id or not self._adim_al(b, kosu_id, adim_id):
                     raise AkisHatasi(409, "yeniden denenecek adım yok")
+                if neden.get("sebep") == "tanim":
+                    kaynak = akis_tanim.adim_bul(self._tanim(kosu), adim_id)
+                    yan_etkisiz = kaynak["tur"] in ("condition", "approval", "quality_gate") or (
+                        kaynak["tur"] == "agent_task" and not kaynak.get("yan_etkili", True)
+                        and not self.ajan_yazabilir(kaynak["ajan"]))
+                    if not yan_etkisiz:
+                        raise AkisHatasi(409, "tanımın yönlendirdiği bu adım yan etkili (hat görevi ya da yazabilen ajan); "
+                                              "yeniden denenmez: başarısız say ya da iptal et")
                 if any(d["adim_id"] == adim_id for d in self._ucusta(b, kosu_id)):
                     raise AkisHatasi(409, "adımın sonucu hâlâ bekleniyor")
                 a = self._adim_al(b, kosu_id, adim_id)
@@ -339,7 +348,9 @@ class Motor:
         return self.detay(kosu_id)
 
     def iptal(self, kosu_id):
-        notlar = []
+        """Önce DB'de iptal (commit): sunucu kuyruğu (ref_ucusta) bundan sonra işi koşturmaz. Kuyruk/limit kaydı
+        temizliği DB işlemi DIŞINDA yapılır (işlem açıkken BASLATMA_KILIDI beklenirse kuyruk eski durumu görürdü)."""
+        notlar, ajan_denemeleri = [], []
         with self._islem() as b:
             kosu = self._kosu_kontrol(b, kosu_id)
             if kosu["durum"] in akis_db.SON_KOSU:
@@ -347,19 +358,27 @@ class Motor:
             tanim = self._tanim(kosu)
             for d in self._ucusta(b, kosu_id):
                 adim = akis_tanim.adim_bul(tanim, d["adim_id"])
-                if adim["tur"] == "agent_task" and self._ajan_isini_kaldir(d["ref"]):
-                    notlar.append(f"{d['adim_id']}: kuyruktan çıkarıldı")
-                    if d["durum"] == "kuyrukta":   # hiç koşmadı: tahmini maliyeti serbest bırak
-                        kosu["tahmini_usd"] = max(kosu["tahmini_usd"] - (d["tahmini_usd"] or 0), 0)
-                        self._kosu_yaz(b, kosu_id, tahmini_usd=kosu["tahmini_usd"])
-                elif adim["tur"] == "agent_task":
-                    notlar.append(f"{d['adim_id']}: çalışan ajan koşusu durdurulmadı; bitince sonucu yok sayılır")
+                if adim["tur"] == "agent_task":
+                    ajan_denemeleri.append(d)
                 elif adim["tur"] == "gelistirme_gorevi":
                     notlar.append(f"{d['adim_id']}: hat görevi sürüyor; Geliştirme sekmesinden yönet")
                 b.execute("UPDATE denemeler SET durum='iptal', bitis_ts=? WHERE id=?", (self.saat(), d["id"]))
             b.execute("UPDATE adimlar SET durum='iptal' WHERE kosu_id=? AND durum IN ('hazir','calisiyor','onay_bekliyor','bekliyor','inceleme')",
                       (kosu_id,))
-            self._kosu_bitir(b, kosu, "iptal", {"sebep": "operator", "metin": "; ".join(notlar) or "operatör iptal etti"})
+            self._kosu_bitir(b, kosu, "iptal", {"sebep": "operator", "metin": "operatör iptal etti"})
+        iade = 0.0
+        for d in ajan_denemeleri:
+            if self._ajan_isini_kaldir(d["ref"]):
+                notlar.append(f"{d['adim_id']}: kuyruktan çıkarıldı")
+                if d["durum"] == "kuyrukta":   # hiç koşmadı: tahmini maliyeti serbest bırak
+                    iade += d["tahmini_usd"] or 0
+            else:
+                notlar.append(f"{d['adim_id']}: çalışan ajan koşusu durdurulmadı; bitince sonucu yok sayılır")
+        with self._islem() as b:
+            kosu = self._kosu_al(b, kosu_id)
+            self._kosu_yaz(b, kosu_id, tahmini_usd=max(kosu["tahmini_usd"] - iade, 0),
+                           neden=json.dumps({"sebep": "operator", "metin": "; ".join(notlar) or "operatör iptal etti"},
+                                            ensure_ascii=False))
         return {**self.detay(kosu_id), "notlar": notlar}
 
     def onayla(self, kosu_id, adim_id, karar, not_=None, kapi_ok=False):
@@ -879,6 +898,9 @@ class Motor:
             son_bakis = _json_oku(os.path.join(sonuc_dizini(), f"{ref}.json"))
             if son_bakis and son_bakis.get("ref") == ref and son_bakis.get("son") is True:
                 return ("bitti", son_bakis)
+            if son_bakis and son_bakis.get("ref") == ref and son_bakis.get("son") is False \
+                    and son_bakis.get("kosu_id") == isaret.get("kosu_id"):
+                return ("bekle", {"ara": son_bakis})   # BU koşu limitte kaldı, yeniden kuyruğa giriyor: iş silinmez
             return ("bilinmeyen", "ajan süreci sonuç yazmadan kapandı")
         # kuyruktan/limit dosyasından çıktı ama kosucu henüz işaret yazmadı: tolerans son görülme anından
         if simdi - max(d["baslangic_ts"], kuyruk_ts, ara_ts) < BASLAMA_TOLERANS_SN:
@@ -1069,8 +1091,9 @@ class Motor:
             paket = self._son_basarili_cikti(b, kosu["id"], adim["izle_adim"]) or {}
             # görev dosyasındaki 'onay: evet' kapısız yazılabilir: kabul yalnız ofis girişinin yazdığı, mühürlü pakete
             # bağlı canlı onay kaydıyla ya da hattın o kayıtla yaptığı yayın sonucuyla (durum: bitti)
-            kayitli = self.ortam.canli_onay_var(izlenen["proje"], paket.get("surum"), paket.get("sha256")) or (
-                durum == "bitti" and self.ortam.yayinlandi(izlenen["proje"], paket.get("surum"), paket.get("dal")))
+            adaylar = {(paket.get("surum"), paket.get("sha256")), (fm.get("surum"), fm.get("sha256"))}  # yeniden temellendirme sürümü değiştirir
+            kayitli = any(self.ortam.canli_onay_var(izlenen["proje"], s, h) for s, h in adaylar) or (
+                durum == "bitti" and any(self.ortam.yayinlandi(izlenen["proje"], s, paket.get("dal"), h) for s, h in adaylar))
             if kayitli:
                 self._adim_yaz(b, kosu["id"], adim["id"], durum="basarili",
                                cikti_json=json.dumps({"karar": "evet", "not": "Geliştirme kartından (ofis girişiyle) onaylandı"}))
@@ -1107,8 +1130,9 @@ class Motor:
                     and adim["tur"] == "gelistirme_gorevi":
                 return
             durum, veri = (self._ajan_uzlastir if adim["tur"] == "agent_task" else self._gelistirme_uzlastir)(b, kosu, tanim, adim, d)
-            if isinstance(veri, dict) and veri.get("ara"):
-                kosu, d = self._ara_maliyet_ekle(b, kosu, d, veri["ara"])
+            if adim["tur"] == "agent_task":
+                for ara in self._aralar(d["ref"]):
+                    kosu, d = self._ara_maliyet_ekle(b, kosu, d, ara)
             if durum in ("bekle",):
                 if self.saat() - d["baslangic_ts"] > adim["zaman_asimi_sn"]:
                     durum, veri = "bilinmeyen", "adım zaman aşımı"
@@ -1137,9 +1161,12 @@ class Motor:
                 sinif, cikti, maliyet, hata = self._ajan_sonucunu_isle(b, kosu, tanim, adim, d, veri)
                 tutamac = json.loads(d["tutamac_json"] or "{}")
                 tutamac["kosu_id"] = str(veri.get("kosu_id") or "")[:120]
+                ara_toplam = sum(float(a.get("maliyet_usd") or 0) for a in self._aralar(d["ref"])
+                                 if isinstance(a.get("maliyet_usd"), (int, float)) and not isinstance(a.get("maliyet_usd"), bool))
                 if not self._deneme_bitir(b, deneme_id, "basarili" if sinif == "basarili" else "basarisiz",
                                           siniflama=sinif, hata=(akis_veri.maskele(hata) or "")[:300] or None,
-                                          maliyet_usd=maliyet, tutamac_json=json.dumps(tutamac)):
+                                          maliyet_usd=(maliyet or 0) + ara_toplam if (maliyet is not None or ara_toplam) else None,
+                                          tutamac_json=json.dumps(tutamac)):
                     return
                 self._kosu_yaz(b, kosu_id, maliyet_usd=kosu["maliyet_usd"] + (maliyet or 0),
                                tahmini_usd=max(kosu["tahmini_usd"] - d["tahmini_usd"], 0) if maliyet is not None else kosu["tahmini_usd"])
@@ -1171,6 +1198,20 @@ class Motor:
                 return
             self._adim_hatasi(b, kosu, tanim, adim, sinif, veri)
         self._uyandir.set()
+
+    @staticmethod
+    def _aralar(ref):
+        """kosucu'nun limit kesintisi başına yazdığı <ref>.ara-<kosu>.json kayıtları."""
+        sonuc = []
+        try:
+            adlar = [a for a in os.listdir(sonuc_dizini()) if a.startswith(f"{ref}.ara-") and a.endswith(".json")]
+        except OSError:
+            return sonuc
+        for ad in sorted(adlar):
+            v = _json_oku(os.path.join(sonuc_dizini(), ad))
+            if v and v.get("ref") == ref:
+                sonuc.append(v)
+        return sonuc
 
     def _ara_maliyet_ekle(self, b, kosu, d, ara):
         """Limitte yarıda kalan koşunun gerçek maliyeti bir kez koşu maliyetine eklenir (bütçe kontrolü eksik saymasın)."""

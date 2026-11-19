@@ -239,10 +239,17 @@ class HatAdaptoruTest(OfisTabani):
         with mock.patch.object(akis_ofis, "IS_DIZINI", self.d):
             self.hat_worktree("1119-z")
             klon = os.path.join(self.d, "homeos")
-            self.assertFalse(self.ortam.yayinlandi("homeos", "0.10.9", "beyin/1119-z"))
-            subprocess.run(["git", "-C", klon, "tag", "v0.10.9", "beyin/1119-z"], check=True)
-            self.assertTrue(self.ortam.yayinlandi("homeos", "0.10.9", "beyin/1119-z"))
-            self.assertFalse(self.ortam.yayinlandi("homeos", "0.10.9", "beyin/../x"))
+            muhur = os.path.join(self.d, "muhur")
+            os.makedirs(muhur)
+            with mock.patch.object(sunucu, "PAKET_MUHUR_DIZINI", muhur):
+                subprocess.run(["git", "-C", klon, "tag", "v0.10.9", "beyin/1119-z"], check=True)
+                self.assertFalse(self.ortam._yayinlandi("homeos", "0.10.9", "beyin/1119-z", "a" * 64))   # mühür yok
+                with open(os.path.join(muhur, "homeos-0.10.9.zip.sha256"), "w") as f:
+                    f.write("a" * 64 + "\n")
+                self.assertTrue(self.ortam._yayinlandi("homeos", "0.10.9", "beyin/1119-z", "a" * 64))
+                self.assertFalse(self.ortam._yayinlandi("homeos", "0.10.9", "beyin/1119-z", "b" * 64))  # başka paket
+                self.assertFalse(self.ortam._yayinlandi("homeos", "0.10.8", "beyin/1119-z", "a" * 64))  # etiket yok
+                self.assertFalse(self.ortam._yayinlandi("homeos", "0.10.9", "beyin/../x", "a" * 64))
 
     def test_worktree_isaretcisi_dogrulanir(self):
         with mock.patch.object(akis_ofis, "IS_DIZINI", self.d):
@@ -274,6 +281,29 @@ class HatAdaptoruTest(OfisTabani):
             import akis_kapi
             akis_kapi.main(["php-lint", wt, "main"])
             self.assertFalse(os.path.exists(iz), "git yapılandırmadaki komutu çalıştırdı")
+
+    def test_git_suruculeri_kapida_calismaz(self):
+        """Üçüncü inceleme: .gitattributes + depo yapılandırmasındaki filter/textconv sürücüsü kapıda komut çalıştıramaz."""
+        import akis_kapi
+        with mock.patch.object(akis_ofis, "IS_DIZINI", self.d):
+            wt = self.hat_worktree("1119-s")
+            iz = os.path.join(self.d, "surucu-calisti")
+            subprocess.run(["git", "-C", wt, "config", "filter.x.clean", f"touch {iz}; cat"], check=True)
+            with open(os.path.join(wt, ".gitattributes"), "w") as f:
+                f.write("* filter=x diff=x\n")
+            with open(os.path.join(wt, "a.php"), "w") as f:
+                f.write("<?php echo 1;")
+            kod, cikti = self.ortam.komut_calistir(["git", "diff", "--check", "main...HEAD"], wt, 30)
+            self.assertEqual(kod, 126)
+            self.assertIn("filter.x.clean", cikti)
+            self.assertEqual(akis_kapi.main(["php-lint", wt, "main"]), 2)
+            self.assertFalse(os.path.exists(iz))
+
+    def test_db_okunamazsa_is_korunur_ve_alarm(self):
+        with mock.patch.object(sunucu, "motor", side_effect=RuntimeError("db")):
+            self.assertTrue(sunucu.akis_ref_gecerli(REF))
+        with open(ortak.OLAYLAR) as f:
+            self.assertTrue(any(json.loads(s)["tur"] == "hata" for s in f))
 
     def test_canli_onay_kaydi(self):
         with mock.patch.object(sunucu, "CANLI_ONAY_DIZINI", self.d):

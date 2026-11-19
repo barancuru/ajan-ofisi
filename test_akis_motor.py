@@ -29,7 +29,7 @@ class SahteOrtam:
         self.komut_kodu = {}          # kontrol adı parçası → çıkış kodu
         self.komutlar = []
         self.onaylar = set()          # (proje, sürüm, sha): ofis girişinin yazdığı canlı onay kayıtları
-        self.yayinlar = set()         # (proje, sürüm, dal): klonda v<sürüm> etiketi + dal etikete alınmış
+        self.yayinlar = set()         # (proje, sürüm, dal, sha): mühür + klonda v<sürüm> etiketi + dal etikete alınmış
         self.ajanlar = {"arastirmaci": {"id": "arastirmaci", "kurulu": True, "butce_usd": 1.0, "izinli_araclar": ["Read", "Grep"]},
                         "gunlukcu": {"id": "gunlukcu", "kurulu": True, "butce_usd": 0.5, "izinli_araclar": ["Read", "Glob"]},
                         "akis-okuyucu": {"id": "akis-okuyucu", "kurulu": True, "butce_usd": 1.5,
@@ -61,10 +61,11 @@ class SahteOrtam:
     def canli_onay_var(self, proje, surum, sha):
         return (proje, surum, sha) in self.onaylar
 
-    def yayinlandi(self, proje, surum, dal):
-        return (proje, surum, dal) in self.yayinlar
+    def yayinlandi(self, proje, surum, dal, sha):
+        return (proje, surum, dal, sha) in self.yayinlar
 
     def kuyruktan_cikar(self, ref):
+        self.cikarirken_ucusta = getattr(self, "motor", None) and self.motor.ref_ucusta(ref)
         if ref in self.kuyruk:
             self.kuyruk.discard(ref)
             return True
@@ -152,13 +153,17 @@ class MotorTabani(unittest.TestCase):
         self.tanimlar[t["id"]] = t
         return t
 
-    def ajan_bitir(self, ref, metin=None, durum="basarili", hata=None, maliyet=0.1, son=True, sure=3.0):
+    def ajan_bitir(self, ref, metin=None, durum="basarili", hata=None, maliyet=0.1, son=True, sure=3.0, kosu_id=None):
         os.makedirs(akis_motor.sonuc_dizini(), exist_ok=True)
         yol = f"cikti/x/{ref}.md"
         self.ortam.ciktilar[yol] = metin or ""
+        veri = {"ref": ref, "son": son, "durum": durum, "hata": hata, "maliyet_usd": maliyet,
+                "cikti": yol, "sure_sn": sure, "kosu_id": kosu_id or f"k-{ref}", "ts": self.saat[0]}
+        if not son:   # kosucu.akis_sonuc_yaz gibi: limit kesintisinin maliyeti kendi dosyasında
+            with open(os.path.join(akis_motor.sonuc_dizini(), f"{ref}.ara-{veri['kosu_id']}.json"), "w") as f:
+                json.dump(veri, f)
         with open(os.path.join(akis_motor.sonuc_dizini(), f"{ref}.json"), "w") as f:
-            json.dump({"ref": ref, "son": son, "durum": durum, "hata": hata, "maliyet_usd": maliyet,
-                       "cikti": yol, "sure_sn": sure, "kosu_id": f"k-{ref}"}, f)
+            json.dump(veri, f)
 
     def son_ref(self):
         return self.ortam.baslatilan[-1][3]
@@ -325,8 +330,9 @@ class RetryTest(MotorTabani):
         self.ajan_bitir(self.son_ref(), '<akis_cikti>{"sonuc": "kotu"}</akis_cikti>')
         self.m.tur()
         self.assertEqual(self.detay(k)["neden"]["sebep"], "tanim")
-        with self.assertRaises(akis_motor.AkisHatasi):
-            self.m.devam(k, "yeniden_dene")
+        self.m.devam(k, "yeniden_dene")                       # kaynak koşul adımı: yan etkisiz, yeniden değerlendirilir
+        self.m.tur()
+        self.assertEqual(self.detay(k)["durum"], "inceleme")
 
     def test_yazabilen_ajan_tanim_yan_etkisiz_dese_de_tekrarlanmaz(self):
         """Gerçek ajanlar.json biçimi: arastirmaci Write(~/beyin/**) taşır; yan_etkili:false körlemesine tekrar açmaz."""
@@ -394,10 +400,10 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         self.m.tur()                                   # tolerans sonra da iz yoksa bilinmeyen
         self.assertEqual(self.adim(k, "a")["denemeler"][0]["durum"], "bilinmeyen")
 
-    def isaret_yaz(self, ref, pid, ts):
+    def isaret_yaz(self, ref, pid, ts, kosu_id=None):
         os.makedirs(akis_motor.sonuc_dizini(), exist_ok=True)
         with open(os.path.join(akis_motor.sonuc_dizini(), f"{ref}.basladi.json"), "w") as f:
-            json.dump({"ref": ref, "pid": pid, "ts": ts}, f)
+            json.dump({"ref": ref, "pid": pid, "ts": ts, "kosu_id": kosu_id}, f)
 
     def test_uzun_suren_canli_kosu_bilinmeyen_olmaz(self):
         """İnceleme bulgusu: canlı pid'li işaret, 180 sn'den uzun koşuda da 'calisiyor' kalmalı."""
@@ -440,7 +446,7 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         with open(os.path.join(akis_motor.sonuc_dizini(), f"{ref}.json"), "w") as f:
             json.dump(ara, f)
         self.saat[0] += 30
-        self.isaret_yaz(ref, 999999999, self.saat[0])   # limit sonrası yeniden koşu başladı, sonra öldü
+        self.isaret_yaz(ref, 999999999, self.saat[0], kosu_id="k2")   # limit sonrası yeniden koşu başladı, sonra öldü
         self.saat[0] += 10
         self.m.tur()
         self.assertEqual(self.adim(k, "a")["denemeler"][0]["durum"], "bilinmeyen")
@@ -478,6 +484,46 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         with mock.patch.object(ortak, "surec_yasiyor", bitip_oldu):
             self.m.tur()
         self.assertEqual(self.detay(k)["durum"], "basarili")
+
+    def test_olu_surec_sonrasi_ara_sonuc_isi_silmez(self):
+        """Üçüncü inceleme: ilk okumadan sonra limit ara sonucu yazılırsa deneme 'bilinmeyen' olmaz, iş kuyruktan silinmez."""
+        self.tanim(taban_tanim())
+        k = self.m.baslat("deneme", {"konu": "x"})["run_id"]
+        self.m.tur()
+        ref = self.son_ref()
+        self.isaret_yaz(ref, 999999999, self.saat[0], kosu_id="k1")
+        self.saat[0] += 60
+
+        def limitte_kaldi(pid):
+            self.ajan_bitir(ref, durum="hata", hata="limit", son=False, kosu_id="k1")
+            self.ortam.kuyruk.add(ref)                      # limit-bekleyen dosyası (görüntüden sonra)
+            return False
+        with mock.patch.object(ortak, "surec_yasiyor", limitte_kaldi):
+            self.m.tur()
+        self.assertNotEqual(self.adim(k, "a")["denemeler"][0]["durum"], "bilinmeyen")
+        self.assertIn(ref, self.ortam.kuyruk)
+
+    def test_ara_maliyet_sonraki_sonuc_ustune_yazsa_da_sayilir(self):
+        self.tanim(taban_tanim())
+        k = self.m.baslat("deneme", {"konu": "x"})["run_id"]
+        self.m.tur()
+        ref = self.son_ref()
+        self.ajan_bitir(ref, durum="hata", hata="limit", son=False, maliyet=0.7, kosu_id="k1")
+        self.ajan_bitir(ref, '<akis_cikti>{"sonuc": "iyi"}</akis_cikti>', maliyet=0.2, kosu_id="k2")   # motor arayı hiç görmedi
+        self.m.tur()
+        d = self.detay(k)
+        self.assertEqual(d["durum"], "basarili")
+        self.assertAlmostEqual(d["maliyet_usd"], 0.9)
+        self.assertAlmostEqual(self.adim(k, "a")["denemeler"][0]["maliyet_usd"], 0.9)
+
+    def test_iptal_kuyruk_temizligi_db_commit_sonrasi(self):
+        self.tanim(taban_tanim())
+        k = self.m.baslat("deneme", {"konu": "x"})["run_id"]
+        self.ortam.davranis = ["kuyruk"]
+        self.m.tur()
+        self.ortam.motor = self.m
+        self.m.iptal(k)
+        self.assertIs(self.ortam.cikarirken_ucusta, False)    # kuyruk tarafı iptali çoktan görüyor
 
     def test_limitte_yarida_kalan_maliyet_bir_kez_sayilir(self):
         self.tanim(taban_tanim())
@@ -885,6 +931,31 @@ class PilotTest(MotorTabani):
         pilot = self.tanimlar["homeos-ozellik-gelistirme"]
         self.assertEqual(pilot["izinli_ajanlar"], ["akis-okuyucu"])
         self.assertEqual({a["ajan"] for a in pilot["adimlar"] if a["tur"] == "agent_task"}, {"akis-okuyucu"})
+
+    def test_tanim_yonlendirmesi_hat_adimindan_yeniden_denenmez(self):
+        self.planla()
+        with self.depo.islem() as b:
+            b.execute("UPDATE kosular SET durum='inceleme', neden=? WHERE id=?",
+                      (json.dumps({"sebep": "tanim", "metin": "x", "adim": "uygulama"}), self.k))
+        with self.assertRaises(akis_motor.AkisHatasi) as c:
+            self.m.devam(self.k, "yeniden_dene")
+        self.assertIn("yan etkili", str(c.exception))
+        self.assertEqual(len(self.ortam.gorevler), 1)        # ikinci hat görevi açılmadı
+
+    def test_yeniden_temellendirme_sonrasi_yayin_kaniti(self):
+        """Hat UAT sonrası yeniden temellendirince sürüm ve sha değişir; kanıt görevdeki güncel değerlerle aranır."""
+        self.planla()
+        self.ortam.hat_uat("G0.md")
+        self.m.tur()
+        self.guvenlik()
+        self.m.tur()
+        self.assertEqual(self.adim(self.k, "uat_onayi")["durum"], "onay_bekliyor")
+        self.ortam.gorevler["G0.md"].update({"durum": "bitti", "onay": "evet", "surum": "0.10.2", "sha256": "c" * 64})
+        self.m.tur()
+        self.assertEqual(self.adim(self.k, "uat_onayi")["durum"], "onay_bekliyor")   # kanıt yok
+        self.ortam.yayinlar.add(("homeos", "0.10.2", "beyin/1118-x", "c" * 64))
+        self.m.tur()
+        self.assertEqual(self.detay(self.k)["durum"], "basarili")
 
     def test_belirsiz_plan_inceleme(self):
         self.planla(risk="belirsiz")

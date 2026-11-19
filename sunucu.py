@@ -390,7 +390,8 @@ def limit_bekleyenleri_al(kuyruk):
                     os.remove(yol)
                 except OSError:
                     pass
-                ortak.olay_yaz({"tur": "akis", "olay": "terk_edilen_is_dusuruldu", "step_id": None, "kaynak": "limit"})
+                ortak.olay_yaz({"tur": "akis", "olay": "terk_edilen_is_dusuruldu", "step_id": None, "kaynak": "limit",
+                                "akis_ref": kayit.get("akis_ref"), "ajan": kayit.get("ajan")})
                 continue
             else:
                 kuyruk.append(kayit)
@@ -414,8 +415,10 @@ def akis_ref_gecerli(ref):
         return True
     try:
         return motor().ref_ucusta(ref)
-    except Exception:  # noqa: BLE001
-        return False
+    except Exception as e:  # noqa: BLE001 - DB okunamadı: iş korunur (sessizce düşürmek, gerçek işi kaybettirir)
+        ortak.olay_yaz({"tur": "hata", "ajan": "ofis", "detay": f"workflow durumu okunamadı ({type(e).__name__}); "
+                        "kuyruktaki workflow işi korunuyor"})
+        return True
 
 
 def kuyrugu_isle():
@@ -440,7 +443,8 @@ def kuyrugu_isle():
                 kalan.append(k)
                 continue
             if not akis_ref_gecerli(k.get("akis_ref")):
-                ortak.olay_yaz({"tur": "akis", "olay": "terk_edilen_is_dusuruldu", "step_id": None, "kuyruk_id": k["id"]})
+                ortak.olay_yaz({"tur": "akis", "olay": "terk_edilen_is_dusuruldu", "step_id": None, "kuyruk_id": k["id"],
+                                "akis_ref": k.get("akis_ref"), "ajan": k.get("ajan")})
                 continue
             ajan = tablo.get(k["ajan"])
             if not ajan or k["ajan"] in ortak.ATANAMAZ or not ajan["kurulu"]:
