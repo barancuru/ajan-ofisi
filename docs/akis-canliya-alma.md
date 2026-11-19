@@ -1,51 +1,111 @@
-# Workflow V1 — canlıya alma kontrol listesi ve rollback planı
+# Workflow V1 — kademeli devreye alma, dağıtım ve geri dönüş
 
-> Canlı ofis `~/ajan-ofisi` (systemd `--user` servisi, `main` çalışma kopyası). Bu dalı `main`'e almak dosyaları
-> **hemen** değiştirir; yeniden başlatma yalnız yeni kodu (motor iş parçacığı dahil) devreye alır. Bu yüzden merge
-> fiilen bir dağıtımdır ve yalnız kullanıcı kararıyla yapılır.
+## Neyin nerede değiştiği (önce bunu ayır)
 
-## Önce (merge'den önce)
-1. [ ] PR incelendi; CI yok, testler yerelde: `OFIS_AJANLAR=ajanlar.example.json python3 -m unittest discover -p 'test_*.py'`
-       hepsi geçer (yalın çalıştırmada `test_revize.test_bilinmeyen_ajan_404` zaten main'de de hata verir).
-2. [ ] Ofiste koşan ajan yok (`GET /api/ajanlar` hepsi uyuyor), `durum/kuyruk.json` boş, hat ajan-ofisi görevi açık değil.
-3. [ ] Yedek: `git -C ~/ajan-ofisi rev-parse main` değerini not et (geri dönüş noktası; şu an `0c0c91b`).
-       `cp ~/ajan-ofisi/ajanlar.json ~/ajan-ofisi/ajanlar.json.yedek-<tarih>`.
-4. [ ] Sürüm: dal `1.0.88`. `~/beyin/gorevler/bitti/Workflow V1 hat adaptoru kabul testi.md` 1.0.87 kullandı; çakışma yok.
+| İşlem | Neyi değiştirir | Neyi değiştirmez |
+|---|---|---|
+| GitHub'da PR merge | `github.com/barancuru/ajan-ofisi` `main` | Canlı çalışma kopyası `~/ajan-ofisi`, çalışan servis |
+| Yerel dağıtım (`git merge --ff-only origin/main`) | `~/ajan-ofisi` dosyaları (anında) | Çalışan süreç (eski kod bellekte kalır) |
+| `systemctl --user restart ajan-ofisi.service` | Çalışan kod (motor dahil) | tmux'taki ajan koşuları (sürer) |
 
-## Merge ve açılış
-5. [ ] PR'ı `main`'e al (tercihen merge commit, `--no-ff`: tek komutla geri alınır; push sonrası `~/ajan-ofisi` `receive.denyCurrentBranch=updateInstead`
-       ile güncellenir ya da `git -C ~/ajan-ofisi pull --ff-only`).
-6. [ ] `ajanlar.json`'a pilot ajanı ekle (`arastirmaci`'ya dokunma): `ajanlar.example.json` içindeki `akis-okuyucu`
-       girdisini kopyala, `cwd`'yi `~/beyin` yap. Yalnız `Read`, `Glob`, `Grep`; `tarayici: false`.
-       Eklemezsen pilot ilk ajan adımında `yetkisiz` ile durur (güvenli taraf).
-7. [ ] Servisi yeniden başlat (`systemctl --user restart <ofis servisi>`). İlk açılışta `durum/akis.db` oluşur (WAL).
-8. [ ] Doğrula: `curl -s 127.0.0.1:8796/api/akis` iki tanım döner, `gecersiz` boş; ofiste Araçlar → Workflow açılır;
-       mevcut sekmeler (Geliştirme, Operatör, Maliyet, Model kullanımı) açılır; `/api/gorev` ile bir hazır görev koşar.
-9. [ ] Boşta maliyet: 10 dk sonra `olaylar.jsonl`'de `tur: akis` olayı yok, yeni `kosu_basladi` yok.
+- `~/ajan-ofisi`'nin `origin`'i GitHub'dır (fetch https, push `github-ajanofisi` SSH takma adı).
+- Hattın klonu `~/beyin-is/ajan-ofisi`'nin `origin`'i `~/ajan-ofisi`'dir (`receive.denyCurrentBranch=updateInstead`). Hat bir ofis görevini canlıya alırken klondan `~/ajan-ofisi`'ye push eder, servisi yeniden başlatır, sonra `~/ajan-ofisi`'den GitHub'a push eder (`sistem/gelistirme/ajan-ofisi.sh` `canliya_al`).
+- Bu yüzden GitHub'da merge commit oluşunca yerel kopya fast-forward ile eşitlenmeden hattın GitHub push'u reddedilir ("GitHub yedeği: hayir"). Sıra her zaman: **GitHub merge → yerel ff → restart**.
 
-## İlk kullanım
-10. [ ] Önce `ornek-arastirma-ozeti` (salt okunur, ~0,2–0,5 $). Onay adımında onayla; koşu `basarili`.
-11. [ ] Pilot `homeos-ozellik-gelistirme` küçük bir HomeOS işiyle. Hat görevi `oto_onay: hayir` taşır; dağıtım onayı
-        Geliştirme kartından **ofis girişiyle** verilir. Workflow yalnız kaydı görünce `uat_onayi`'ni geçer.
-12. [ ] Bütçe sınırı 30 $ (pilot), döngü 3 iterasyon; değiştirme.
+## Aşamalar
 
-## Rollback
-- **Motoru durdurmak, kodu tutmak (en hızlı):** etkin koşuları panelden "İptal" et. Gerekirse `akislar/` içindeki
-  tanımları başka yere taşı: tanımsız akış başlatılamaz, motor etkin koşu yokken yalnız bir SELECT yapar.
-- **Kodu geri almak:**
-  1. Etkin workflow koşularını iptal et (çalışan ajan durdurulmaz; bitince sonucu yok sayılır). Açık hat görevleri
-     (`kaynak: akis`) normal hat görevi olarak kalır ve Geliştirme sekmesinden yönetilir.
-  2. Kodu geri al ve servisi yeniden başlat:
-     - merge commit ile alındıysa (`--no-ff`, önerilen): `git -C ~/ajan-ofisi revert -m 1 <merge commit>`;
-     - fast-forward alındıysa: `git -C ~/ajan-ofisi revert --no-edit <adım 3'teki SHA>..<alınan HEAD>`;
-     - push edilmediyse yerelde `git -C ~/ajan-ofisi reset --hard <adım 3'teki SHA>` de olur.
-  3. Eski kod `durum/akis.db`'yi okumaz; dosya kalabilir (veri kaybı yok, yeniden ileri alınca devam eder).
-     `durum/akis-sonuc/` işaretleri zararsızdır.
-  4. Kuyruk uyumluluğu: eski kod `kaynak: "akis"` kuyruk kaydını geçersiz sayıp **sessizce düşürür**
-     (`_kuyruk_dogrula`, `KUYRUK_KAYNAKLARI` yalnız buton/ceo/tekrar); limit-bekleyen kaydını ise `kaynak` alanını
-     "buton"a çevirip `akis_ref`'siz koşturur. Geri almadan önce `durum/kuyruk.json` ve `durum/limit-bekleyen/` içinde
-     `akis_ref` taşıyan kayıt kalmadığını kontrol et (iptal bunları zaten temizler).
-  5. `ajanlar.json`'daki `akis-okuyucu` girdisi eski kodda sıradan bir salt okunur ajandır; kalabilir ya da silinir.
-- **Kabul testinden kalanlar (kullanıcı kararıyla silinecek):** `~/ajan-ofisi` içindeki
-  `beyin/1119-workflow-v1-hat-adaptoru-kabul-testi` dalı, `~/beyin-is/wt/ajan-ofisi-1119-workflow-v1-hat-adaptoru-kabul-testi`
-  worktree'si, `~/beyin/sistem/yayin/ajan-ofisi-1.0.87.zip` + `.sha256` ve `~/.local/state/beyin/paket-muhur/ajan-ofisi-1.0.87.zip*`.
+| Aşama | İçerik | Ön koşul |
+|---|---|---|
+| 0 | GitHub `main`'i canlı 1.0.86'ya eşitle (PR #2) | Yalnız **merge commit** (squash/rebase değil) |
+| 1 | Workflow kodu canlıda; yalnız `ornek-arastirma-ozeti` başlatılabilir | Aşağıdaki "Aşama 1 ön koşulları" |
+| 2 | HomeOS geliştirme akışı | Kod değişikliği: `akis_motor.ETKIN_AKISLAR`, `HAT_ADIMLARI_ACIK` + aşağıdaki "Aşama 2 ön koşulları" |
+
+Aşama 1 kodda fail-closed'tır: `ETKIN_AKISLAR = ("ornek-arastirma-ozeti",)` ve `HAT_ADIMLARI_ACIK = False`. Hat görevi, kalite
+kapısı ya da dağıtım/yayın onayı içeren akış — id'si ne olursa olsun — API'de 403 alır, gönderim anında da çalışmaz.
+Açmak yapılandırma değil gözden geçirilmiş bir kod değişikliğidir.
+
+### Aşama 1 ön koşulları
+1. [ ] **Ajan Ofisi oto-onayını kapat** (ofis girişiyle, Geliştirme sekmesi). `bin/calistir hassas_degisim()` bugün
+       `akis_*.py` ve `akislar/`'ı hassas saymıyor: hattan gelen bir ofis paketi workflow kapılarını değiştirip
+       oto-onayla canlıya geçebilir. Beyin dalındaki düzeltme (`hassas_degisim` genişletmesi) canlıya alınana dek kapalı kalmalı.
+2. [ ] `ajanlar.json`'a `akis-okuyucu` girdisi (`ajanlar.example.json`'dan; `cwd: ~/beyin`; yalnız Read/Glob/Grep, `tarayici: false`).
+       Eksikse araştırma akışı ilk adımda `yetkisiz` ile durur (güvenli taraf). `arastirmaci`'ya dokunma.
+
+### Aşama 2 ön koşulları (HomeOS akışı)
+- Beyin hattında (ayrı dal, kullanıcı onayıyla canlıya): ortak görev dosyası kilidi (`fm_set`, `teslim_yaz`, `sed -i`,
+  `bitti/` taşıma, görev açan betikler), güvenli geçici dosya ve symlink reddi, paket mührüne görev kimliği (`.kimlik`).
+- Ofis tarafı aynı kilidi ve güvenli yazımı kullanır; onay kaydına mühürden kimlik kopyalanır; motor mühür kimliği =
+  onay kimliği = kendi izlediği kart olmadıkça onay/yayın kanıtı kabul etmez.
+- Ancak bunlar canlıdayken `ETKIN_AKISLAR`/`HAT_ADIMLARI_ACIK` değiştirilir (ayrı PR).
+
+## Dağıtım penceresi (her yerel dağıtımdan önce)
+```bash
+# 1) koşan iş yok
+curl -s 127.0.0.1:8796/api/ajanlar | python3 -c "import json,sys; print('koşan:', [a['id'] for a in json.load(sys.stdin)['ajanlar'] if a.get('durum') not in ('uyuyor', 'bitti', 'hata', None)])"
+test ! -s ~/ajan-ofisi/durum/kuyruk.json && echo "kuyruk boş"
+# 2) açık ajan-ofisi hat görevi yok (hazir/calisiyor/uat/takildi)
+grep -l '^proje: ajan-ofisi$' ~/beyin/gorevler/*.md 2>/dev/null | xargs -r grep -LE '^durum: (bitti|reddedildi)$'
+# 3) hattı duraklat (pencere boyunca yeni görev almasın)
+systemctl --user stop beyin-gorev.timer
+```
+
+## Aşama 0 — GitHub eşitleme (PR #2, `ofis-1.0.86` → `main`)
+1. GitHub'da **"Create a merge commit"** ile birleştir. (Squash/rebase yeni SHA'lar üretir; yerel `0c0c91b` uzak geçmişin atası olmaz ve `--ff-only` çalışmaz.)
+2. Yerelde doğrula ve eşitle:
+   ```bash
+   cd ~/ajan-ofisi
+   test "$(git rev-parse HEAD)" = 0c0c91b0a3643c5c60d028cc02dff8ec395378eb && git diff --quiet && git diff --cached --quiet && echo "beklenen ve temiz"
+   git fetch origin
+   git merge-base --is-ancestor HEAD origin/main && echo "ff mümkün"
+   git diff --stat HEAD origin/main          # beklenen: boş (merge commit içerik değiştirmez)
+   git merge --ff-only origin/main
+   ```
+   İçerik değişmediği için yeniden başlatma gerekmez.
+
+## Aşama 1 — Workflow dağıtımı (PR #1 → `main`)
+1. PR #1'in hedefini `main` yap, farkı doğrula: yalnız workflow commit'leri (`git log --oneline origin/main..origin/akis-motoru-v1`).
+2. GitHub'da **merge commit** ile birleştir.
+3. Dağıtım penceresi adımları (yukarıda) + Aşama 1 ön koşulları.
+4. Yerel:
+   ```bash
+   cd ~/ajan-ofisi
+   ONCEKI=$(git rev-parse HEAD); echo "$ONCEKI" > ~/ajan-ofisi-onceki-sha   # geri dönüş noktası
+   git diff --quiet && git diff --cached --quiet || { echo "yerel değişiklik var, dur"; exit 1; }
+   git fetch origin && git merge-base --is-ancestor HEAD origin/main && git merge --ff-only origin/main
+   cat SURUM                                   # 1.0.88
+   OFIS_AJANLAR=$PWD/ajanlar.example.json python3 -m unittest discover -p 'test_*.py' 2>&1 | tail -3
+   ```
+5. Yeniden başlat ve doğrula:
+   ```bash
+   systemctl --user restart ajan-ofisi.service
+   systemctl --user is-active ajan-ofisi.service
+   curl -s 127.0.0.1:8796/api/akis | python3 -c "import json,sys; d=json.load(sys.stdin); print([(t['id'], t['etkin']) for t in d['tanimlar']])"
+   # beklenen: ornek-arastirma-ozeti True, homeos-ozellik-gelistirme False
+   curl -s -o /dev/null -w '%{http_code}\n' -H 'Content-Type: application/json' \
+     -d '{"akis":"homeos-ozellik-gelistirme","girdiler":{"baslik":"x x x","istek":"x"}}' 127.0.0.1:8796/api/akis/baslat   # 403
+   curl -s -o /dev/null -w '%{http_code}\n' 127.0.0.1:8796/api/ajanlar   # 200 (eski uçlar)
+   ```
+6. Hattı yeniden aç: `systemctl --user start beyin-gorev.timer`. Hat klonu sonraki ajan-ofisi görevinde `~/ajan-ofisi`'den
+   ileri sarılır (`is_gelistir`: fetch + `--ff-only`).
+7. 10 dk boşta: `olaylar.jsonl`'de yeni `tur: akis` olayı ve model çağrısı olmamalı. Sonra araştırma akışını bir kez koş.
+
+## Geri dönüş (Aşama 1)
+```bash
+# 1) etkin workflow koşularını panelden iptal et (çalışan ajan durmaz, sonucu yok sayılır);
+#    kuyrukta/limit-bekleyen'de akis kaydı kalmadığını kontrol et (eski kod 'kaynak: akis' kaydını sessizce düşürür)
+grep -c akis_ref ~/ajan-ofisi/durum/kuyruk.json 2>/dev/null; grep -l akis_ref ~/ajan-ofisi/durum/limit-bekleyen/*.json 2>/dev/null
+# 2) kodu geri al (yalnız yerel; GitHub'a dokunmaz)
+systemctl --user stop beyin-gorev.timer
+cd ~/ajan-ofisi && git reset --hard "$(cat ~/ajan-ofisi-onceki-sha)"
+systemctl --user restart ajan-ofisi.service && systemctl --user is-active ajan-ofisi.service
+systemctl --user start beyin-gorev.timer
+```
+- `durum/akis.db` ve `durum/akis-sonuc/` kalabilir (eski kod okumaz; yeniden ileri alınca kaldığı yerden).
+- `ajanlar.json`'daki `akis-okuyucu` eski kodda sıradan salt okunur ajandır.
+- GitHub `main` ileride kalır; bir sonraki yerel ileri alma yine `--ff-only` ile yapılır. Hat bu arada bir ofis sürümünü
+  canlıya alırsa GitHub push'u reddedilir (yerel geride): geri dönüş sürdükçe ajan-ofisi hat görevi açma.
+
+## Kabul testinden kalanlar (kullanıcı kararıyla silinecek)
+- `~/ajan-ofisi` içindeki `beyin/1119-workflow-v1-hat-adaptoru-kabul-testi` dalı ve `~/beyin-is/wt/ajan-ofisi-1119-workflow-v1-hat-adaptoru-kabul-testi` worktree'si
+- `~/beyin/sistem/yayin/ajan-ofisi-1.0.87.zip` + `.sha256`, `~/.local/state/beyin/paket-muhur/ajan-ofisi-1.0.87.zip*`
+- `~/beyin/gorevler/bitti/Workflow V1 hat adaptoru kabul testi.md` (reddedildi)
