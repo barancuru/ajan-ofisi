@@ -13,7 +13,7 @@ Her kalem ayrı dal + PR; Aşama 1/2 sabitleri V2 PR'larında değişmez. Kalem 
 4. [x] V2 maliyet modeli (p50/p90, bu dal).
 5. [ ] İptal edilen denemenin maliyeti: claude öldürülünce `total_cost_usd` yok → deneme 0/None sayılır. Bütçede
        iptal anına dek harcama görünmez (koşu zaten iptal, risk düşük); `stream-json` usage'tan kısmi maliyet.
-6. [ ] V2 zamanlayıcı tetiklemesi → 7. [ ] olay tetiklemesi (yeni yetki eklemez).
+6. [x] V2 zamanlayıcı tetiklemesi → 7. [ ] olay tetiklemesi (yeni yetki eklemez).
 8. [ ] V2 dinamik fan-out → 9. [ ] `workflow_call` (derinlik ≤ 2).
 10. [ ] V2 değerlendirici-iyileştirici döngüsü.
 11. [ ] V2 `plan_step` → 12. [ ] CEO workflow önerisi (model çıktısı yol seçtiği için en son).
@@ -51,7 +51,7 @@ Her kalem ayrı dal + PR; Aşama 1/2 sabitleri V2 PR'larında değişmez. Kalem 
 - **Alt workflow çağrısı** (`workflow_call`): sürüm sabitli, ayrı bütçe payı, derinlik ≤ 2.
 - **CEO entegrasyonu**: CEO atama yerine "şu workflow'u şu girdilerle başlat" önerebilir. Başlatma yine kullanıcı onayıyla.
 - ~~**Maliyet modeli**~~ — V2: `Motor._tahmin` ≥5 ölçümde p90 (son 50, yalnız >0 ölçüm, statiğin %10'u taban), `maliyet_modeli()` API'de tanım başına; olayda `tahmin_kaynagi`.
-- **Zamanlayıcı tetiklemesi**: `zamanlayici.py` tekrar eden işine "workflow başlat" türü (idem anahtarı = zaman dilimi).
+- ~~**Zamanlayıcı tetiklemesi**~~ — V2: tekrar eden iş `{akis, girdiler, cron}`; kayıtta akış etkin + girdi doğrulaması, tetikte idem `tekrar:<iş>:<dakika>`, motor kapıları yeniden uygular; Öngörülebilirlik formunda "Workflow" türü.
 - **Olay tetiklemesi**: hat görevi `uat`/`takildi` olunca bağlı workflow'u ilerletmek için dosya izleme yerine bildirim.
 
 ## V3 — görsel workflow editörü

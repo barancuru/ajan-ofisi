@@ -189,6 +189,16 @@ kosucu sonucu `son: false` yazar; motor aynı denemeyi beklemeyi sürdürür, ke
   API/Codex yedeğine ya da limit kuyruğuna geçmez. Yarım kalmış yan etki olabilir: not bunu söyler, operatör kontrol
   eder (koşu zaten `iptal`). Hat görevi sürer ve Geliştirme sekmesinden yönetilir.
 
+## Zamanlayıcı tetiklemesi (V2)
+Öngörülebilirlik'te tekrar eden iş türü **Workflow**: `{akis, girdiler, cron}` (`durum/tekrarlar.json`, aynı systemd
+timer'ı). Kayıtta akış tanımlı ve **etkin** olmalı, girdiler başlatma doğrulamasından geçer (sır görünümlü değer
+reddedilir); en sık 15 dk. Yüklemede her seferinde yeniden doğrulanır: akış sonradan kapanırsa iş `hata` ile durur.
+Tetikte servis süreci yalnız DB'ye koşu yazar (`motor_kur(...).baslat`, motor döngüsü açılmaz; adımları sunucunun
+döngüsü ≤30 sn içinde gönderir). İstek anahtarı `tekrar:<iş>:<YYYY-MM-DDTHH:MM>`: aynı dakikadaki ikinci tetik ya da
+systemd telafisi aynı koşuyu döndürür. Bütçe, etkin koşu sınırı (5), kapılar ve onaylar elle başlatılan koşuyla
+aynıdır; zamanlayıcı yasak bir işleme yetki kazanmaz. Sonuç `son_sonuc`'a yazılır (`basladi (workflow r…)`,
+`atlandi: akış kapalı|etkin koşu sınırı|bu dilim zaten başladı`).
+
 ## Operatör kararları (V1.1)
 
 - **Adımı başarılı say** (`karar: basarili_say, adim, gerekce, cikti`): yalnız ofis girişi (`X-Ofis-Kapi`; motor da

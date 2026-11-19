@@ -32,6 +32,7 @@ import model_kullanim  # noqa: E402
 import zamanlayici  # noqa: E402
 import ykb  # noqa: E402
 import akis_motor  # noqa: E402
+import akis_tanim  # noqa: E402
 import akis_ofis  # noqa: E402
 
 HOST = "127.0.0.1"
@@ -2180,18 +2181,28 @@ def ongorulebilirlik_yaniti():
     otomatik = [{"ajan": a["id"], "ad": a.get("ad") or a["id"], "metin": str(a["ne_zaman_metin"])[:200],
                  "kaynak": "ajanlar.json"}
                 for a in tablo.values() if a["id"] != "ceo" and a.get("ne_zaman_metin")]
+    try:
+        akis_tanimlari, _ = akis_tanim.tanimlari_yukle()
+    except Exception:  # noqa: BLE001 - tanımlar okunamazsa workflow seçeneği gösterilmez
+        akis_tanimlari = {}
+    akislar = [{"id": t["id"], "ad": t["ad"],
+                "girdiler": {g: {"tur": a["tur"], "zorunlu": a["zorunlu"], "maks": a.get("maks"),
+                                 "secenekler": a.get("secenekler")} for g, a in t["girdiler"].items()}}
+               for t in akis_tanimlari.values() if akis_motor.akis_engeli(t) is None]
     isler = []
     for k in zamanlayici.yukle(tablo):
         try:
             sonraki = zamanlayici.sonraki(k["cron"], simdi) if k["aktif"] and not k["hata"] else None
         except ValueError:
             sonraki = None
-        p = k.get("prompt")
+        p = k.get("prompt") or (", ".join(str(v) for v in (k.get("girdiler") or {}).values()) if k.get("akis") else None)
         try:
             takvim = zamanlayici.oncalendar(k["cron"]) if not k["hata"] else None
         except ValueError:
             takvim = None
-        isler.append({"id": k["id"], "ajan": k["ajan"], "ad": (tablo.get(k["ajan"]) or {}).get("ad") or k["ajan"],
+        ad = (f"Workflow: {(akis_tanimlari.get(k['akis']) or {}).get('ad') or k['akis']}" if k.get("akis")
+              else (tablo.get(k["ajan"]) or {}).get("ad") or k["ajan"])
+        isler.append({"id": k["id"], "ajan": k["ajan"], "akis": k.get("akis"), "ad": ad,
                       "etiket": k["etiket"], "prompt_kisa": (p[:40] + ("…" if len(p) > 40 else "")) if p else None,
                       "cron": k["cron"], "ozet": zamanlayici.ozet(k["cron"]), "aktif": k["aktif"],
                       "olusturma": k["olusturma"], "son_calisma": k["son_calisma"], "son_sonuc": k["son_sonuc"],
@@ -2208,7 +2219,7 @@ def ongorulebilirlik_yaniti():
     return {"otomatik": otomatik, "isler": isler, "ajanlar": ajanlar, "simdi": _iso(simdi),
             "uyari": zamanlayici.UYARI, "min_aralik_dk": zamanlayici.MIN_ARALIK_DK, "maks_is": zamanlayici.MAKS_IS,
             "kuyruk": kuyruk, "maks_kuyruk": MAKS_KUYRUK, "ceo_kuyruk": ceo_kuyruk_sayisi(), "alt": alt, "maks_alt": MAKS_ALT,
-            "systemd_kurulu": kurulu}
+            "systemd_kurulu": kurulu, "akislar": akislar}
 
 
 def ongorulebilirlik_degistir(veri):

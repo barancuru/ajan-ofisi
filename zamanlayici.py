@@ -221,10 +221,41 @@ def ozet(ifade):
 
 # ---------- doğrulama + depo ----------
 
-def is_dogrula(ham, tablo):
-    """Kullanıcı girdisi → temiz alanlar {ajan, etiket, prompt, cron}. Hata: ValueError (Türkçe)."""
+def akis_is_dogrula(ham, tanimlar=None):
+    """V2 workflow tetiklemesi: {akis, girdiler, cron}. Akış tanımlı ve kaydederken etkin olmalı; girdiler motorun
+    başlatma doğrulamasından geçer (sır görünümlü değer reddedilir). Tetiklemede motor bütün kapıları yeniden uygular."""
+    import akis_motor
+    import akis_tanim
+    akis_id = ham.get("akis")
+    if not isinstance(akis_id, str) or not akis_tanim.ID_DESENI.match(akis_id):
+        raise ValueError("geçersiz akış id")
+    if tanimlar is None:
+        tanimlar, _ = akis_tanim.tanimlari_yukle()
+    tanim = tanimlar.get(akis_id)
+    if not tanim:
+        raise ValueError("bilinmeyen akış")
+    engel = akis_motor.akis_engeli(tanim)
+    if engel:
+        raise ValueError(f"akış etkin değil: {engel}"[:200])
+    try:
+        girdiler = akis_tanim.girdileri_dogrula(tanim, ham.get("girdiler"))
+    except akis_tanim.TanimHatasi as e:
+        raise ValueError(str(e)[:200]) from e
+    if any(isinstance(v, str) and SIR_DESENI.search(v) for v in girdiler.values()):
+        raise ValueError("girdide sır gibi görünen bir dizi var (anahtar/şifre/token); kaldır")
+    return {"ajan": None, "etiket": None, "prompt": None, "akis": akis_id, "girdiler": girdiler,
+            "cron": cron_dogrula(ham.get("cron"))}
+
+
+def is_dogrula(ham, tablo, tanimlar=None):
+    """Kullanıcı girdisi → temiz alanlar {ajan, etiket, prompt, cron} ya da workflow işi {akis, girdiler, cron}.
+    Hata: ValueError (Türkçe)."""
     if not isinstance(ham, dict):
         raise ValueError("geçersiz iş")
+    if ham.get("akis") is not None:
+        if any(ham.get(k) for k in ("ajan", "etiket", "prompt")):
+            raise ValueError("workflow işi ajan/hazır görev/prompt almaz")
+        return akis_is_dogrula(ham, tanimlar)
     ajan_id = ham.get("ajan")
     ajan = tablo.get(ajan_id) if isinstance(ajan_id, str) else None
     if not ajan or ajan_id in ortak.ATANAMAZ:
@@ -282,7 +313,10 @@ def yukle(tablo):
         try:
             alanlar, hata = is_dogrula(k, tablo), None
         except ValueError as e:
-            alanlar = {"ajan": str(k.get("ajan"))[:40], "etiket": None, "prompt": None, "cron": str(k["cron"])[:100]}
+            alanlar = {"ajan": str(k.get("ajan"))[:40] if k.get("ajan") else None, "etiket": None, "prompt": None,
+                       "cron": str(k["cron"])[:100]}
+            if k.get("akis") is not None:
+                alanlar.update(akis=str(k.get("akis"))[:40], girdiler={})
             hata = str(e)
         sonuc.append({"id": k["id"], **alanlar, "aktif": k.get("aktif") is not False,
                       "olusturma": str(k.get("olusturma") or "")[:40],
@@ -317,7 +351,8 @@ def degistir(veri, tablo):
             isler.append(yeni)
             kaydet(isler)
             birimleri_uret(tablo)
-            ortak.olay_yaz({"tur": "tekrar_eklendi", "ajan": yeni["ajan"], "is_id": yeni["id"]})
+            ortak.olay_yaz({"tur": "tekrar_eklendi", "ajan": yeni["ajan"] or "ofis", "is_id": yeni["id"],
+                            **({"akis": yeni["akis"]} if yeni.get("akis") else {})})
             return yeni["id"]
         is_id = veri.get("id")
         if not isinstance(is_id, str) or not IS_ID_DESENI.match(is_id):
@@ -332,7 +367,7 @@ def degistir(veri, tablo):
         kaydet(isler)
         birimleri_uret(tablo)
         ortak.olay_yaz({"tur": "tekrar_" + {"sil": "silindi", "ac": "acildi", "kapat": "kapatildi"}[islem],
-                        "ajan": str(k.get("ajan"))[:40], "is_id": is_id})
+                        "ajan": str(k.get("ajan") or "ofis")[:40], "is_id": is_id})
         return is_id
 
 
@@ -455,7 +490,18 @@ def kur(hedef=None, systemctl=_systemctl):
 
 # ---------- tetik (systemd servisi) ----------
 
-def tetikle(is_id, baslatici, simdi=None, tablo_yukle=None):
+def akis_sonucu(y, hata=None):
+    """Motor baslat yanıtı/hatası → kısa sonuç metni (girdi/sır yok)."""
+    if hata is not None:
+        kod = getattr(hata, "kod", None)
+        return {403: "atlandi: akış kapalı", 429: "atlandi: etkin koşu sınırı", 404: "hata: akış yok",
+                400: "hata: girdi geçersiz"}.get(kod, "hata")
+    y = y if isinstance(y, dict) else {}
+    run = str(y.get("run_id") or "")[:20]
+    return f"atlandi: bu dilim zaten başladı ({run})" if y.get("tekrar") else f"basladi (workflow {run})"
+
+
+def tetikle(is_id, baslatici, simdi=None, tablo_yukle=None, akis_baslatici=None):
     """Tek bir işi bir kez başlatır. `baslatici(ajan, etiket, prompt, kaynak)` → gorev_baslat yanıtı.
     Aynı dakikada ikinci tetik koşmaz. Meşgulde çift koşu açılmaz (alt ajan / kuyruk / atlandı). Sonucu döndürür."""
     if not isinstance(is_id, str) or not IS_ID_DESENI.match(is_id):
@@ -467,6 +513,19 @@ def tetikle(is_id, baslatici, simdi=None, tablo_yukle=None):
         if not k or k["hata"] or not k["aktif"] or k["son_calisma"] == damga:
             return None
         _alan_yaz(is_id, son_calisma=damga)  # önce damga: aynı dakikada ikinci tetik ya da hata sonrası tekrar yok
+    if k.get("akis"):
+        # idem anahtarı = iş + dakika dilimi: systemd telafisi ya da çift tetik aynı koşuyu döndürür
+        try:
+            sonuc = akis_sonucu(akis_baslatici(k["akis"], k["girdiler"], f"tekrar:{is_id}:{damga}"))
+        except Exception as e:  # noqa: BLE001 - ayrıntıda girdi/sır yok
+            sonuc = akis_sonucu(None, e)
+        with _kilit():
+            _alan_yaz(is_id, son_sonuc=sonuc)
+        try:
+            ortak.olay_yaz({"tur": "tekrar_tetiklendi", "ajan": "ofis", "akis": k["akis"], "is_id": is_id, "sonuc": sonuc})
+        except OSError:
+            pass
+        return sonuc
     try:
         y = baslatici(k["ajan"], k["etiket"], k["prompt"], "tekrar")
         y = y if isinstance(y, dict) else {}
@@ -495,7 +554,10 @@ def _alan_yaz(is_id, **alanlar):
 def main(argv):
     if len(argv) == 2 and argv[0] == "--tetikle":
         import sunucu  # sunucu sürecine değil, bu servis sürecine yüklenir (HTTP açılmaz)
-        sonuc = tetikle(argv[1], lambda a, e, p, k: sunucu.gorev_baslat(a, etiket=e, prompt=p, kaynak=k, havuz=True))
+        import akis_ofis
+        # workflow işi yalnız DB'ye koşu yazar; adımları sunucunun motor döngüsü gönderir (bu süreç motor döngüsü açmaz)
+        sonuc = tetikle(argv[1], lambda a, e, p, k: sunucu.gorev_baslat(a, etiket=e, prompt=p, kaynak=k, havuz=True),
+                        akis_baslatici=lambda a, g, i: akis_ofis.motor_kur(sunucu).baslat(a, g, i))
         try:
             sunucu.kuyrugu_isle()
         except Exception as e:  # noqa: BLE001
