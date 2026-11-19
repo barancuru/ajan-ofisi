@@ -149,7 +149,7 @@ class VeriTest(unittest.TestCase):
 
     def test_sir_iceren_cikti_aktarilmaz(self):
         for sir in ("sk-ant-api03-" + "a" * 30, "ghp_" + "b" * 36, "-----BEGIN OPENSSH PRIVATE KEY-----",
-                    "password = hunter2hunter2", "AKIAABCDEFGHIJKLMNOP"):
+                    "password = hunter2hunter2", "AKIA" + "ABCDEFGHIJKLMNOP"):   # sahte; parçalı: tarayıcılar gerçek sanmasın
             with self.assertRaises(akis_veri.VeriHatasi) as c:
                 akis_veri.cikti_cikar(f'not: {sir}\n<akis_cikti>{{"karar": "gecti"}}</akis_cikti>', self.ALANLAR)
             self.assertEqual(c.exception.tur, "sir")
