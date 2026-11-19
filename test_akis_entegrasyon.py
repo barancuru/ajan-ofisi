@@ -486,6 +486,11 @@ class KuyrukIptalSiralamaTest(OfisTabani):
             self.assertTrue(self.alarm(("acilis-2", 62.0)))     # bozuk dosya: alarm verir ve dosyayı düzeltir
             self.assertFalse(self.alarm(("acilis-2", 63.0)))
 
+    def test_acilis_kimligi_okunamazsa_eslesmez(self):
+        self.assertTrue(self.alarm(("?", 500.0)))
+        with mock.patch.object(sunucu, "_AKIS_ALARM_SUREC", None):   # yeniden açılış, kimlik yine okunamıyor
+            self.assertTrue(self.alarm(("?", 600.0)))
+
     def test_alarm_dosyasi_yazilamazsa_surec_ici_seyreltme(self):
         """Disk dolu/salt okunur: dosya yazılamazsa her turda alarm yağmuru olmaz (süreç içi yedek)."""
         with mock.patch.object(sunucu, "atomik_yaz", side_effect=OSError("disk dolu")):

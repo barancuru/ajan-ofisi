@@ -373,15 +373,17 @@ class Motor:
                     notlar.append(f"{d['adim_id']}: çalışan ajan koşusu durdurulmadı; bitince sonucu yok sayılır")
         # iptal commit edildi: bundan sonraki hata yanıtı 500'e çevirmemeli (tekrar deneyen 409 alırdı)
         try:
-            with self._islem() as b:
-                kosu = self._kosu_al(b, kosu_id)
-                self._kosu_yaz(b, kosu_id, tahmini_usd=max(kosu["tahmini_usd"] - iade, 0),
-                               neden=json.dumps({"sebep": "operator", "metin": "; ".join(notlar) or "operatör iptal etti"},
-                                                ensure_ascii=False))
+            self._islem_iade(kosu_id, iade, "; ".join(notlar) or "operatör iptal etti")
         except Exception as e:  # noqa: BLE001
-            notlar.append(f"not/iade yazılamadı ({type(e).__name__})")
-            ortak.olay_yaz({"tur": "hata", "ajan": "ofis", "detay": f"workflow iptali commit edildi ama not/iade "
-                            f"yazılamadı ({type(e).__name__}); koşu {kosu_id}"})
+            notlar.append(f"not/iade yazılamadı ({type(e).__name__}); iade sonraki motor turunda yeniden denenecek")
+            if iade:
+                self.__dict__.setdefault("_bekleyen_iadeler", {})[kosu_id] = \
+                    self.__dict__.setdefault("_bekleyen_iadeler", {}).get(kosu_id, 0) + iade
+            try:
+                ortak.olay_yaz({"tur": "hata", "ajan": "ofis", "detay": f"workflow iptali commit edildi ama not/iade "
+                                f"yazılamadı ({type(e).__name__}); koşu {kosu_id}"})
+            except Exception:  # noqa: BLE001 - iptal zaten tamam: yanıt 500 olmasın
+                pass
         try:
             return {**self.detay(kosu_id), "notlar": notlar}
         except Exception:  # noqa: BLE001 - yanıt biçimi docs/akis-motoru.md'de: en az run_id, durum, notlar
@@ -514,14 +516,48 @@ class Motor:
         except Exception:  # noqa: BLE001
             self._kuyruk_refleri = None
         try:
+            self._bekleyen_iadeleri_uygula()
             for k in self.depo.kosular(durumlar=akis_db.AKTIF_KOSU, sinir=MAKS_AKTIF_KOSU * 4):
                 try:
                     self._kosu_isle(k["id"])
                 except Exception as e:  # noqa: BLE001 - bir koşunun hatası diğerlerini durdurmasın
-                    ortak.olay_yaz({"tur": "akis", "olay": "motor_hatasi", "run_id": k["id"],
-                                    "neden": f"{type(e).__name__}: {akis_veri.maskele(str(e))[:200]}"})
+                    self._motor_hatasi(k["id"], e)
         finally:
             self._kuyruk_refleri = None
+
+    MOTOR_HATASI_ARALIK_SN = 600
+
+    def _motor_hatasi(self, kosu_id, e):
+        """Koşu+hata türü başına en çok 10 dakikada bir olay (sürekli bozuk koşu her 5 sn'de satır yazmasın).
+        Olay yazılamazsa sessiz: yalıtım bozulmasın."""
+        anahtar = (kosu_id, type(e).__name__)
+        son = self.__dict__.setdefault("_motor_hatasi_son", {})
+        if anahtar in son and 0 <= self.saat() - son[anahtar] < self.MOTOR_HATASI_ARALIK_SN:
+            return
+        son[anahtar] = self.saat()
+        try:
+            ortak.olay_yaz({"tur": "akis", "olay": "motor_hatasi", "run_id": kosu_id,
+                            "neden": f"{type(e).__name__}: {akis_veri.maskele(str(e))[:200]}"})
+        except Exception:  # noqa: BLE001
+            import sys
+            sys.stderr.write(f"akis motoru: {kosu_id} {type(e).__name__}\n")
+
+    def _islem_iade(self, kosu_id, iade, metin):
+        with self._islem() as b:
+            kosu = self._kosu_al(b, kosu_id)
+            alan = {"tahmini_usd": max(kosu["tahmini_usd"] - iade, 0)}
+            if metin is not None:
+                alan["neden"] = json.dumps({"sebep": "operator", "metin": metin}, ensure_ascii=False)
+            self._kosu_yaz(b, kosu_id, **alan)
+
+    def _bekleyen_iadeleri_uygula(self):
+        bekleyen = self.__dict__.setdefault("_bekleyen_iadeler", {})
+        for kosu_id, iade in list(bekleyen.items()):
+            try:
+                self._islem_iade(kosu_id, iade, None)
+                bekleyen.pop(kosu_id, None)
+            except Exception:  # noqa: BLE001 - sonraki turda yeniden
+                pass
 
     def _kuyrukta(self, ref):
         refler = getattr(self, "_kuyruk_refleri", None)
@@ -1126,7 +1162,7 @@ class Motor:
                                cikti_json=json.dumps({"karar": "evet", "not": "Geliştirme kartından (ofis girişiyle) onaylandı"}))
                 self._olay(b, kosu, "onay_verildi", adim=adim["id"], durum="evet", iterasyon=r["iterasyon"], kaynak="kart")
                 self._gecisler_uygula(b, kosu, tanim, adim["sonraki"], adim["id"])
-            elif onay == "hayir" or (onay != "evet" and durum in ("hazir", "calisiyor", "takildi", "reddedildi")):
+            elif onay == "hayir" or durum in ("takildi", "reddedildi") or (onay != "evet" and durum in ("hazir", "calisiyor")):
                 # 'onay: evet' + kayıt yok: ret sayılmaz, aşağıda beklenir (yayın sürüyor ya da kapısız yazıldı)
                 self._adim_yaz(b, kosu["id"], adim["id"], durum="basarisiz",
                                cikti_json=json.dumps({"karar": "hayir", "not": f"kart reddedildi (durum {durum})"}))

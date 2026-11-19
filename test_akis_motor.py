@@ -571,6 +571,61 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         self.assertIn(ref, self.ortam.kuyruk)
         self.assertEqual(self.adim(k, "a")["denemeler"][0]["durum"], "kuyrukta")
 
+    def test_bitti_ve_ret_ret_yolunu_izler(self):
+        tanimlar, _ = akis_tanim.tanimlari_yukle()
+        self.tanimlar.update(tanimlar)
+        k = self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"})["run_id"]
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"plan": "p", "risk": "dusuk", "yetki_gerekli": False}) + '</akis_cikti>')
+        self.m.tur()
+        self.ortam.hat_uat("G0.md")
+        self.m.tur()
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"karar": "gecti", "bulgular": "-"}) + '</akis_cikti>')
+        self.m.tur()
+        self.m.tur()
+        self.ortam.gorevler["G0.md"].update({"durum": "bitti", "onay": "hayir"})
+        self.m.tur()
+        self.assertEqual(self.adim(k, "uat_onayi")["durum"], "basarisiz")
+
+    def test_surekli_hata_veren_kosu_olay_yagmuru_yapmaz(self):
+        self.tanim(taban_tanim())
+        k = self.m.baslat("deneme", {"konu": "x"})["run_id"]
+        with mock.patch.object(self.m, "_kosu_isle", side_effect=KeyError("adim")), \
+                mock.patch.object(ortak, "olay_yaz") as yaz:
+            for _ in range(10):
+                self.m.tur()
+            self.assertEqual(yaz.call_count, 1)
+            self.saat[0] += 601
+            self.m.tur()
+            self.assertEqual(yaz.call_count, 2)
+
+    def test_olay_yazilamazsa_tur_ve_iptal_bozulmaz(self):
+        self.tanim(taban_tanim())
+        k1 = self.m.baslat("deneme", {"konu": "x"})["run_id"]
+        k2 = self.m.baslat("deneme", {"konu": "y"})["run_id"]
+        asil = self.m._kosu_isle
+        with mock.patch.object(self.m, "_kosu_isle", side_effect=lambda r: (_ for _ in ()).throw(KeyError()) if r == k1 else asil(r)), \
+                mock.patch.object(ortak, "olay_yaz", side_effect=OSError("disk dolu")):
+            self.m.tur()
+        self.assertEqual(len(self.ortam.baslatilan), 1)       # k2 yine işlendi
+        with mock.patch.object(self.m, "_islem_iade", side_effect=OSError("db meşgul")), \
+                mock.patch.object(ortak, "olay_yaz", side_effect=OSError("disk dolu")):
+            d = self.m.iptal(k2)                               # 500 değil
+        self.assertEqual(d["durum"], "iptal")
+
+    def test_iptal_iadesi_yazilamazsa_sonra_uygulanir(self):
+        self.tanim(taban_tanim())
+        k = self.m.baslat("deneme", {"konu": "x"})["run_id"]
+        self.ortam.davranis = ["kuyruk"]
+        self.m.tur()
+        self.assertEqual(self.detay(k)["tahmini_usd"], 1.0)
+        with mock.patch.object(self.m, "_islem_iade", side_effect=OSError("db meşgul")):
+            self.m.iptal(k)
+        self.assertEqual(self.detay(k)["tahmini_usd"], 1.0)
+        self.m.tur()                                          # bekleyen iade uygulanır
+        self.assertEqual(self.detay(k)["tahmini_usd"], 0)
+
     def test_yayin_kaniti_eksikse_neden_gorunur(self):
         """Son inceleme 6: 'durum: bitti' ama kanıt yok (ör. etiket başka commit'te) → ayrı olay, onay verilmez."""
         tanimlar, _ = akis_tanim.tanimlari_yukle()
@@ -597,7 +652,7 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         self.m.tur()
         self.assertEqual(self.adim(k, "uat_onayi")["durum"], "onay_bekliyor")   # reddedilmez, beklenir
         self.assertTrue(any(o["olay"] == "onay_kaydi_yok" for o in self.ortam.olaylar))
-        self.ortam.gorevler["G0.md"].update({"durum": "bitti", "onay": "hayir"})  # 'bitti' + ret: ret yolu öncelikli
+        self.ortam.gorevler["G0.md"].update({"durum": "takildi", "onay": "evet"})   # takıldı: kayıtsız 'evet' olsa da ret
         self.m.tur()
         self.assertEqual(self.adim(k, "uat_onayi")["durum"], "basarisiz")
 

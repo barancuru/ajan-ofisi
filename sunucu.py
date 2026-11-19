@@ -436,7 +436,8 @@ def _akis_alarm_zamani_geldi():
     acilis, simdi = _alarm_saati()
 
     def yakin(kayit):
-        return kayit is not None and kayit[0] == acilis and 0 <= simdi - kayit[1] < AKIS_ALARM_ARALIK_SN
+        return (kayit is not None and acilis != "?" and kayit[0] == acilis
+                and 0 <= simdi - kayit[1] < AKIS_ALARM_ARALIK_SN)
     try:
         with open(yol, encoding="utf-8") as f:
             parca = f.read().split()

@@ -125,19 +125,30 @@ class Depo:
             try:
                 yield b
             except BaseException:
-                b.execute("ROLLBACK")
+                self._geri_al(b)
                 raise
             try:
                 b.execute("COMMIT")
             except BaseException:
                 # COMMIT başarısızsa bağlantı açık işlemde kalmamalı: sonraki islem() çağrıları bu işleme "katılıp"
                 # hiç commit etmezdi (sessiz durum kaybı)
-                if b.in_transaction:
-                    try:
-                        b.execute("ROLLBACK")
-                    except sqlite3.Error:
-                        pass
+                self._geri_al(b)
                 raise
+
+    def _geri_al(self, b):
+        """ROLLBACK; o da başarısız olur ve işlem açık kalırsa bağlantı bırakılır (sonraki çağrı yenisini açar).
+        Asıl istisnayı gölgelemez."""
+        try:
+            if b.in_transaction:
+                b.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass
+        if getattr(b, "in_transaction", False):
+            try:
+                b.close()
+            except Exception:  # noqa: BLE001
+                pass
+            self._yerel.b = None
 
     def migrate(self):
         b = self.baglanti()

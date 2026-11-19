@@ -249,6 +249,32 @@ class DepoTest(unittest.TestCase):
         self.assertIsNotNone(dp2.kosu("r2"))
         self.assertIsNone(dp2.kosu("r1"))
 
+    def test_commit_ve_rollback_hatasinda_baglanti_yenilenir(self):
+        dp = akis_db.Depo(self.yol)
+        gercek = dp.baglanti()
+
+        class IkisiKiran:
+            @property
+            def in_transaction(self):
+                return gercek.in_transaction
+
+            def execute(self, sql, *a):
+                if sql in ("COMMIT", "ROLLBACK"):
+                    raise sqlite3.OperationalError("disk I/O error")
+                return gercek.execute(sql, *a)
+
+            def __getattr__(self, ad):
+                return getattr(gercek, ad)
+        dp._yerel.b = IkisiKiran()
+        with self.assertRaises(sqlite3.OperationalError):
+            with dp.islem() as b:
+                pass
+        self.assertIsNone(getattr(dp._yerel, "b", None))       # bozuk bağlantı bırakıldı
+        with dp.islem() as b:                                  # yeni bağlantı commit eder
+            b.execute("INSERT INTO kosular(id, akis_id, akis_surum, tanim_ozet, tanim_json, girdi_json, durum, "
+                      "olusturma_ts, guncelleme_ts) VALUES ('r3','x',1,'o','{}','{}','calisiyor',0,0)")
+        self.assertIsNotNone(akis_db.Depo(self.yol).kosu("r3"))
+
     def test_islem_geri_alinir(self):
         dp = akis_db.Depo(self.yol)
         with self.assertRaises(RuntimeError):
