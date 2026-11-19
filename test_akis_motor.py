@@ -93,6 +93,9 @@ class SahteOrtam:
     def arg_dosyasi_var(self, ref):
         return ref in self.arglar
 
+    def hat_maliyeti(self, dosya, baslangic_ts):
+        return getattr(self, "hat_maliyetleri", {}).get(dosya)
+
     def ajan_durdur(self, ref):
         self.durdurulan = getattr(self, "durdurulan", []) + [ref]
         return getattr(self, "durdur_sonucu", (False, "süreç yok"))
@@ -916,6 +919,43 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         self.m.tur()
         self.assertEqual(hat(), {"durum": "?", "deneme": None})
         self.assertEqual(self.adim(k, "uygulama")["durum"], "calisiyor")   # ara durum karar vermez
+
+    def test_hat_tahmini_gercek_maliyetle_degisir(self):
+        """V1.1 #1: hat kimliği varsa 6 $ tahmin gerçekleşenle değişir; yoksa tahmin kalır (fail-closed)."""
+        tanimlar, _ = akis_tanim.tanimlari_yukle()
+        self.tanimlar.update(tanimlar)
+        k = self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"})["run_id"]
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"plan": "p", "risk": "dusuk", "yetki_gerekli": False}) + '</akis_cikti>', maliyet=0.1)
+        self.m.tur()
+        once = self.detay(k)
+        self.assertGreaterEqual(once["tahmini_usd"], 6)
+        self.ortam.hat_maliyetleri = {"G0.md": 0.00525}
+        self.ortam.hat_uat("G0.md")
+        self.m.tur()
+        d = self.detay(k)
+        self.assertAlmostEqual(d["maliyet_usd"], 0.1 + 0.00525, places=4)
+        uyg = self.adim(k, "uygulama")["denemeler"][-1]
+        self.assertAlmostEqual(uyg["maliyet_usd"], 0.00525)
+        olay = [o for o in d["olaylar"] if o["tur"] == "hat_maliyeti"]
+        self.assertEqual((olay[0]["cost_usd"], olay[0]["tahmini_usd"]), (0.00525, 6.0))
+        # 6 $ serbest kaldı; aynı turda başlayan sonraki ajan adımının tahmini (1,5 $) eklenmiş olabilir
+        self.assertLess(d["tahmini_usd"], once["tahmini_usd"] - 4)
+
+    def test_hat_kimligi_yoksa_tahmin_kalir(self):
+        tanimlar, _ = akis_tanim.tanimlari_yukle()
+        self.tanimlar.update(tanimlar)
+        k = self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"})["run_id"]
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"plan": "p", "risk": "dusuk", "yetki_gerekli": False}) + '</akis_cikti>', maliyet=0.1)
+        self.m.tur()
+        once = self.detay(k)["tahmini_usd"]
+        self.ortam.hat_uat("G0.md")
+        self.m.tur()
+        d = self.detay(k)
+        self.assertAlmostEqual(d["maliyet_usd"], 0.1, places=4)
+        self.assertGreaterEqual(d["tahmini_usd"], 6)
+        self.assertIsNone(self.adim(k, "uygulama")["denemeler"][-1]["maliyet_usd"])
 
     def test_baska_kartin_onayi_odunc_alinamaz(self):
         """Kart dosyası UAT sonrası başka (onaylı, mühürlü, daha yeni) bir sürüme çevrilirse onay kaydı sayılmaz."""

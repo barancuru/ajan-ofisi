@@ -84,8 +84,11 @@ tanımın tamamı kuyruk kapasitesini tüketmez.
   (`dongu_siniri`, yeniden denenemez) ya da fail.
 - Koşu başına `max_ajan_cagrisi`, `max_sure_sn`, `max_maliyet_usd`. Maliyet her ajan/hat adımından **önce** kontrol edilir:
   gerçekleşen maliyet + açık tahminler + sıradaki tahmin. Ajan tahmini `tahmini_usd`, yoksa ajanın `butce_usd`'si
-  (opus'ta 2 katı). Hat turu varsayılan 6 $ (sonnet 3 $ tavan + hattın kendi düzeltme turu). Hat maliyeti
-  `olaylar.jsonl`'e dönmediği için tahmin olarak kalır. Sınır aşılacaksa adım başlamaz, koşu `inceleme` (`butce`) olur.
+  (opus'ta 2 katı). Hat turu varsayılan 6 $ (sonnet 3 $ tavan + hattın kendi düzeltme turu). Hat turu bitince
+  (UAT, takıldı ya da ret) tahmin, hattın göreve bağladığı gerçek maliyetle değişir (V1.1): beyin `kos()` görev
+  argümanlı koşuda `~/.local/state/beyin/kosular/<ts>-<is>.gorev.json` yazar (`gorev`, yuvarlanmamış `maliyet_usd`,
+  `ts`); motor deneme başlangıcından sonraki kayıtları toplar (`hat_maliyeti` olayı). Kayıt yoksa (eski hat, Codex)
+  tahmin gerçekleşmiş sayılır. Sınır aşılacaksa adım başlamaz, koşu `inceleme` (`butce`) olur.
 
 ## Hata politikası ve retry
 

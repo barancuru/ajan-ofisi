@@ -229,6 +229,27 @@ class HatAdaptoruTest(OfisTabani):
                 kartlar = {g["dosya"]: g for g in sunucu.gelistirme_yaniti()["gorevler"]}
             self.assertEqual(kartlar[dosya]["akis"], {"durum": "bilinmiyor"})
 
+    def test_hat_maliyeti_kimlik_dosyalarindan(self):
+        """V1.1 #1: beyin kos() <ts>-<is>.gorev.json biçimi; yalnız bu görev, başlangıçtan sonra, geçerli sayı."""
+        d = os.path.join(self.d, "beyin-kosular")
+        os.makedirs(d)
+        t0 = time.time()
+        kayitlar = {"20261119-101010-11-gelistir.gorev.json": {"gorev": "R.md", "maliyet_usd": 0.00525, "ts": t0 + 5},
+                    "20261119-101011-12-teshis.gorev.json": {"gorev": "R.md", "maliyet_usd": 0.00525, "ts": t0 + 9},
+                    "20261119-101012-13-gelistir.gorev.json": {"gorev": "Baska.md", "maliyet_usd": 9, "ts": t0 + 5},
+                    "20261119-101013-14-gelistir.gorev.json": {"gorev": "R.md", "maliyet_usd": 9, "ts": t0 - 100},
+                    "20261119-101014-15-gelistir.gorev.json": {"gorev": "R.md", "maliyet_usd": True, "ts": t0 + 5},
+                    "yabanci.gorev.json": {"gorev": "R.md", "maliyet_usd": 9, "ts": t0 + 5}}
+        for ad, v in kayitlar.items():
+            with open(os.path.join(d, ad), "w") as f:
+                json.dump(v, f)
+        with mock.patch.object(akis_ofis.OfisOrtami, "HAT_KOSU_DIZINI", d):
+            self.assertAlmostEqual(self.ortam.hat_maliyeti("R.md", t0), 0.0105)
+            self.assertIsNone(self.ortam.hat_maliyeti("Yok.md", t0))
+            self.assertIsNone(self.ortam.hat_maliyeti("../R.md", t0))
+        with mock.patch.object(akis_ofis.OfisOrtami, "HAT_KOSU_DIZINI", os.path.join(self.d, "yok")):
+            self.assertIsNone(self.ortam.hat_maliyeti("R.md", t0))
+
     def test_reddet_yalniz_uat_ve_onaysiz(self):
         with mock.patch.object(sunucu, "gelistirme_projeleri", lambda: ["homeos"]):
             dosya = self.ortam.gelistirme_yaz("homeos", "Rapor", "x", "sonnet", REF)

@@ -1657,6 +1657,8 @@ class Motor:
             if adim["tur"] == "gelistirme_gorevi" and durum == "bitti":
                 if not self._deneme_bitir(b, deneme_id, "basarili", siniflama="basarili"):
                     return
+                self._hat_maliyeti_uygula(b, kosu_id, d)
+                kosu = self._kosu_al(b, kosu_id)
                 if adim["mod"] == "duzeltme":
                     # yeni paket (sha, uyarı) hedef adımın çıktısı olur: {{adim.uygulama.*}} ve kapılar güncel paketi görür
                     self._adim_yaz(b, kosu_id, adim["hedef_adim"], cikti_json=json.dumps(veri, ensure_ascii=False))
@@ -1669,10 +1671,31 @@ class Motor:
             if not self._deneme_bitir(b, deneme_id, "bilinmeyen" if sinif == "bilinmeyen" else "basarisiz",
                                       siniflama=sinif, hata=str(veri)[:300]):
                 return
+            if adim["tur"] == "gelistirme_gorevi":
+                self._hat_maliyeti_uygula(b, kosu_id, d)   # takılan/reddedilen tur da harcandı
+                kosu = self._kosu_al(b, kosu_id)
             if adim["tur"] == "agent_task" and sinif == "bilinmeyen":
                 kaldir.append(d["ref"])   # bu işlem kapattı; temizlik commit'ten sonra
             self._adim_hatasi(b, kosu, tanim, adim, sinif, veri)
         self._uyandir.set()
+
+    def _hat_maliyeti_uygula(self, b, kosu_id, d):
+        """V1.1 #1: biten hat denemesinin tahmini (6 $/tur) hattın göreve bağladığı gerçek maliyetle değişir.
+        Kimlik yoksa tahmin gerçekleşmiş sayılır (eski davranış; bütçe tavanı fail-closed kalır)."""
+        t = json.loads(d["tutamac_json"] or "{}")
+        try:
+            m = self.ortam.hat_maliyeti(t.get("dosya"), d["baslangic_ts"]) if t.get("dosya") else None
+        except Exception:  # noqa: BLE001 - maliyet okunamazsa tahmin kalır
+            m = None
+        if m is None:
+            return None
+        kosu = self._kosu_al(b, kosu_id)
+        b.execute("UPDATE denemeler SET maliyet_usd=? WHERE id=?", (m, d["id"]))
+        self._kosu_yaz(b, kosu_id, maliyet_usd=kosu["maliyet_usd"] + m,
+                       tahmini_usd=max(kosu["tahmini_usd"] - (d["tahmini_usd"] or 0), 0))
+        self._olay(b, self._kosu_al(b, kosu_id), "hat_maliyeti", adim=d["adim_id"], deneme=d["deneme"], durum="gercek",
+                   iterasyon=d["iterasyon"], cost_usd=m, tahmini_usd=d["tahmini_usd"])
+        return m
 
     @staticmethod
     def _aralar(ref):

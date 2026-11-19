@@ -214,6 +214,38 @@ class OfisOrtami:
                     pass
         return cikti
 
+    HAT_KOSU_DIZINI = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "beyin", "kosular")
+    MALIYET_KIMLIGI = re.compile(r"^\d{8}-\d{6}-\d{1,10}-[a-z]{1,30}\.gorev\.json$")
+
+    def hat_maliyeti(self, dosya, baslangic_ts):
+        """V1.1 #1: hattın bu görev için baslangic_ts'den sonra yaptığı koşuların gerçek maliyeti (USD) ya da None
+        (kimlik yok: eski hat, Codex ya da koşu olmadı → motor tahmini korur). Kaynak: hattın KOSU_DIZIN'deki
+        <ts>-<is>.gorev.json kayıtları (~/beyin dışı; ajan yazamaz)."""
+        if not isinstance(dosya, str) or "/" in dosya or not dosya.endswith(".md"):
+            return None
+        try:
+            adlar = os.listdir(self.HAT_KOSU_DIZINI)
+        except OSError:
+            return None
+        toplam, bulundu = 0.0, False
+        for ad in adlar:
+            if not self.MALIYET_KIMLIGI.match(ad):
+                continue
+            yol = os.path.join(self.HAT_KOSU_DIZINI, ad)
+            try:
+                if os.lstat(yol).st_mtime < baslangic_ts - 60:
+                    continue
+            except OSError:
+                continue
+            v = akis_motor._json_oku(yol) or {}
+            m, ts = v.get("maliyet_usd"), v.get("ts")
+            if v.get("gorev") != dosya or not isinstance(ts, (int, float)) or ts < baslangic_ts:
+                continue
+            if isinstance(m, bool) or not isinstance(m, (int, float)) or not 0 <= m < 1000:
+                continue
+            toplam, bulundu = toplam + float(m), True
+        return round(toplam, 6) if bulundu else None
+
     def ajan_durdur(self, ref):
         """V1.1 #7: çalışan workflow ajan koşusuna iptal sinyali (SIGUSR1). Süreç kosucu'nun başlangıç işaretinden
         bulunur ve /proc'tan doğrulanır: komut satırı bu koşunun arg dosyasıyla kosucu.py olmalı (PID yeniden

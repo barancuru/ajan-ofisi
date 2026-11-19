@@ -6,7 +6,7 @@
 > ajan-ofisi oto-onaylı olabilir. Bir kalem seçilince Geliştirme sekmesinden (ya da elle) görev açılır.
 
 ## V1.1 (öncelikli)
-1. **Hat maliyet eşlemesi** (kullanıcı kararı 2026-11-19: V1.1). Koşu başına gerçek maliyet var
+1. ~~**Hat maliyet eşlemesi**~~ — V1.1: beyin dalı `hat-maliyet-esleme` (`adc0346`, `maliyet_kimligi_yaz`) + ofis `hat_maliyeti`; kabul: iki haiku turu 0,0105 $ (tahmin 12 $): (kullanıcı kararı 2026-11-19: V1.1). Koşu başına gerçek maliyet var
    (`~/.local/state/beyin/kosular/<zaman>-gelistir.json` → `total_cost_usd`, `.cache/kayit-tam.jsonl` → `maliyet`) ama
    görev yolu yok; paralel hatlarda göreve bağlanamaz. Öneri: `~/beyin/bin/calistir` `kos()` `kayit`'e ve JSON yanına
    `gorev` (4. argüman, görev dosyası) yazsın; adaptör bunu okuyup tahmini (6 $/tur) gerçekleşenle değiştirsin.
