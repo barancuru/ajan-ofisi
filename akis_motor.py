@@ -33,7 +33,7 @@ MAKS_ISTEM = ortak.MAKS_GIRDI
 UYANMA_AKTIF_SN = 5
 # Bu incelemelerde "yeniden dene" aynı sonucu verir ya da sınırı aşar. 'tanim' (tanım @inceleme'ye yönlendirdi) ayrıca
 # kaynak adıma göre karar verilir: yan etkisiz adım yeniden denenebilir, yan etkili adım (hat görevi, yazabilen ajan) değil.
-YENIDEN_DENENEMEZ = ("dongu_siniri", "butce", "sure", "erken_onay", "yayin_takildi")
+YENIDEN_DENENEMEZ = ("dongu_siniri", "butce", "sure", "erken_onay")   # yayin_takildi denenebilir: onay adımı yan etkisiz
 UYANMA_BOS_SN = 30
 DEGER_DESENLERI = {"surum": re.compile(r"^[0-9.]{1,24}$"), "dal": re.compile(r"^beyin/[a-z0-9-]{1,80}$"),
                    "sha256": re.compile(r"^[0-9a-f]{64}$")}
@@ -1172,10 +1172,13 @@ class Motor:
             # → onay; (4) 'evet' olmayan hazir/calisiyor (kart geri döndü) → ret; (5) aksi hâlde beklenir.
             kesin_red = onay == "hayir" or durum == "reddedildi"
             kayit = not kesin_red and any(self.ortam.canli_onay_var(izlenen["proje"], s, h) for s, h in adaylar)
-            if durum == "takildi" and kayit:
+            # takılma kararı yalnız motorun kaydettiği mühürlü paketle: kart dosyası kapısız yazılabilir
+            paket_kaydi = not kesin_red and self.ortam.canli_onay_var(izlenen["proje"], paket.get("surum"), paket.get("sha256"))
+            if durum == "takildi" and paket_kaydi:
+                self._adim_yaz(b, kosu["id"], adim["id"], durum="inceleme", hata="yayın takıldı")
                 self._incelemeye_al(b, kosu, "yayin_takildi", "kart kapıdan onaylandı ama yayın takıldı; Geliştirme "
-                                    "sekmesinden yeniden dene ya da iptal et, sonra bu koşuyu başarısız say/iptal et",
-                                    adim["id"])
+                                    "sekmesinden yeniden dene. Yayın çıkınca bu koşuda 'Yeniden dene' onayı yeniden "
+                                    "değerlendirir; vazgeçilirse başarısız say ya da iptal et", adim["id"])
                 return
             red = kesin_red or durum == "takildi" or (onay != "evet" and durum in ("hazir", "calisiyor"))
             kayitli = not red and (kayit or (

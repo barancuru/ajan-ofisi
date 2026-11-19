@@ -139,7 +139,8 @@ kosucu sonucu `son: false` yazar; motor aynı denemeyi beklemeyi sürdürür, ke
 - Motor turunda bir koşunun uzlaştırması hata verirse `motor_hatasi` olayı (koşu + hata türü başına 10 dakikada bir)
   yazılır, diğer koşular işlenmeye devam eder. Aynı türden farklı bir hata o 10 dakika içinde ayrıca görünmez.
 - İzlenen dağıtım onayı karar sırası: `onay: hayir`/`reddedildi` → ret; kapıdan onaylı (canlı kayıt var) ama
-  `takildi` → manual_review (`yayin_takildi`, yeniden denenmez: kart Geliştirme sekmesinden yönetilir); kayıtsız
+  `takildi` → manual_review (`yayin_takildi`; kart Geliştirme sekmesinden yeniden denenir, yayın çıkınca koşuda
+  "Yeniden dene" onayı yeniden değerlendirir; karar yalnız motorun kaydettiği mühürlü paketle); kayıtsız
   `takildi` → ret; kayıt ya da yayın kanıtı → onay; `evet` olmayan `hazir`/`calisiyor` → ret; aksi hâlde beklenir.
   SQLite COMMIT hata verirse işlem geri alınır (bağlantı açık işlemde kalmaz).
 - `POST /api/akis/iptal` iptal commit edildikten sonra hata vermez; ayrıntı okunamazsa yanıt kısmidir:

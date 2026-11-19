@@ -700,7 +700,33 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         self.m.tur()
         d = self.detay(k)
         self.assertEqual((d["durum"], d["neden"]["sebep"]), ("inceleme", "yayin_takildi"))
-        self.assertNotEqual(self.adim(k, "uat_onayi")["durum"], "basarisiz")
+        self.assertEqual(self.adim(k, "uat_onayi")["durum"], "inceleme")
+        # operatör kartı Geliştirme sekmesinden yeniden denedi, yayın çıktı: koşu devam edebilmeli
+        self.ortam.gorevler["G0.md"].update({"durum": "bitti", "onay": "evet"})
+        self.ortam.yayinlar.add(("homeos", "0.10.1", "beyin/1118-x", "a" * 64))
+        self.m.devam(k, "yeniden_dene")
+        self.m.tur()
+        self.m.tur()
+        self.assertEqual(self.detay(k)["durum"], "basarili")
+
+    def test_takilma_karari_kart_dosyasina_degil_muhurlu_pakete_bakar(self):
+        """Kayıtsız (kapıdan geçmemiş) kart, dosyasındaki sürüm/sha eski bir onay kaydına uysa da ret alır."""
+        tanimlar, _ = akis_tanim.tanimlari_yukle()
+        self.tanimlar.update(tanimlar)
+        k = self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"})["run_id"]
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"plan": "p", "risk": "dusuk", "yetki_gerekli": False}) + '</akis_cikti>')
+        self.m.tur()
+        self.ortam.hat_uat("G0.md")
+        self.m.tur()
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"karar": "gecti", "bulgular": "-"}) + '</akis_cikti>')
+        self.m.tur()
+        self.m.tur()
+        self.ortam.onaylar.add(("homeos", "0.9.0", "e" * 64))          # eski sürümün kaydı
+        self.ortam.gorevler["G0.md"].update({"durum": "takildi", "onay": "evet", "surum": "0.9.0", "sha256": "e" * 64})
+        self.m.tur()
+        self.assertEqual(self.adim(k, "uat_onayi")["durum"], "basarisiz")
 
     def test_iptal_kuyruk_temizligi_db_commit_sonrasi(self):
         self.tanim(taban_tanim())
