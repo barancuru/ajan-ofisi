@@ -1,0 +1,30 @@
+{
+  "sema_surumu": 1,
+  "id": "ornek-arastirma-ozeti",
+  "surum": 2,
+  "ad": "Örnek: araştırma ve özet",
+  "aciklama": "Salt okunur iki ajan adımı, koşul ve genel onay. Hat ve sunucu yok; motoru denemek için.",
+  "girdiler": {"konu": {"tur": "metin", "maks": 500}},
+  "izinli_ajanlar": ["akis-okuyucu"],
+  "sinirlar": {"max_ajan_cagrisi": 4, "max_sure_sn": 7200, "max_maliyet_usd": 4},
+  "baslangic": "arastir",
+  "adimlar": [
+    {
+      "id": "arastir", "tur": "agent_task", "ad": "Araştır", "ajan": "akis-okuyucu", "yan_etkili": false,
+      "gorev": "Beyin notlarında şu konuyu ara ve kısa bul (dosya yazma, not ekleme yok): {{girdi.konu}}",
+      "cikti_alanlari": {"bulgu": {"tur": "metin", "maks": 2000}, "kaynak_var": {"tur": "evet_hayir"}},
+      "hata": {"eylem": "retry", "max_deneme": 2, "geri_cekilme_sn": 30},
+      "sonraki": "kaynak_mi"
+    },
+    {"id": "kaynak_mi", "tur": "condition", "kosullar": [{"alan": "adim.arastir.kaynak_var", "op": "eq", "deger": true}], "dogru": "ozetle", "yanlis": "@inceleme"},
+    {
+      "id": "ozetle", "tur": "agent_task", "ad": "Özetle", "ajan": "akis-okuyucu", "yan_etkili": false,
+      "gorev": "Aşağıdaki bulguyu 5 maddede özetle; dosya yazma: {{adim.arastir.bulgu}}",
+      "cikti_alanlari": {"ozet": {"tur": "metin", "maks": 1500}},
+      "sonraki": "onay"
+    },
+    {"id": "onay", "tur": "approval", "ad": "Özeti kabul et", "kategori": "genel", "mesaj": "Özet uygun mu?", "sonraki": "son", "reddedilirse": "son_red"},
+    {"id": "son", "tur": "end", "sonuc": "basarili"},
+    {"id": "son_red", "tur": "end", "sonuc": "basarisiz"}
+  ]
+}

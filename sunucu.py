@@ -14,6 +14,9 @@ import secrets
 import shutil
 import subprocess
 import sys
+import contextlib
+import fcntl
+import tempfile
 import threading
 import time
 from datetime import datetime, timedelta
@@ -28,6 +31,8 @@ import token_sayac  # noqa: E402
 import model_kullanim  # noqa: E402
 import zamanlayici  # noqa: E402
 import ykb  # noqa: E402
+import akis_motor  # noqa: E402
+import akis_ofis  # noqa: E402
 
 HOST = "127.0.0.1"
 ILK_PORT = int(os.environ.get("OFIS_PORT", "8796"))
@@ -204,7 +209,8 @@ def son_is_yaniti(ajan_id, kosu_id=None):
             "durum": d.get("durum")}
 
 
-def gorev_baslat(ajan_id, etiket=None, prompt=None, kaynak="buton", ekler=None, ust=None, havuz=False, model=None):
+def gorev_baslat(ajan_id, etiket=None, prompt=None, kaynak="buton", ekler=None, ust=None, havuz=False, model=None,
+                 akis_ref=None):
     _, tablo = ortak.ajanlari_yukle()
     ajan = tablo.get(ajan_id)
     if not ajan or ajan_id in ortak.ATANAMAZ:  # YKB yalnız /api/ykb'den; CEO/zamanlayıcı/kuyruk başlatamaz
@@ -221,20 +227,23 @@ def gorev_baslat(ajan_id, etiket=None, prompt=None, kaynak="buton", ekler=None, 
     if len(prompt) > ortak.MAKS_GIRDI:
         raise IstekHatasi(413, f"prompt en fazla {ortak.MAKS_GIRDI} karakter")
     with BASLATMA_KILIDI, ortak.baslatma_kilidi():
-        return _baslat_kilitli(ajan, etiket, prompt, kaynak, ekler, ust, havuz, model=model)
+        return _baslat_kilitli(ajan, etiket, prompt, kaynak, ekler, ust, havuz, model=model, akis_ref=akis_ref)
 
 
-def _baslat_kilitli(ajan, etiket, prompt, kaynak, ekler, ust, havuz, kuyruktan=False, model=None, limit_deneme=None):
+def _baslat_kilitli(ajan, etiket, prompt, kaynak, ekler, ust, havuz, kuyruktan=False, model=None, limit_deneme=None,
+                    akis_ref=None):
     """BASLATMA_KILIDI + baslatma_kilidi altında çağrılır. havuz=True: ajan meşgulse çift koşu açılmaz;
-    ALT_AJANLI ajanda boş alt yuvada (derinlik 1) koşar, yoksa kuyruğa alınır."""
+    ALT_AJANLI ajanda boş alt yuvada (derinlik 1) koşar, yoksa kuyruğa alınır.
+    akis_ref: workflow deneme anahtarı (akis_motor); kosucu buna başlangıç/sonuç işareti yazar."""
     ajan_id = ajan["id"]
+    akis_ref = akis_ref if isinstance(akis_ref, str) and akis_motor.REF_DESENI.match(akis_ref) else None
     durum_id = ajan_id
     if ortak.ajan_mesgul(ajan_id):
         durum_id = alt_yuva(ajan_id) if havuz else None
         if durum_id is None:
             if not havuz or kuyruktan:
                 raise IstekHatasi(409, "ajan zaten çalışıyor")
-            return kuyruga_ekle(ajan_id, etiket, prompt, kaynak, ekler, ust, model=model)
+            return kuyruga_ekle(ajan_id, etiket, prompt, kaynak, ekler, ust, model=model, akis_ref=akis_ref)
     kosu_id = f"{datetime.now():%Y-%m-%d-%H%M%S}-{durum_id}" + (f"-{secrets.token_hex(2)}" if durum_id != ajan_id else "")
     prompt = eklerle_prompt(prompt, gorselleri_kaydet(ekler, ajan_id, kosu_id))
     arg_yolu = os.path.join(ortak.KOSU_DIZINI, f"{kosu_id}.arg.json")
@@ -244,7 +253,8 @@ def _baslat_kilitli(ajan, etiket, prompt, kaynak, ekler, ust, havuz, kuyruktan=F
                    **({"model": model} if model is not None else {}),  # kosucu yalnız beyaz listeden kabul eder
                    **({"durum_id": durum_id} if durum_id != ajan_id else {}),
                    **({"ust_kosu": ust} if ust and KOSU_ID_DESENI.match(ust) else {}),
-                   **({"limit_deneme": limit_deneme} if limit_deneme else {})}, f, ensure_ascii=False)
+                   **({"limit_deneme": limit_deneme} if limit_deneme else {}),
+                   **({"akis_ref": akis_ref} if akis_ref else {})}, f, ensure_ascii=False)
     ortak.durum_yaz(durum_id, {"durum": "basliyor", "kosu_id": kosu_id, "pid": None,
                                "baslangic_ts": time.time()})
     try:
@@ -269,7 +279,7 @@ MAKS_ALT = 2
 MAKS_KUYRUK = 20
 MAKS_KUYRUK_PROMPT = (ortak.MAKS_GIRDI + MAKS_EK_KARAKTER * 2 + 4000  # ekler gömülü hâliyle
                       + kosucu.MAKS_ONCEKI_OZET + 2000)  # limit sonrası yeniden denemenin önceki-deneme başlığı
-KUYRUK_KAYNAKLARI = ("buton", "ceo", "tekrar")
+KUYRUK_KAYNAKLARI = ("buton", "ceo", "tekrar", "akis")
 KUYRUK_ID_DESENI = re.compile(r"^q[0-9a-f]{10}$")
 KUYRUK_UYANMA_SN = 20
 
@@ -315,7 +325,9 @@ def _kuyruk_dogrula(isler):
             and (k.get("ust") is None or (isinstance(k.get("ust"), str) and KOSU_ID_DESENI.match(k["ust"])))
             and (k.get("sonra") is None or (isinstance(k.get("sonra"), int) and not isinstance(k.get("sonra"), bool)))
             and (k.get("limit_deneme") is None
-                 or (isinstance(k.get("limit_deneme"), int) and 0 < k["limit_deneme"] <= kosucu.MAKS_LIMIT_DENEME))]
+                 or (isinstance(k.get("limit_deneme"), int) and 0 < k["limit_deneme"] <= kosucu.MAKS_LIMIT_DENEME))
+            and (k.get("akis_ref") is None
+                 or (isinstance(k.get("akis_ref"), str) and akis_motor.REF_DESENI.match(k["akis_ref"])))]
 
 
 def kuyruk_yaz(isler):
@@ -328,7 +340,7 @@ def kuyruk_yaz(isler):
     atomik_yaz(kuyruk_yolu(), json.dumps({"surum": 1, "isler": isler}, ensure_ascii=False, indent=1))
 
 
-def kuyruga_ekle(ajan_id, etiket, prompt, kaynak, ekler, ust, model=None):
+def kuyruga_ekle(ajan_id, etiket, prompt, kaynak, ekler, ust, model=None, akis_ref=None):
     kuyruk = kuyruk_oku()
     if len(kuyruk) >= MAKS_KUYRUK:
         raise IstekHatasi(429, f"ajan meşgul ve kuyruk dolu (en fazla {MAKS_KUYRUK} iş); biri bitince yeniden dene")
@@ -338,6 +350,7 @@ def kuyruga_ekle(ajan_id, etiket, prompt, kaynak, ekler, ust, model=None):
                    "kaynak": kaynak if kaynak in KUYRUK_KAYNAKLARI else "buton",
                    "ust": ust if isinstance(ust, str) and KOSU_ID_DESENI.match(ust) else None,
                    **({"model": model} if model in kosucu.ATAMA_MODELLERI else {}),
+                   **({"akis_ref": akis_ref} if akis_ref else {}),
                    "zaman": ortak.simdi_iso()})
     kuyruk_yaz(kuyruk)
     ortak.olay_yaz({"tur": "kuyruga_alindi", "ajan": ajan_id, "kuyruk_id": q_id, "kaynak": kuyruk[-1]["kaynak"],
@@ -370,11 +383,24 @@ def limit_bekleyenleri_al(kuyruk):
                      "kaynak": k.get("kaynak") if k.get("kaynak") in KUYRUK_KAYNAKLARI else "buton",
                      "ust": k.get("ust") if isinstance(k.get("ust"), str) and KOSU_ID_DESENI.match(k["ust"]) else None,
                      **({"model": k["model"]} if k.get("model") in kosucu.ATAMA_MODELLERI else {}),
-                     "sonra": k.get("sonra"), "limit_deneme": k.get("limit_deneme"), "zaman": ortak.simdi_iso()}
-            if _kuyruk_dogrula([kayit]):  # kuyruk_oku ile aynı doğrulama
-                kuyruk.append(kayit)
-            else:
+                     "sonra": k.get("sonra"), "limit_deneme": k.get("limit_deneme"), "zaman": ortak.simdi_iso(),
+                     **({"akis_ref": k["akis_ref"]} if k.get("akis_ref") else {})}
+            akis_durumu = akis_ref_durumu(kayit.get("akis_ref")) if _kuyruk_dogrula([kayit]) else None
+            if akis_durumu == "bilinmiyor":
+                continue   # limit kaydı yerinde kalır: DB okununca sonraki turda karar verilir
+            if akis_durumu is None:  # kuyruk_oku ile aynı doğrulama
                 kayit = None
+            elif akis_durumu == "gecersiz":
+                # iptal/terk edilmiş workflow denemesi: arıza değil, hata olayı (Telegram) yazılmaz
+                try:
+                    os.remove(yol)
+                except OSError:
+                    pass
+                ortak.olay_yaz({"tur": "akis", "olay": "terk_edilen_is_dusuruldu", "step_id": None, "kaynak": "limit",
+                                "akis_ref": kayit.get("akis_ref"), "ajan": kayit.get("ajan")})
+                continue
+            else:
+                kuyruk.append(kayit)
         try:
             os.remove(yol)
         except OSError:
@@ -386,6 +412,66 @@ def limit_bekleyenleri_al(kuyruk):
         ortak.olay_yaz({"tur": "kuyruga_alindi", "ajan": kayit["ajan"], "kuyruk_id": kayit["id"], "kaynak": "limit",
                         "sira": len(kuyruk), "sonra": kayit["sonra"], "onceki_kosu": k.get("onceki_kosu")})
     return eklenen
+
+
+AKIS_ALARM_ARALIK_SN = 600
+
+
+_AKIS_ALARM_SUREC = None   # (açılış, monotonik): dosya yazılamazsa süreç içi seyreltme
+
+
+def _alarm_saati():
+    """(açılış kimliği, monotonik saniye). Monotonik saat açılışta sıfırlanır; açılış kimliği bunu ayırt eder."""
+    try:
+        with open("/proc/sys/kernel/random/boot_id", encoding="ascii") as f:
+            acilis = f.read().strip()
+    except OSError:
+        acilis = "?"
+    return acilis, time.monotonic()
+
+
+def _akis_alarm_zamani_geldi():
+    """'Workflow DB okunamadı' alarmı en çok 10 dakikada bir — ofis sunucusu ve systemd tekrar servisinin kısa ömürlü
+    süreçleri arasında ortak: 'açılış monotonik' durum/akis-alarm.ts'te (çağıranlar baslatma.lock altında). Duvar saati
+    değişse de etkilenmez; yeni açılış hemen alarm verir. Dosya yazılamazsa süreç içi zamanla seyreltilir."""
+    global _AKIS_ALARM_SUREC
+    yol = os.path.join(ortak.DURUM_DIZINI, "akis-alarm.ts")
+    acilis, simdi = _alarm_saati()
+
+    def yakin(kayit, dosyadan):
+        # açılış kimliği bilinmiyorsa dosyadaki (başka süreç/açılış) kayıt eşleşmiş sayılmaz; süreç içi kayıt sayılır
+        return (kayit is not None and kayit[0] == acilis and not (dosyadan and acilis == "?")
+                and 0 <= simdi - kayit[1] < AKIS_ALARM_ARALIK_SN)
+    try:
+        with open(yol, encoding="utf-8") as f:
+            parca = f.read().split()
+        if yakin((parca[0], float(parca[1])), True):
+            return False
+    except (OSError, ValueError, IndexError):
+        pass
+    if yakin(_AKIS_ALARM_SUREC, False):
+        return False
+    _AKIS_ALARM_SUREC = (acilis, simdi)
+    try:
+        atomik_yaz(yol, f"{acilis} {simdi}\n")
+    except OSError:
+        pass
+    return True
+
+
+def akis_ref_durumu(ref):
+    """Kuyruktaki/limit-bekleyen'deki işin workflow durumu: 'gecerli' (deneme uçuşta ya da workflow işi değil),
+    'gecersiz' (iptal/terk edilmiş: iş düşürülür) ya da 'bilinmiyor' (workflow DB okunamadı: kayıt KORUNUR ama
+    BAŞLATILMAZ, hata olayı yazılır; DB geri gelince sonraki turda karar verilir). Çağıran BASLATMA_KILIDI altındadır."""
+    if not ref:
+        return "gecerli"
+    try:
+        return "gecerli" if motor().ref_ucusta(ref) else "gecersiz"
+    except Exception as e:  # noqa: BLE001
+        if _akis_alarm_zamani_geldi():
+            ortak.olay_yaz({"tur": "hata", "ajan": "ofis", "detay": f"workflow durumu okunamadı ({type(e).__name__}); "
+                            "kuyruktaki workflow işleri korunuyor, başlatılmıyor"})
+        return "bilinmiyor"
 
 
 def kuyrugu_isle():
@@ -409,6 +495,14 @@ def kuyrugu_isle():
             if k.get("sonra") and (k["sonra"] > simdi or kosucu.hepsi_limitte()):
                 kalan.append(k)
                 continue
+            akis_durumu = akis_ref_durumu(k.get("akis_ref"))
+            if akis_durumu == "bilinmiyor":
+                kalan.append(k)       # korunur, başlatılmaz
+                continue
+            if akis_durumu == "gecersiz":
+                ortak.olay_yaz({"tur": "akis", "olay": "terk_edilen_is_dusuruldu", "step_id": None, "kuyruk_id": k["id"],
+                                "akis_ref": k.get("akis_ref"), "ajan": k.get("ajan")})
+                continue
             ajan = tablo.get(k["ajan"])
             if not ajan or k["ajan"] in ortak.ATANAMAZ or not ajan["kurulu"]:
                 ortak.olay_yaz({"tur": "hata", "ajan": k["ajan"], "kuyruk_id": k["id"],
@@ -417,7 +511,7 @@ def kuyrugu_isle():
             try:
                 b = _baslat_kilitli(ajan, k["etiket"], k["prompt"], k["kaynak"], None, k["ust"], True, kuyruktan=True,
                                     model=k.get("model") if k.get("model") in kosucu.ATAMA_MODELLERI else None,
-                                    limit_deneme=k.get("limit_deneme"))
+                                    limit_deneme=k.get("limit_deneme"), akis_ref=k.get("akis_ref"))
             except IstekHatasi as e:
                 if e.kod == 409 and "çalışıyor" in str(e):
                     kalan.append(k)
@@ -1392,7 +1486,7 @@ def dizin_yaz(veri):
     surum = veri.get("surum")
     if not isinstance(surum, str) or not re.fullmatch(r"[0-9a-f]{64}", surum):
         raise IstekHatasi(409, "sürüm bilgisi yok: sayfayı yenileyip yeniden aç")
-    with GELISTIRME_KILIDI:
+    with gorev_kilidi():
         if dosya_surumu(tam) != surum:
             raise IstekHatasi(409, "dosya sen açtıktan sonra başka yerde değişti (telefon, PC ya da ajan); kaydedilmedi")
         atomik_yaz(tam, metin)
@@ -1609,10 +1703,14 @@ def alarm_gordum(kapi_imzasi):
     """'Gördüm': marks every current critical alarm as read. Persisted under durum/; only the web login may do it."""
     if not kapidan_geldi(kapi_imzasi):
         raise IstekHatasi(403, "alarm yalnız ofis girişinden kapatılabilir")
-    with GELISTIRME_KILIDI:
+    if not GELISTIRME_KILIDI.acquire(timeout=GOREV_KILIDI_BEKLE_SN):   # görev dosyası değil; sınırlı bekler
+        raise IstekHatasi(503, "meşgul; biraz sonra yeniden dene")
+    try:
         okunan = _okunmuslar() | {a["id"] for a in alarmlar_oku() if a["seviye"] == "kritik"}
         os.makedirs(os.path.dirname(ALARM_OKUNDU_DOSYASI), exist_ok=True)
         atomik_yaz(ALARM_OKUNDU_DOSYASI, json.dumps({"okundu": sorted(okunan)[-500:]}))
+    finally:
+        GELISTIRME_KILIDI.release()
 
 
 def _teshis_metni(govde):
@@ -1674,9 +1772,8 @@ def takilan_islem(gorev, eylem, kapi_imzasi):
     if eylem not in TEKRAR_DEN:
         raise IstekHatasi(400, "eylem: yeniden-dene | teshis-iste | iptal")
     yol = takilan_dosya(gorev)
-    with GELISTIRME_KILIDI:
-        with open(yol, encoding="utf-8", errors="replace") as f:
-            metin = f.read()
+    with gorev_kilidi():
+        metin = gorev_oku(yol)
         fm, _ = on_bilgi(metin)
         if fm.get("durum") != "takildi":
             raise IstekHatasi(409, f"görev takılı değil (durum: {fm.get('durum') or '-'})")
@@ -1722,11 +1819,101 @@ def kosucuyu_durt():
                    capture_output=True, timeout=10)
 
 
+def _umask_oku():
+    """Süreç umask'ı, değiştirmeden (çok iş parçacıklı sunucuda os.umask(0) başka iş parçacığının dosyasını açık bırakırdı)."""
+    try:
+        with open("/proc/self/status", encoding="ascii") as f:
+            for satir in f:
+                if satir.startswith("Umask:"):
+                    return int(satir.split()[1], 8)
+    except (OSError, ValueError):
+        pass
+    return 0o022
+
+
+_UMASK = _umask_oku()
+
+
 def atomik_yaz(yol, metin):
-    gecici = yol + ".ofis.tmp"
-    with open(gecici, "w", encoding="utf-8") as f:
-        f.write(metin)
-    os.replace(gecici, yol)
+    """Aynı klasörde mkstemp (O_EXCL: yerleştirilmiş symlink/sabit ad izlenmez) + os.replace (hedef symlink ise bağın
+    kendisi değişir, gösterdiği dosya değil). Var olan dosyanın izinleri korunur."""
+    klasor = os.path.dirname(yol) or "."
+    import stat as _stat
+    try:
+        st = os.stat(yol, follow_symlinks=False)
+        kip = st.st_mode & 0o777 if _stat.S_ISREG(st.st_mode) else None   # symlink'in kendi kipi (0777) alınmaz
+    except FileNotFoundError:
+        kip = None
+    if kip is None:   # yeni dosya ya da symlink yerine: main'deki open("w") ile aynı (umask varsayılanı)
+        kip = 0o666 & ~_UMASK
+    fd, gecici = tempfile.mkstemp(dir=klasor, prefix=".ofis.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(metin)
+            os.fchmod(f.fileno(), kip)
+        os.replace(gecici, yol)
+    except BaseException:
+        try:
+            os.unlink(gecici)
+        except OSError:
+            pass
+        raise
+
+
+GOREV_KILIDI_DOSYASI = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
+                                    "beyin", "gorev-dosyasi.lock")   # bin/calistir GOREV_KILIDI ile aynı yol
+_VARSAYILAN_GOREV_DIZINI = GOREV_DIZINI
+_VARSAYILAN_KILIT = GOREV_KILIDI_DOSYASI
+
+
+def _gorev_kilidi_yolu():
+    """Gerçek görev klasöründe hattın kilidi; GOREV_DIZINI başka bir yere çevrildiyse (testler, başka beyin) o klasörün
+    yanında ayrı kilit (gerçek durum klasörüne dokunulmaz)."""
+    if GOREV_KILIDI_DOSYASI != _VARSAYILAN_KILIT or GOREV_DIZINI == _VARSAYILAN_GOREV_DIZINI:
+        return GOREV_KILIDI_DOSYASI
+    return os.path.join(GOREV_DIZINI, ".gorev-dosyasi.lock")
+GOREV_KILIDI_BEKLE_SN = 30
+GOREV_MAKS_BAYT = 5_000_000
+
+
+@contextlib.contextmanager
+def gorev_kilidi():
+    """Görev dosyası yazımları için ortak kilit: süreç içi GELISTIRME_KILIDI + hattın (bin/calistir fm_set, teslim_yaz,
+    bitti/ taşıma) aldığı dosya kilidi. İç içe alınmaz. 30 sn'de alınamazsa 503 (yazma yapılmaz)."""
+    if not GELISTIRME_KILIDI.acquire(timeout=GOREV_KILIDI_BEKLE_SN):
+        raise IstekHatasi(503, "görev dosyası kilidi alınamadı (başka bir yazım sürüyor); biraz sonra yeniden dene")
+    try:
+        kilit = _gorev_kilidi_yolu()
+        os.makedirs(os.path.dirname(kilit), exist_ok=True)
+        fd = os.open(kilit, os.O_RDWR | os.O_CREAT | os.O_APPEND, 0o600)
+        try:
+            son = time.monotonic() + GOREV_KILIDI_BEKLE_SN
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() > son:
+                        raise IstekHatasi(503, "görev dosyası kilidi alınamadı (hat yazıyor); biraz sonra yeniden dene")
+                    time.sleep(0.1)
+            yield
+        finally:
+            os.close(fd)
+    finally:
+        GELISTIRME_KILIDI.release()
+
+
+def gorev_oku(yol):
+    """Kilit altında görev dosyası okuma: symlink izlenmez (O_NOFOLLOW), yalnız sıradan dosya."""
+    try:
+        metin = akis_ofis.duz_dosya_oku(yol, GOREV_MAKS_BAYT + 1)   # tamamı: kesilmiş metin geri yazılmasın
+    except FileNotFoundError:
+        raise IstekHatasi(404, "görev yok")
+    except OSError as e:
+        raise IstekHatasi(409, f"görev dosyası okunamadı ({type(e).__name__}; symlink/FIFO olabilir)")
+    if len(metin) > GOREV_MAKS_BAYT:
+        raise IstekHatasi(413, "görev dosyası çok büyük; web'den değiştirilmez (elle kısalt)")
+    return metin
 
 
 KAPI_IMZA_DOSYASI = os.path.expanduser("~/.config/ofis-kapi/kapi.env")
@@ -1750,7 +1937,7 @@ def kapidan_geldi(deger):
     return False
 
 
-def canli_onayi_yaz(fm):
+def canli_onayi_yaz(fm, dosya=None):
     """Production permission, bound to the exact sealed package. Agents cannot write here; task files alone never authorize production."""
     proje, surum = fm.get("proje", ""), fm.get("surum", "")
     if not re.fullmatch(r"[a-z-]{1,40}", proje) or not re.fullmatch(r"[0-9.]{1,24}", surum):
@@ -1763,7 +1950,18 @@ def canli_onayi_yaz(fm):
     if not re.fullmatch(r"[0-9a-f]{64}", muhur):
         return False
     os.makedirs(CANLI_ONAY_DIZINI, mode=0o700, exist_ok=True)
-    atomik_yaz(os.path.join(CANLI_ONAY_DIZINI, f"{proje}-{surum}.onay"), muhur + "\n")
+    atomik_yaz(os.path.join(CANLI_ONAY_DIZINI, f"{proje}-{surum}.onay"), muhur + "\n")   # biçim değişmez (onay_gecerli)
+    # Kimlik: hattın mührüne yazdığı görev/dal bu kartla eşleşiyorsa ek dosyaya kopyalanır; workflow motoru onay kaydını
+    # yalnız kendi izlediği kartın kimliğiyle kabul eder. Eşleşmezse (eski hat, başka görev) kimlik yazılmaz.
+    kimlik_yolu = os.path.join(CANLI_ONAY_DIZINI, f"{proje}-{surum}.onay.kimlik")
+    k = akis_ofis.kimlik_oku(os.path.join(PAKET_MUHUR_DIZINI, f"{proje}-{surum}.zip.kimlik"))
+    if k and dosya and k.get("gorev") == dosya and k.get("sha256") == muhur and k.get("dal") == fm.get("dal", ""):
+        atomik_yaz(kimlik_yolu, "".join(f"{a}={k[a]}\n" for a in ("gorev", "dal", "sha256")))
+    else:
+        try:
+            os.remove(kimlik_yolu)
+        except FileNotFoundError:
+            pass
     return True
 
 
@@ -1800,6 +1998,70 @@ def oto_onay_degistir(proje, acik, kapi_imzasi):
             pass
 
 
+def gelistirme_gorevi_yaz(proje, baslik, istek, model, ek_alanlar=None):
+    """Hat görevi dosyası (durum: hazir). Ofis 'yeni' düğmesi ve workflow adaptörü aynı yolu kullanır.
+    ek_alanlar yalnız workflow içindir (oto_onay: hayir, akis_adim, kaynak: akis). Dönen: dosya adı."""
+    baslik = " ".join(baslik.split())
+    ad = re.sub(r"[^\w\s.-]", "", baslik, flags=re.U).strip(" .") or "Geliştirme"
+    ek = dict(ek_alanlar or {})
+    kaynak = ek.pop("kaynak", "ofis")
+    ek_satir = "".join(f"{k}: {v}\n" for k, v in ek.items()
+                       if re.fullmatch(r"[a-z_]{1,30}", k) and re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", str(v)))
+    with gorev_kilidi():
+        os.makedirs(GOREV_DIZINI, exist_ok=True)
+        yol, n = os.path.join(GOREV_DIZINI, ad + ".md"), 2
+        while os.path.exists(yol) or os.path.exists(os.path.join(GOREV_DIZINI, "bitti", os.path.basename(yol))):
+            yol, n = os.path.join(GOREV_DIZINI, f"{ad} {n}.md"), n + 1
+        atomik_yaz(yol, f"---\ndurum: hazir\ntur: gelistirme\nproje: {proje}\nmodel: {model}\n"
+                        f"olusturma: {datetime.now():%Y-%m-%d %H:%M}\nkaynak: {kaynak}\n{ek_satir}---\n"
+                        f"# {baslik}\n\n## İstek\n{istek.strip()}\n")
+    return os.path.basename(yol)
+
+
+def geri_bildirim_ekle(metin, not_, kimden="ofisten"):
+    return metin.rstrip("\n") + f"\n\n## Geri bildirim\n_{datetime.now():%Y-%m-%d %H:%M} · {kimden}_\n\n{not_.strip()}\n"
+
+
+def uat_reddet(dosya, not_, kimden="workflow", beklenen_sha=None):
+    """UAT'deki hat görevini geri bildirimle reddeder (ofisteki 'reddet' ile aynı alanlar). Onay VERMEZ."""
+    if not isinstance(dosya, str) or not DOSYA_DESENI.match(dosya) or dosya.startswith("."):
+        raise IstekHatasi(400, "geçersiz dosya")
+    yol = os.path.join(GOREV_DIZINI, dosya)
+    if os.path.islink(yol) or not os.path.isfile(yol):
+        raise IstekHatasi(404, "görev yok")
+    with gorev_kilidi():
+        try:
+            metin = gorev_oku(yol)   # O_NOFOLLOW: kilit altında symlink izlenmez
+        except IstekHatasi as e:
+            if e.kod == 404:
+                raise IstekHatasi(410, "kart bu arada kayboldu ya da taşındı; ret yazılmadı") from e
+            raise
+        fm, _ = on_bilgi(metin)
+        if fm.get("durum") != "uat":
+            raise IstekHatasi(409, f"görev UAT'de değil (durum: {fm.get('durum') or '-'})")
+        if fm.get("onay") == "evet":
+            raise IstekHatasi(409, "görev onaylanmış")
+        if beklenen_sha is not None and fm.get("sha256") != beklenen_sha:
+            # okuma ile yazma arasında kart yeni pakete geçti: kalite kapısının test etmediği paket reddedilmez
+            raise IstekHatasi(409, "kart bu arada yeni bir pakete geçti; test edilmeyen paket reddedilmez")
+        yeni = on_bilgi_yaz(geri_bildirim_ekle(metin, not_, kimden), "onay", "hayir")
+        # Korumalı hat (HAT_KORUMA_SURUMU) aynı gorev_kilidi'ni alır. Eski hat ve ajanların kendi araçlarıyla yaptığı
+        # yazımlar kilitsizdir: yazmadan hemen önce dosya yeniden okunur, değiştiyse ezilmez.
+        try:
+            degisti = gorev_oku(yol) != metin
+        except IstekHatasi as e:
+            raise IstekHatasi(410 if e.kod == 404 else 409, "kart bu arada kayboldu, taşındı ya da okunamadı; ret yazılmadı") from e
+        if degisti:
+            raise IstekHatasi(409, "kart bu arada değişti (hat yazdı); ret yazılmadı. Kart yeni bir pakete geçtiyse "
+                                   "kalite kapısı onu test etmedi: başarısız say/iptal et; yalnız ilgisiz bir düzenlemeyse "
+                                   "'Yeniden dene'")
+        atomik_yaz(yol, yeni)
+    try:   # ret yazıldı: tetik hatası (systemctl) reddi geri almaz, 5 dk zamanlayıcı yine alır
+        kosucuyu_durt()
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
 def gelistirme_degistir(veri, kapi_imzasi=""):
     islem = veri.get("islem")
     if islem == "oto-onay":
@@ -1822,16 +2084,7 @@ def gelistirme_degistir(veri, kapi_imzasi=""):
             raise IstekHatasi(400, "başlık 3–80 karakter olmalı")
         if not isinstance(istek, str) or not istek.strip() or len(istek) > ortak.MAKS_GIRDI:
             raise IstekHatasi(400, f"istek gerekli (en fazla {ortak.MAKS_GIRDI} karakter)")
-        baslik = " ".join(baslik.split())
-        ad = re.sub(r"[^\w\s.-]", "", baslik, flags=re.U).strip(" .") or "Geliştirme"
-        with GELISTIRME_KILIDI:
-            os.makedirs(GOREV_DIZINI, exist_ok=True)
-            yol, n = os.path.join(GOREV_DIZINI, ad + ".md"), 2
-            while os.path.exists(yol) or os.path.exists(os.path.join(GOREV_DIZINI, "bitti", os.path.basename(yol))):
-                yol, n = os.path.join(GOREV_DIZINI, f"{ad} {n}.md"), n + 1
-            atomik_yaz(yol, f"---\ndurum: hazir\ntur: gelistirme\nproje: {proje}\nmodel: {model}\n"
-                            f"olusturma: {datetime.now():%Y-%m-%d %H:%M}\nkaynak: ofis\n---\n"
-                            f"# {baslik}\n\n## İstek\n{istek.strip()}\n")
+        gelistirme_gorevi_yaz(proje, baslik, istek, model)
         kosucuyu_durt()
         return gelistirme_yaniti()
     if islem == "onay":
@@ -1845,16 +2098,15 @@ def gelistirme_degistir(veri, kapi_imzasi=""):
         yol = os.path.join(GOREV_DIZINI, dosya)
         if os.path.islink(yol) or not os.path.isfile(yol):
             raise IstekHatasi(404, "görev yok")
-        with GELISTIRME_KILIDI:
-            with open(yol, encoding="utf-8", errors="replace") as f:  # one bad byte must not hide the task or break the approval
-                metin = f.read()
+        with gorev_kilidi():
+            metin = gorev_oku(yol)  # symlink izlenmez; one bad byte must not hide the task or break the approval
             fm, _ = on_bilgi(metin)
             if fm.get("durum") != "uat":
                 raise IstekHatasi(409, f"görev UAT'de değil (durum: {fm.get('durum') or '-'})")
             if karar == "hayir":
-                metin = metin.rstrip("\n") + f"\n\n## Geri bildirim\n_{datetime.now():%Y-%m-%d %H:%M} · ofisten_\n\n{not_.strip()}\n"
+                metin = geri_bildirim_ekle(metin, not_)
             if karar == "evet" and kapidan_geldi(kapi_imzasi):
-                canli_onayi_yaz(fm)
+                canli_onayi_yaz(fm, dosya)
             atomik_yaz(yol, on_bilgi_yaz(metin, "onay", karar))
         kosucuyu_durt()
         return gelistirme_yaniti()
@@ -1870,9 +2122,8 @@ def gelistirme_degistir(veri, kapi_imzasi=""):
         yol = os.path.join(GOREV_DIZINI, dosya)
         if os.path.islink(yol) or not os.path.isfile(yol):
             raise IstekHatasi(404, "öneri yok")
-        with GELISTIRME_KILIDI:
-            with open(yol, encoding="utf-8", errors="replace") as f:  # one bad byte must not hide the task or break the approval
-                metin = f.read()
+        with gorev_kilidi():
+            metin = gorev_oku(yol)  # symlink izlenmez; one bad byte must not hide the task or break the approval
             fm, _ = on_bilgi(metin)
             if fm.get("durum") != "oneri":
                 raise IstekHatasi(409, f"bu bir öneri değil (durum: {fm.get('durum') or '-'})")
@@ -2166,6 +2417,58 @@ def not_grafi_yaniti():
 
 # ---------- HTTP ----------
 
+# ---------- Workflow & Loop Engine (V1) ----------
+
+_MOTOR = None
+_MOTOR_KILIDI = threading.Lock()
+
+
+def motor():
+    """Tek motor örneği (durum/akis.db). Testler akis_motor.Motor'u kendi ortamıyla kurar."""
+    global _MOTOR
+    with _MOTOR_KILIDI:
+        if _MOTOR is None:
+            _MOTOR = akis_ofis.motor_kur(sys.modules[__name__])
+        return _MOTOR
+
+
+def akis_listesi_yaniti():
+    m = motor()
+    tanimlar, hatalar = m.tanimlar()
+    return {"tanimlar": [{"id": t["id"], "surum": t["surum"], "ad": t["ad"], "aciklama": t["aciklama"],
+                          "girdiler": t["girdiler"], "sinirlar": t["sinirlar"],
+                          "etkin": m.akis_engeli(t) is None, "engel": m.akis_engeli(t),
+                          "adimlar": [{"id": a["id"], "ad": a["ad"], "tur": a["tur"]} for a in t["adimlar"]]}
+                         for t in tanimlar.values()],
+            "gecersiz": [{"dosya": d, "hata": h} for d, h in hatalar.items()],
+            "kosular": m.liste()}
+
+
+def akis_islemi(yol, veri, kapi_imzasi=""):
+    m = motor()
+    islem = yol.rsplit("/", 1)[-1]
+    try:
+        if islem == "baslat":
+            sonuc = m.baslat(veri.get("akis"), veri.get("girdiler"), veri.get("idem_anahtari"))
+            return 202, {**sonuc, **m.detay(sonuc["run_id"])}
+        kosu = veri.get("run_id")
+        if islem == "duraklat":
+            return 200, m.duraklat(kosu)
+        if islem == "devam":
+            karar = veri.get("karar")
+            if karar is not None and karar not in ("yeniden_dene", "basarisiz_say"):
+                raise akis_motor.AkisHatasi(400, "karar: yeniden_dene | basarisiz_say")
+            return 200, m.devam(kosu, karar)
+        if islem == "iptal":
+            return 200, m.iptal(kosu)
+        if islem == "onay":
+            return 200, m.onayla(kosu, veri.get("adim"), veri.get("karar"), veri.get("not"),
+                                 kapi_ok=kapidan_geldi(kapi_imzasi))
+    except akis_motor.AkisHatasi as e:
+        raise IstekHatasi(e.kod, str(e)) from e
+    raise IstekHatasi(404, "yok")
+
+
 class Isleyici(SimpleHTTPRequestHandler):
     server_version = "AjanOfisi/2"
     timeout = 30  # yarım gövdeli istek iş parçacığını kilitlemesin (canlı akış _sse'de kaldırır)
@@ -2370,6 +2673,13 @@ class Isleyici(SimpleHTTPRequestHandler):
             return self._json(200, {"terminaller": KOPRU.liste(), "sanal_ornekler": KOPRU.ornekler()})
         if yol.path == "/api/olaylar":
             return self._sse(parse_qs(yol.query))
+        if yol.path == "/api/akis":
+            return self._json(200, akis_listesi_yaniti())
+        if yol.path == "/api/akis/detay":
+            try:
+                return self._json(200, motor().detay((parse_qs(yol.query).get("id") or [""])[0]))
+            except akis_motor.AkisHatasi as e:
+                return self._json(e.kod, {"hata": str(e)})
         if yol.path.startswith("/api/"):
             return self._json(404, {"hata": "yok"})
         self._statik = True   # on-yuz/ dosyaları: her açılışta Last-Modified ile doğrula (eski kedi.js önbellekte kalmasın)
@@ -2388,7 +2698,7 @@ class Isleyici(SimpleHTTPRequestHandler):
             veri = self._govde(MAKS_GOVDE_EKLI if yol == "/api/gorev" else
                                MAKS_GOVDE_DIZIN if yol == "/api/dizin/yaz" else
                                MAKS_GOVDE_EKLI if yol == "/api/ceo" else
-                               MAKS_GOVDE_GELISTIRME if yol == "/api/gelistirme" else MAKS_GOVDE)
+                               MAKS_GOVDE_GELISTIRME if yol in ("/api/gelistirme", "/api/akis/baslat") else MAKS_GOVDE)
             if yol == "/api/dizin/yaz":
                 return self._json(200, dizin_yaz(veri))
             if yol == "/api/gorev":
@@ -2420,6 +2730,9 @@ class Isleyici(SimpleHTTPRequestHandler):
                 return self._json(200, ceo_calistir(metin, kuru=bool(veri.get("kuru")), ekler=ekler))
             if yol == "/api/ykb":
                 return self._json(202, ykb_istegi(veri))
+            if yol in ("/api/akis/baslat", "/api/akis/duraklat", "/api/akis/devam", "/api/akis/iptal", "/api/akis/onay"):
+                kod, yanit = akis_islemi(yol, veri, self.headers.get("X-Ofis-Kapi", ""))
+                return self._json(kod, yanit)
             if yol == "/api/ykb/dagit":
                 return self._json(200, ykb_dagit(veri.get("kosu_id"), veri.get("secilen")))
             raise IstekHatasi(404, "yok")
@@ -2513,6 +2826,7 @@ def main():
     print(f"Ajan Ofisi: http://{HOST}:{port}   (demo: http://{HOST}:{port}/?demo=1)", flush=True)
     KOPRU.baslat()
     kuyruk_izleyici_baslat()  # tekrar eden işler systemd timer'larıyla koşar; sunucu yalnız kuyruğu boşaltır
+    motor().baslat_thread()   # workflow motoru: etkin koşu yoksa yalnız SQL sorgusu, model çağrısı yok
     sunucu.serve_forever()
 
 

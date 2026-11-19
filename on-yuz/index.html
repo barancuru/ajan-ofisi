@@ -431,6 +431,26 @@ td.sayi,th.sayi{text-align:right}
 .dizin-onizleme{min-width:0;overflow:auto;max-height:70vh;padding:4px 10px;border:1px dashed rgba(59,52,44,.18);border-radius:10px}
 @media (max-width:768px){.dizin-alan{grid-template-columns:1fr}.dizin-arac button{min-width:44px;min-height:44px}.dizin-liste button,.dizin-liste a.dizin-indir{min-height:44px}.dizin-ara input{min-height:44px;font-size:16px}.dizin-yol button{min-height:40px}.md{font-size:15px}.dizin-duzenle{font-size:16px}.dizin-dugmeler button{min-height:44px;padding:10px 14px}}
 .ong-kart{margin:0 0 14px;max-width:720px}
+/* Workflow paneli */
+.akis-kosu{margin:0 0 10px;max-width:860px}
+.akis-kosu>summary{list-style:none;cursor:pointer;display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;min-height:36px}
+.akis-kosu>summary::-webkit-details-marker{display:none}
+.akis-kosu>summary b{font-size:14px}
+.akis-kosu small,.akis-adim small{color:var(--soluk);font-size:12px}
+.akis-ilerleme{flex:1 1 120px;max-width:180px;height:6px;border-radius:3px;background:rgba(59,52,44,.1);overflow:hidden}
+.akis-ilerleme i{display:block;height:100%;background:var(--mercan)}
+.akis-adimlar{list-style:none;padding:0;margin:10px 0 0;display:flex;flex-direction:column;gap:6px}
+.akis-adim{padding:7px 10px;border-radius:10px;background:#fffdf9;border:1px solid rgba(59,52,44,.12);display:flex;flex-direction:column;gap:3px;overflow-wrap:anywhere}
+.akis-adim .ust{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;font-size:13.5px}
+.akis-adim pre{white-space:pre-wrap;font:12px/1.45 ui-monospace,monospace;margin:2px 0 0;color:#5d5348;max-height:160px;overflow:auto}
+.akis-dugmeler{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.akis-dugmeler .mini{font-size:12.5px;padding:6px 10px;border-radius:8px;border:1px solid rgba(59,52,44,.16);background:#fffdf9;color:var(--murekkep);cursor:pointer}
+.akis-dugmeler .mini:hover{background:#fff4e8}.akis-dugmeler .mini:disabled{opacity:.5;cursor:default}
+.akis-neden{color:#9c2f26;font-size:12.5px;margin-top:4px}
+.rozet.basarisiz,.rozet.inceleme,.rozet.iptal{background:#f7d4d1;color:#9c2f26}
+.rozet.onay_bekliyor,.rozet.duraklatildi,.rozet.kuyrukta{background:#ffe1d6;color:#b5401f}
+.rozet.basarili{background:#dcefe1;color:#2f6e44}
+@media (max-width:768px){.akis-kosu{max-width:none}.akis-dugmeler button{min-height:44px;flex:1}.akis-form input,.akis-form textarea,.akis-form select{font-size:16px;min-height:44px}}
 .ong-oto{list-style:none;padding:0;margin:6px 0 0;display:flex;flex-direction:column;gap:6px}
 .ong-oto li{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:13.5px}
 .ong-oto li b{min-width:110px}
@@ -598,6 +618,7 @@ body.boyut-2d #sahne,body.boyut-2d .vinyet,body.boyut-2d #etiketler,body.boyut-2
   <button type="button" role="menuitem" data-sekme="diyagram">Diyagramlar</button>
   <button type="button" role="menuitem" data-sekme="notgrafi">Not Grafı</button>
   <button type="button" role="menuitem" data-sekme="ongorulebilirlik">Öngörülebilirlik</button>
+  <button type="button" role="menuitem" data-sekme="akis">Workflow</button>
 </div>
 
 <section class="selam cam" id="selam">
@@ -2325,6 +2346,7 @@ function olayIsle(o) {
   const a = (o.ornek && ajanBul(o.ornek)) || ajanBul(o.ajan);   // hat koşusu olayı kendi Atölye örneğine gider
   const ad = a?.ad || o.ajan || 'Ajan';
   const isler = {
+    akis() { akisCanli(); },
     kosu_basladi() {
       kosuEtiket.set(o.kosu_id, o.etiket || '');
       if (!tekrar) akisEkle(o.ajan, ad + ' işe başladı' + (o.etiket ? ': ' + o.etiket : ''), '', '', zaman);
@@ -3253,7 +3275,7 @@ async function sekmeAc(ad) {
   sekmeAdres(ad);
   if (ad === 'ofis') { sayfa.classList.remove('acik'); return; }
   panelKapat();
-  const icerik = ad === 'kodgrafi' ? await kodGrafiSayfasi() : ad === 'diyagram' ? await diyagramSayfasi() : ad === 'notgrafi' ? await notGrafiSayfasi() : ad === 'odalar' ? odalarSayfasi() : ad === 'hafiza' ? await hafizaSayfasi() : ad === 'gelistirme' ? await gelistirmeSayfasi() : ad === 'dizin' ? await dizinSayfasi() : ad === 'ongorulebilirlik' ? await ongorulebilirlikSayfasi() : ad === 'operator' ? await operatorSayfasi() : ad === 'modeller' ? await modellerSayfasi() : maliyetSayfasi();
+  const icerik = ad === 'kodgrafi' ? await kodGrafiSayfasi() : ad === 'diyagram' ? await diyagramSayfasi() : ad === 'notgrafi' ? await notGrafiSayfasi() : ad === 'odalar' ? odalarSayfasi() : ad === 'hafiza' ? await hafizaSayfasi() : ad === 'gelistirme' ? await gelistirmeSayfasi() : ad === 'dizin' ? await dizinSayfasi() : ad === 'ongorulebilirlik' ? await ongorulebilirlikSayfasi() : ad === 'akis' ? await akisSayfasi() : ad === 'operator' ? await operatorSayfasi() : ad === 'modeller' ? await modellerSayfasi() : maliyetSayfasi();
   if (aktifSekme !== ad) return;
   sayfa.replaceChildren(...icerik); sayfa.classList.add('acik');
 }
@@ -4185,6 +4207,131 @@ async function dizinSayfasi() {
 }
 // Öngörülebilirlik: otomatik zamanlar (salt okunur) + tekrar eden işler. Yalnız sayfa açıkken sorgu atar.
 let ongZaman = null;
+/* ---------- Workflow paneli (V1): liste, durum, adımlar, yeniden denemeler, operatör müdahalesi ---------- */
+const AKIS_DURUM = { calisiyor:'çalışıyor', duraklatildi:'duraklatıldı', inceleme:'manual review', basarili:'başarılı',
+  basarisiz:'başarısız', iptal:'iptal', bekliyor:'bekliyor', hazir:'sırada', onay_bekliyor:'onay bekliyor',
+  gonderiliyor:'gönderiliyor', kuyrukta:'kuyrukta', bilinmeyen:'bilinmeyen', yok_sayildi:'yok sayıldı' };
+const akisAcik = new Set();
+let akisCanliZaman = null;
+function akisCanli() {
+  if (aktifSekme !== 'akis' || akisCanliZaman) return;
+  akisCanliZaman = setTimeout(() => {
+    akisCanliZaman = null;
+    const yaziyor = [...sayfa.querySelectorAll('.akis-form textarea,.akis-form input')].some(x => x.value.trim());
+    if (aktifSekme === 'akis' && !yaziyor) sekmeAc('akis');
+  }, 1500);
+}
+function akisRozet(d) { return el('span', 'rozet ' + d, AKIS_DURUM[d] || d); }
+function akisPara(x) { return (Number(x) || 0).toFixed(2) + ' $'; }
+async function akisIslem(yol, govde, tamam) {
+  let r; try { r = await postJSON('/api/akis/' + yol, govde); } catch { r = { durum: 0, veri: {} }; }
+  if (r.durum !== 200 && r.durum !== 202) { tost(r.veri.hata || ('hata ' + r.durum)); return false; }
+  if (tamam) tost(tamam);
+  sekmeAc('akis'); return true;
+}
+async function akisSayfasi() {
+  const bas = [el('h2', null, 'Workflow'), el('p', 'alt', 'Sürüm kontrollü akışlar (akislar/*.json). Geçişler tanımdan gelir; model yeniden planlama yapmaz. Boştayken model çağrısı yok. Dağıtım onayı Geliştirme sekmesindeki UAT kartında kalır.')];
+  if (DEMO) return [...bas, el('p', 'alt', 'Demo modunda workflow gösterilmez.')];
+  let d;
+  try { d = await getJSON('/api/akis'); } catch { return [...bas, el('p', 'alt', 'Workflow listesi alınamadı.')]; }
+  // başlatma formu
+  const form = el('form', 'kart gelistirme-form akis-form'); form.autocomplete = 'off';
+  form.append(el('h4', null, 'Akış başlat'));
+  const sec = el('select'); sec.setAttribute('aria-label', 'Akış');
+  d.tanimlar.forEach(t => { const o = el('option', null, t.ad + ' · v' + t.surum + (t.etkin ? '' : ' (kapalı)')); o.value = t.id; o.disabled = !t.etkin; sec.append(o); });
+  const ilkEtkin = d.tanimlar.find(t => t.etkin); if (ilkEtkin) sec.value = ilkEtkin.id;
+  const aciklama = el('small', 'alt'); const alanlar = el('div', 'gelistirme-form'); alanlar.style.margin = '0';
+  const idem = 'ui-' + (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2));
+  const ciz = () => {
+    const t = d.tanimlar.find(x => x.id === sec.value); alanlar.replaceChildren();
+    if (!t) return;
+    gonder.disabled = !t.etkin;
+    aciklama.textContent = (t.etkin ? '' : 'Kapalı: ' + t.engel + '. ') + t.aciklama + ' Sınırlar: ' + t.sinirlar.max_ajan_cagrisi + ' ajan çağrısı, ' + t.sinirlar.max_maliyet_usd + ' $, döngü ' + t.sinirlar.max_iterasyon + ' iterasyon.';
+    Object.entries(t.girdiler).forEach(([ad, g]) => {
+      const x = g.tur === 'metin' && (g.maks || 0) > 200 ? el('textarea') : el('input');
+      x.name = ad; x.placeholder = (g.aciklama || ad) + (g.maks ? ' (en çok ' + g.maks + ')' : ''); x.setAttribute('aria-label', g.aciklama || ad);
+      if (g.maks) x.maxLength = g.maks; if (x.tagName === 'TEXTAREA') x.rows = 4; x.required = g.zorunlu;
+      alanlar.append(x);
+    });
+  };
+  const gonder = el('button', 'koyu', 'Başlat'); gonder.type = 'submit';
+  sec.onchange = ciz; ciz();
+  form.append(sec, aciklama, alanlar, gonder);
+  form.onsubmit = async e => {
+    e.preventDefault(); gonder.disabled = true;
+    const girdiler = {}; alanlar.querySelectorAll('[name]').forEach(x => { girdiler[x.name] = x.value; });
+    if (!await akisIslem('baslat', { akis: sec.value, girdiler, idem_anahtari: idem }, 'Akış başladı')) gonder.disabled = false;
+  };
+  const icerik = [...bas];
+  if (d.tanimlar.length) icerik.push(form); else icerik.push(el('p', 'alt', 'akislar/ klasöründe geçerli tanım yok.'));
+  if (d.gecersiz.length) {
+    const g = el('div', 'kart ong-kart'); g.append(el('h4', null, 'Geçersiz tanımlar (başlatılamaz)'));
+    d.gecersiz.forEach(x => g.append(el('p', 'alt ong-hata', x.dosya + ': ' + x.hata))); icerik.push(g);
+  }
+  icerik.push(el('h4', null, 'Koşular (' + d.kosular.length + ')'));
+  if (!d.kosular.length) icerik.push(el('p', 'alt', 'Henüz koşu yok.'));
+  for (const k of d.kosular) icerik.push(akisKosuKarti(k));
+  return icerik;
+}
+function akisKosuKarti(k) {
+  const kart = el('details', 'kart akis-kosu'); kart.open = akisAcik.has(k.run_id);
+  const ozet = el('summary');
+  const cubuk = el('span', 'akis-ilerleme'); const dolu = el('i'); dolu.style.width = Math.round(100 * k.ilerleme.biten / Math.max(k.ilerleme.toplam, 1)) + '%'; cubuk.append(dolu);
+  cubuk.setAttribute('role', 'img'); cubuk.setAttribute('aria-label', k.ilerleme.biten + '/' + k.ilerleme.toplam + ' adım');
+  const dongu = Object.entries(k.dongu || {}).map(([a, n]) => a + ' ' + n + '/' + k.sinirlar.max_iterasyon).join(', ');
+  ozet.append(el('b', null, k.ad), akisRozet(k.durum), cubuk,
+    el('small', null, k.ilerleme.biten + '/' + k.ilerleme.toplam + ' adım · ' + k.ajan_cagrisi + '/' + k.sinirlar.max_ajan_cagrisi + ' çağrı · ' + akisPara(k.maliyet_usd) + ' (+' + akisPara(k.tahmini_usd) + ' tahmini) / ' + k.sinirlar.max_maliyet_usd + ' $' + (dongu ? ' · döngü ' + dongu : '') + ' · ' + new Date(k.olusturma * 1000).toLocaleString('tr-TR')));
+  kart.append(ozet);
+  if (k.neden && k.neden.metin) kart.append(el('div', 'akis-neden', (k.durum === 'inceleme' ? 'Manual review: ' : '') + k.neden.metin));
+  const govde = el('div');
+  kart.append(govde);
+  const yukle = async () => {
+    govde.replaceChildren(el('small', 'alt', 'yükleniyor…'));
+    let dt; try { dt = await getJSON('/api/akis/detay?id=' + encodeURIComponent(k.run_id)); } catch { govde.replaceChildren(el('small', 'alt ong-hata', 'Ayrıntı alınamadı.')); return; }
+    govde.replaceChildren(akisDugmeler(dt), akisAdimlar(dt));
+  };
+  kart.ontoggle = () => { if (kart.open) { akisAcik.add(k.run_id); yukle(); } else akisAcik.delete(k.run_id); };
+  if (kart.open) yukle();
+  return kart;
+}
+function akisDugmeler(dt) {
+  const kutu = el('div', 'akis-dugmeler'); const id = dt.run_id;
+  const dug = (metin, yol, govde, soru, tamam) => { const b = el('button', 'mini', metin); b.type = 'button';
+    b.onclick = async () => { if (soru && !confirm(soru)) return; b.disabled = true; if (!await akisIslem(yol, { run_id: id, ...govde }, tamam)) b.disabled = false; }; kutu.append(b); };
+  if (dt.durum === 'calisiyor') dug('Duraklat', 'duraklat', {}, null, 'Duraklatıldı: yeni adım başlamaz');
+  if (dt.durum === 'duraklatildi') dug('Devam et', 'devam', {}, null, 'Devam ediyor');
+  const sinirda = dt.neden && ['dongu_siniri', 'butce', 'sure', 'erken_onay', 'kapali'].includes(dt.neden.sebep);
+  if (dt.durum === 'inceleme' && !sinirda) {
+    dug('Yeniden dene', 'devam', { karar: 'yeniden_dene' }, 'Takılan adım yeni bir denemeyle başlatılsın mı? Yan etkili bir adımsa önce sonucunu kontrol et.');
+  }
+  if (dt.durum === 'inceleme') dug('Başarısız say', 'devam', { karar: 'basarisiz_say' }, 'Koşu başarısız olarak kapatılsın mı?');
+  if (!['basarili', 'basarisiz', 'iptal'].includes(dt.durum)) dug('İptal', 'iptal', {}, 'Koşu iptal edilsin mi? Çalışan ajan koşusu durdurulmaz, sonucu yok sayılır.', 'İptal edildi');
+  for (const a of dt.adimlar) {
+    if (a.tur !== 'approval' || !(a.durum === 'onay_bekliyor' || (a.izle && a.durum === 'inceleme'))) continue;
+    if (a.izle) { const b = el('button', 'mini', a.ad + ': Geliştirme kartına git'); b.type = 'button'; b.onclick = () => sekmeAc('gelistirme'); kutu.append(b); continue; }
+    dug(a.ad + ': Onayla', 'onay', { adim: a.id, karar: 'evet' }, a.mesaj + '\n\nOnaylıyor musun?', 'Onaylandı');
+    dug(a.ad + ': Reddet', 'onay', { adim: a.id, karar: 'hayir' }, 'Reddedilsin mi?', 'Reddedildi');
+  }
+  return kutu;
+}
+function akisAdimlar(dt) {
+  const liste = el('ol', 'akis-adimlar');
+  for (const a of dt.adimlar) {
+    const li = el('li', 'akis-adim'); const ust = el('div', 'ust');
+    ust.append(el('b', null, a.ad), akisRozet(a.durum), el('small', null, a.tur + (a.ajan ? ' · ' + a.ajan : '') + (a.iterasyon ? ' · iterasyon ' + (a.iterasyon + 1) : '') + (a.denemeler.length ? ' · ' + a.denemeler.length + ' deneme' : '')));
+    li.append(ust);
+    if (a.sonraki_ts && a.durum === 'hazir' && a.sonraki_ts * 1000 > Date.now()) li.append(el('small', null, 'Yeniden deneme: ' + new Date(a.sonraki_ts * 1000).toLocaleTimeString('tr-TR')));
+    if (a.tur === 'approval' && a.durum === 'onay_bekliyor') li.append(el('small', null, a.mesaj));
+    if (a.hata) li.append(el('small', 'ong-hata', a.hata));
+    const son = a.denemeler[a.denemeler.length - 1];
+    if (a.denemeler.length) li.append(el('small', null, a.denemeler.map(x => '#' + x.deneme + ' ' + (AKIS_DURUM[x.durum] || x.durum) + (x.siniflama && x.siniflama !== 'basarili' ? ' (' + x.siniflama + ')' : '') + (x.sure_sn != null ? ' ' + x.sure_sn + ' sn' : '') + (x.maliyet_usd != null ? ' ' + akisPara(x.maliyet_usd) : '')).join(' · ')));
+    if (son && son.tutamac && son.tutamac.dosya) li.append(el('small', null, 'Hat görevi: ' + son.tutamac.dosya));
+    const cikti = Object.entries(a.cikti || {}).filter(([kk]) => kk !== 'dosya');
+    if (cikti.length) li.append(el('pre', null, cikti.map(([kk, v]) => kk + ': ' + (typeof v === 'string' ? v : JSON.stringify(v))).join('\n')));
+    liste.append(li);
+  }
+  return liste;
+}
 const ONG_HIZLI = [['0 9 * * *', 'Her gün 09:00'], ['0 9 * * 1-5', 'Hafta içi 09:00'], ['0 * * * *', 'Her saat başı'], ['30 8 * * 1', 'Pazartesi 08:30']];
 const ONG_SONUC = { basladi: 'başladı', 'basladi (alt ajan)': 'alt ajanla başladı', kuyrukta: 'kuyruğa alındı',
   'atlandi: mesgul': 'atlandı (ajan meşguldü)', 'atlandi: kuyruk dolu': 'atlandı (kuyruk dolu)', hata: 'hata' };
