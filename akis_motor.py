@@ -34,17 +34,18 @@ MAKS_AKTIF_KOSU = 5
 # dağıtım/yayın onayı içeren hiçbir akış — id'si ne olursa olsun — başlatılamaz ve adımı gönderilmez. Aşama 2 için ön
 # koşullar docs/akis-canliya-alma.md'de: ortak görev dosyası kilidi, güvenli geçici dosya, onay/mühür kimlik bağı.
 ETKIN_AKISLAR = ("ornek-arastirma-ozeti",)
-HAT_ADIMLARI_ACIK = False
+HAT_ADIMLARI_ACIK = False        # gelistirme_gorevi, quality_gate (yerel komut)
+DAGITIM_ONAYI_ACIK = False       # dagitim/yayin onayı: ayrı karar (onay/mühür kimlik bağı canlıda olmalı)
+YAZAN_AJAN_ACIK = False          # aşama 1 salt okunur: yan etki üretebilen ajan (ajan_yazabilir) adım olamaz
 KAPALI_ONAY_KATEGORILERI = ("dagitim", "yayin")
+DIS_ETKILI_ADIMLAR = ("agent_task", "gelistirme_gorevi", "quality_gate")
 
 
 def adim_kapali_mi(adim):
     """Aşama 1'de kapalı adım türü: hat görevi, kalite kapısı (yerel komut), dağıtım/yayın onayı."""
-    if HAT_ADIMLARI_ACIK:
-        return None
-    if adim["tur"] in ("gelistirme_gorevi", "quality_gate"):
+    if not HAT_ADIMLARI_ACIK and adim["tur"] in ("gelistirme_gorevi", "quality_gate"):
         return f"{adim['tur']} adımları bu sürümde kapalı"
-    if adim["tur"] == "approval" and adim.get("kategori") in KAPALI_ONAY_KATEGORILERI:
+    if not DAGITIM_ONAYI_ACIK and adim["tur"] == "approval" and adim.get("kategori") in KAPALI_ONAY_KATEGORILERI:
         return f"{adim['kategori']} onayı bu sürümde kapalı"
     return None
 
@@ -302,7 +303,11 @@ class Motor:
         if not tanim:
             raise AkisHatasi(404 if f"{akis_id}.json" not in hatalar else 409,
                              "bilinmeyen akış" if f"{akis_id}.json" not in hatalar else "akış tanımı geçersiz")
-        engel = akis_engeli(tanim)
+        if idem_anahtari:   # aynı istek anahtarı: mevcut koşu (kapı sonradan kapanmış olsa da) döner
+            r = self.depo.baglanti().execute("SELECT id FROM kosular WHERE idem_anahtari=?", (idem_anahtari,)).fetchone()
+            if r:
+                return {"run_id": r["id"], "tekrar": True}
+        engel = self.akis_engeli(tanim)
         if engel:
             raise AkisHatasi(403, engel)
         try:
@@ -370,6 +375,9 @@ class Motor:
                     return self.detay(kosu_id)
                 if karar != "yeniden_dene":
                     raise AkisHatasi(400, "inceleme kararı: yeniden_dene | basarisiz_say")
+                if neden.get("sebep") == "kapali":
+                    raise AkisHatasi(409, "akış ya da adım bu sürümde kapalı (kademeli devreye alma): başarısız say ya da "
+                                          "iptal et")
                 if neden.get("sebep") in YENIDEN_DENENEMEZ:
                     raise AkisHatasi(409, "bu inceleme yeniden denenemez (sınır, elle onay ya da tanımın yönlendirmesi); "
                                           "başarısız say ya da iptal et")
@@ -845,7 +853,9 @@ class Motor:
             if r["durum"] != "hazir":
                 return False
             # gönderim anında da (DB'deki eski koşu, yeniden dene, döngü): kapalı akış/adım dış dünyaya dokunmaz
-            kapali = ("akış bu sürümde etkin değil" if kosu["akis_id"] not in ETKIN_AKISLAR else adim_kapali_mi(adim))
+            kapali = self.adim_engeli(adim) or (
+                "akış bu sürümde etkin değil" if kosu["akis_id"] not in ETKIN_AKISLAR and adim["tur"] in DIS_ETKILI_ADIMLAR
+                else None)
             if kapali:
                 self._adim_yaz(b, kosu_id, adim_id, durum="inceleme", hata=kapali)
                 self._incelemeye_al(b, kosu, "kapali", f"{adim_id}: {kapali}", adim_id)
@@ -995,6 +1005,27 @@ class Motor:
 
     # ---- agent_task
     SALT_OKUR_ARACLAR = ("Read", "Glob", "Grep", "WebSearch", "WebFetch", "TodoWrite")
+
+    def akis_engeli(self, tanim):
+        """Modül kapısı + aşama 1 salt okunur kuralı (yazabilen ajan adımı kapalı)."""
+        engel = akis_engeli(tanim)
+        if engel:
+            return engel
+        for a in tanim["adimlar"]:
+            neden = self.adim_engeli(a)
+            if neden:
+                return f"{a['id']}: {neden}"
+        return None
+
+    def adim_engeli(self, adim):
+        neden = adim_kapali_mi(adim)
+        if neden:
+            return neden
+        if not YAZAN_AJAN_ACIK and adim["tur"] == "agent_task":
+            yetki = self.ajan_yazabilir(adim["ajan"])
+            if yetki:
+                return f"ajan {adim['ajan']} yazabilir ({yetki}); bu sürüm salt okunur"
+        return None
 
     def ajan_yazabilir(self, ajan_id):
         """Ajanın yan etki üretebilen yetkisi (ilk eşleşen) ya da None. Bilinmeyen araç yan etkili sayılır (fail-closed).
@@ -1517,9 +1548,15 @@ class Motor:
         motor → BASLATMA_KILIDI; kuyrugu_isle BASLATMA_KILIDI altında çağırır). Salt okuma."""
         if not isinstance(ref, str) or not REF_DESENI.match(ref):
             return False
-        r = self.depo.baglanti().execute("SELECT d.durum, k.durum AS kd FROM denemeler d JOIN kosular k ON k.id=d.kosu_id "
-                                         "WHERE d.ref=?", (ref,)).fetchone()
-        return bool(r and r["durum"] in akis_db.UCUSTA and r["kd"] not in akis_db.SON_KOSU)
+        r = self.depo.baglanti().execute("SELECT d.durum, d.adim_id, k.durum AS kd, k.akis_id, k.tanim_json FROM denemeler d "
+                                         "JOIN kosular k ON k.id=d.kosu_id WHERE d.ref=?", (ref,)).fetchone()
+        if not (r and r["durum"] in akis_db.UCUSTA and r["kd"] not in akis_db.SON_KOSU):
+            return False
+        # kademeli devreye alma kapısı kuyrukta da: kapalı akışın/adımın işi koşturulmaz
+        if r["akis_id"] not in ETKIN_AKISLAR:
+            return False
+        adim = akis_tanim.adim_bul(json.loads(r["tanim_json"]), r["adim_id"])
+        return bool(adim) and self.adim_engeli(adim) is None
 
     def _baslamayan_cagriyi_dus(self, b, kosu, d):
         """Hiç başlamamış deneme ajan çağrısı ve tahmini maliyet sayılmaz (_baslatma_hatasi ile aynı muhasebe)."""

@@ -156,7 +156,9 @@ class HerAkis(tuple):
 
 def kapiyi_ac(test):
     for y in (mock.patch.object(akis_motor, "ETKIN_AKISLAR", HerAkis()),
-              mock.patch.object(akis_motor, "HAT_ADIMLARI_ACIK", True)):
+              mock.patch.object(akis_motor, "HAT_ADIMLARI_ACIK", True),
+              mock.patch.object(akis_motor, "DAGITIM_ONAYI_ACIK", True),
+              mock.patch.object(akis_motor, "YAZAN_AJAN_ACIK", True)):
         y.start()
         test.addCleanup(y.stop)
 
@@ -243,7 +245,8 @@ class KademeliDevreyeAlmaTest(MotorTabani):
         self.assertIn("gelistirme_gorevi", str(c.exception))
 
     def test_dbdeki_eski_kosu_kapali_adimi_gondermez(self):
-        with mock.patch.object(akis_motor, "ETKIN_AKISLAR", HerAkis()), mock.patch.object(akis_motor, "HAT_ADIMLARI_ACIK", True):
+        with mock.patch.object(akis_motor, "ETKIN_AKISLAR", HerAkis()), mock.patch.object(akis_motor, "HAT_ADIMLARI_ACIK", True), \
+                mock.patch.object(akis_motor, "DAGITIM_ONAYI_ACIK", True):
             k = self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"})["run_id"]
             self.m.tur()
             self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"plan": "p", "risk": "dusuk", "yetki_gerekli": False}) + '</akis_cikti>')
@@ -262,6 +265,49 @@ class KademeliDevreyeAlmaTest(MotorTabani):
         self.m.tur()
         self.assertEqual(self.ortam.baslatilan, [])
         self.assertEqual(self.detay(k)["neden"]["sebep"], "kapali")
+
+    def test_kapali_akisin_kuyruktaki_isi_baslatilmaz(self):
+        with mock.patch.object(akis_motor, "ETKIN_AKISLAR", HerAkis()):
+            k = self.m.baslat("ornek-arastirma-ozeti", {"konu": "x"})["run_id"]
+            self.ortam.davranis = ["kuyruk"]
+            self.m.tur()
+        ref = self.son_ref()
+        with mock.patch.object(akis_motor, "ETKIN_AKISLAR", ("baska",)):
+            self.assertFalse(self.m.ref_ucusta(ref))             # sunucu kuyruğu bu işi koşturmaz
+
+    def test_yazabilen_ajan_izinli_id_altinda_da_kapali(self):
+        import copy
+        t = copy.deepcopy(self.tanimlar["ornek-arastirma-ozeti"])
+        t["izinli_ajanlar"] = ["arastirmaci"]
+        t["adimlar"][0]["ajan"] = "arastirmaci"
+        self.tanimlar["ornek-arastirma-ozeti"] = t
+        self.ortam.ajanlar["arastirmaci"]["izinli_araclar"] = ["Read", "Write(~/beyin/**)"]
+        with self.assertRaises(akis_motor.AkisHatasi) as c:
+            self.m.baslat("ornek-arastirma-ozeti", {"konu": "x"})
+        self.assertEqual(c.exception.kod, 403)
+        self.assertIn("yazabilir", str(c.exception))
+
+    def test_kapali_akisin_dis_etkisiz_adimi_biter(self):
+        t = taban_tanim()
+        t["adimlar"][0] = {"id": "a", "tur": "condition", "kosullar": [{"alan": "girdi.konu", "op": "var"}],
+                           "dogru": "son", "yanlis": "son"}
+        t["adimlar"] = [t["adimlar"][0], t["adimlar"][2]]
+        self.tanim(t)
+        with mock.patch.object(akis_motor, "ETKIN_AKISLAR", HerAkis()):
+            k = self.m.baslat("deneme", {"konu": "x"})["run_id"]
+        self.m.tur()
+        self.assertEqual(self.detay(k)["durum"], "basarili")
+
+    def test_ayni_istek_anahtari_kapali_akista_mevcut_kosuyu_doner(self):
+        with mock.patch.object(akis_motor, "ETKIN_AKISLAR", HerAkis()), mock.patch.object(akis_motor, "HAT_ADIMLARI_ACIK", True), \
+                mock.patch.object(akis_motor, "DAGITIM_ONAYI_ACIK", True):
+            k = self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"}, idem_anahtari="ui-123456789")["run_id"]
+        r = self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"}, idem_anahtari="ui-123456789")
+        self.assertEqual((r["run_id"], r["tekrar"]), (k, True))
+
+    def test_dagitim_onayi_ayri_anahtar(self):
+        with mock.patch.object(akis_motor, "HAT_ADIMLARI_ACIK", True):
+            self.assertIsNotNone(akis_motor.adim_kapali_mi({"tur": "approval", "kategori": "dagitim"}))
 
     def test_arastirma_akisi_calisir(self):
         k = self.m.baslat("ornek-arastirma-ozeti", {"konu": "x"})["run_id"]
