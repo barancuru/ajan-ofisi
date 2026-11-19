@@ -1703,7 +1703,7 @@ def alarm_gordum(kapi_imzasi):
     """'Gördüm': marks every current critical alarm as read. Persisted under durum/; only the web login may do it."""
     if not kapidan_geldi(kapi_imzasi):
         raise IstekHatasi(403, "alarm yalnız ofis girişinden kapatılabilir")
-    with gorev_kilidi():
+    with GELISTIRME_KILIDI:   # görev dosyası değil: hattın kilidini beklemez
         okunan = _okunmuslar() | {a["id"] for a in alarmlar_oku() if a["seviye"] == "kritik"}
         os.makedirs(os.path.dirname(ALARM_OKUNDU_DOSYASI), exist_ok=True)
         atomik_yaz(ALARM_OKUNDU_DOSYASI, json.dumps({"okundu": sorted(okunan)[-500:]}))
@@ -1769,8 +1769,7 @@ def takilan_islem(gorev, eylem, kapi_imzasi):
         raise IstekHatasi(400, "eylem: yeniden-dene | teshis-iste | iptal")
     yol = takilan_dosya(gorev)
     with gorev_kilidi():
-        with open(yol, encoding="utf-8", errors="replace") as f:
-            metin = f.read()
+        metin = gorev_oku(yol)
         fm, _ = on_bilgi(metin)
         if fm.get("durum") != "takildi":
             raise IstekHatasi(409, f"görev takılı değil (durum: {fm.get('durum') or '-'})")
@@ -1820,16 +1819,21 @@ def atomik_yaz(yol, metin):
     """Aynı klasörde mkstemp (O_EXCL: yerleştirilmiş symlink/sabit ad izlenmez) + os.replace (hedef symlink ise bağın
     kendisi değişir, gösterdiği dosya değil). Var olan dosyanın izinleri korunur."""
     klasor = os.path.dirname(yol) or "."
+    import stat as _stat
     try:
-        kip = os.stat(yol, follow_symlinks=False).st_mode & 0o777
+        st = os.stat(yol, follow_symlinks=False)
+        kip = st.st_mode & 0o777 if _stat.S_ISREG(st.st_mode) else None   # symlink'in kendi kipi (0777) alınmaz
     except FileNotFoundError:
         kip = None
+    if kip is None:   # yeni dosya ya da symlink yerine: umask varsayılanı (mkstemp'in 0600'ü değil)
+        maske = os.umask(0)
+        os.umask(maske)
+        kip = 0o666 & ~maske
     fd, gecici = tempfile.mkstemp(dir=klasor, prefix=".ofis.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(metin)
-            if kip is not None:
-                os.fchmod(f.fileno(), kip)
+            os.fchmod(f.fileno(), kip)
         os.replace(gecici, yol)
     except BaseException:
         try:
@@ -1858,7 +1862,9 @@ GOREV_KILIDI_BEKLE_SN = 30
 def gorev_kilidi():
     """Görev dosyası yazımları için ortak kilit: süreç içi GELISTIRME_KILIDI + hattın (bin/calistir fm_set, teslim_yaz,
     bitti/ taşıma) aldığı dosya kilidi. İç içe alınmaz. 30 sn'de alınamazsa 503 (yazma yapılmaz)."""
-    with GELISTIRME_KILIDI:
+    if not GELISTIRME_KILIDI.acquire(timeout=GOREV_KILIDI_BEKLE_SN):
+        raise IstekHatasi(503, "görev dosyası kilidi alınamadı (başka bir yazım sürüyor); biraz sonra yeniden dene")
+    try:
         kilit = _gorev_kilidi_yolu()
         os.makedirs(os.path.dirname(kilit), exist_ok=True)
         fd = os.open(kilit, os.O_RDWR | os.O_CREAT | os.O_APPEND, 0o600)
@@ -1875,21 +1881,19 @@ def gorev_kilidi():
             yield
         finally:
             os.close(fd)
+    finally:
+        GELISTIRME_KILIDI.release()
 
 
 def gorev_oku(yol):
     """Kilit altında görev dosyası okuma: symlink izlenmez (O_NOFOLLOW), yalnız sıradan dosya."""
     try:
-        fd = os.open(yol, os.O_RDONLY | os.O_NOFOLLOW)
+        metin = akis_ofis.duz_dosya_oku(yol)
     except FileNotFoundError:
         raise IstekHatasi(404, "görev yok")
     except OSError as e:
-        raise IstekHatasi(409, f"görev dosyası okunamadı ({type(e).__name__}; symlink olabilir)")
-    with os.fdopen(fd, encoding="utf-8", errors="replace") as f:
-        import stat as _stat
-        if not _stat.S_ISREG(os.fstat(f.fileno()).st_mode):
-            raise IstekHatasi(409, "görev dosyası sıradan dosya değil")
-        return f.read()
+        raise IstekHatasi(409, f"görev dosyası okunamadı ({type(e).__name__}; symlink/FIFO olabilir)")
+    return metin
 
 
 KAPI_IMZA_DOSYASI = os.path.expanduser("~/.config/ofis-kapi/kapi.env")
@@ -2024,12 +2028,9 @@ def uat_reddet(dosya, not_, kimden="workflow", beklenen_sha=None):
         # Korumalı hat (HAT_KORUMA_SURUMU) aynı gorev_kilidi'ni alır. Eski hat ve ajanların kendi araçlarıyla yaptığı
         # yazımlar kilitsizdir: yazmadan hemen önce dosya yeniden okunur, değiştiyse ezilmez.
         try:
-            with open(yol, encoding="utf-8", errors="replace") as f:
-                degisti = f.read() != metin
-        except FileNotFoundError:
-            raise IstekHatasi(410, "kart bu arada kayboldu ya da taşındı; ret yazılmadı")
-        except OSError as e:
-            raise IstekHatasi(409, f"kart okunamadı ({type(e).__name__}); ret yazılmadı")
+            degisti = gorev_oku(yol) != metin
+        except IstekHatasi as e:
+            raise IstekHatasi(410 if e.kod == 404 else 409, "kart bu arada kayboldu, taşındı ya da okunamadı; ret yazılmadı") from e
         if degisti:
             raise IstekHatasi(409, "kart bu arada değişti (hat yazdı); ret yazılmadı. Kart yeni bir pakete geçtiyse "
                                    "kalite kapısı onu test etmedi: başarısız say/iptal et; yalnız ilgisiz bir düzenlemeyse "

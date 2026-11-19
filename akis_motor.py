@@ -1207,7 +1207,8 @@ class Motor:
                 self.ortam.gelistirme_reddet(dosya, f"(workflow {ref})\n\n{not_}"[:ortak.MAKS_GIRDI], test_edilen)
                 tutamac = {"dosya": dosya, "onceki_sha": fm.get("sha256"), "reddedildi": True}
         except BaslatmaHatasi as e:
-            sinif = "erken_onay" if e.kod == 423 else "kaynak"
+            # 503: görev kilidi alınamadı, hiçbir şey yazılmadı → güvenli yeniden deneme
+            sinif = "erken_onay" if e.kod == 423 else "baslamadi" if e.kod == 503 else "kaynak"
             return self._baslatma_hatasi(kosu_id, adim, deneme_id, sinif, str(e))
         except Exception as e:  # noqa: BLE001 - dosya yazılamadı: atomik yazımda yarım dosya kalmaz
             return self._baslatma_hatasi(kosu_id, adim, deneme_id, "baslamadi", f"hat görevi yazılamadı: {type(e).__name__}")
@@ -1370,7 +1371,8 @@ class Motor:
             # manual_review (ret değil: 'yeniden dene' ile yayınlanabilir); kayıtsız takıldı → ret; (3) kayıt/yayın kanıtı
             # → onay; (4) 'evet' olmayan hazir/calisiyor (kart geri döndü) → ret; (5) aksi hâlde beklenir.
             kesin_red = onay == "hayir" or durum == "reddedildi"
-            kayit = not kesin_red and any(self.ortam.canli_onay_var(izlenen["proje"], s, h, dosya) for s, h in kayit_adaylari)
+            kayit = not kesin_red and any(self.ortam.canli_onay_var(izlenen["proje"], s, h, dosya, paket.get("dal") or None)
+                                          for s, h in kayit_adaylari)
             if durum == "takildi" and not kayit and not kesin_red:
                 # hat main'e alıp etiketledi ama canlıya geçemedi: onay kaydını siler, kartı takildi yapar
                 kayit = any(self.ortam.yayinlandi(izlenen["proje"], s, paket.get("dal"), h, dosya) for s, h in adaylar)

@@ -60,7 +60,7 @@ class SahteOrtam:
     def kuyruktaki_refler(self):
         return set(self.kuyruk)
 
-    def canli_onay_var(self, proje, surum, sha, dosya=None):
+    def canli_onay_var(self, proje, surum, sha, dosya=None, dal=None):
         return (proje, surum, sha) in self.onaylar
 
     def muhur_var(self, proje, surum, sha, dosya=None, dal=None):

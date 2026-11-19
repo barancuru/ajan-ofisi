@@ -581,32 +581,21 @@ class KuyrukIptalSiralamaTest(OfisTabani):
 
     def test_reddetme_okuma_hatalari_ayristirilir(self):
         """İki okumada da: kayıp kart 410, diğer okuma hatası 409; kart değişmez."""
-        import builtins
         dosya, yol = self.uat_karti()
         with open(yol) as f:
             once = f.read()
-        asil = builtins.open
         for hata, kod in ((sunucu.IstekHatasi(404, "görev yok"), 410), (sunucu.IstekHatasi(409, "x"), 409)):   # 1. okuma
             with mock.patch.object(sunucu, "gorev_oku", side_effect=hata):
                 with self.assertRaises(akis_motor.BaslatmaHatasi) as c:
                     self.ortam.gelistirme_reddet(dosya, "düzelt", "a" * 64)
             self.assertEqual(c.exception.kod, kod)
-        for kacinci in (1,):   # 2. okuma (yazmadan önce yeniden okuma) builtins.open ile
-            for hata, kod in ((FileNotFoundError, 410), (PermissionError, 409)):
-                sayac = [0]
-
-                def bozuk_open(p, *a, **k):
-                    if p == yol and (not a or "r" in a[0]) and "w" not in (a[0] if a else ""):
-                        sayac[0] += 1
-                        if sayac[0] == kacinci:   # ilk okuma gorev_oku (os.open) ile: builtins.open'daki ilk = yeniden okuma
-                            raise hata("x")
-                    return asil(p, *a, **k)
-                with mock.patch("builtins.open", bozuk_open):
-                    with self.assertRaises(akis_motor.BaslatmaHatasi) as c:
-                        self.ortam.gelistirme_reddet(dosya, "düzelt", "a" * 64)
-                self.assertEqual(c.exception.kod, kod, (kacinci, hata))
-                with open(yol) as f:
-                    self.assertEqual(f.read(), once)
+        for hata, kod in ((sunucu.IstekHatasi(404, "görev yok"), 410), (sunucu.IstekHatasi(409, "x"), 409)):   # 2. okuma
+            with mock.patch.object(sunucu, "gorev_oku", side_effect=[once, hata]):
+                with self.assertRaises(akis_motor.BaslatmaHatasi) as c:
+                    self.ortam.gelistirme_reddet(dosya, "düzelt", "a" * 64)
+            self.assertEqual(c.exception.kod, kod)
+            with open(yol) as f:
+                self.assertEqual(f.read(), once)
 
     def test_reddetme_beklenen_sha_kilit_altinda(self):
         with mock.patch.object(sunucu, "gelistirme_projeleri", lambda: ["homeos"]):
@@ -777,21 +766,47 @@ class HatKorumaTest(OfisTabani):
         self.assertIsNone(self.ortam.gelistirme_oku("L2.md"))
 
     def test_hat_koruma_isareti(self):
-        betik = os.path.join(self.d, "calistir")
-        with mock.patch.object(akis_ofis, "HAT_BETIGI", betik):
-            self.assertFalse(self.ortam.hat_korumasi_var())                                   # betik yok
-            self.yaz(betik, "#!/bin/bash\nGOREV_KILIDI=x\n")
-            self.assertFalse(self.ortam.hat_korumasi_var())
+        """İki kanıt birlikte: betikte işaret satırı ve hattın durum klasörüne yazdığı işaret; yalnız betiğe satır yetmez."""
+        betik, isaret = os.path.join(self.d, "calistir"), os.path.join(self.d, "hat-koruma-surumu")
+        with mock.patch.object(akis_ofis, "HAT_BETIGI", betik), mock.patch.object(akis_ofis, "HAT_KORUMA_ISARETI", isaret):
+            self.assertFalse(self.ortam.hat_korumasi_var())                                   # ikisi de yok
             self.yaz(betik, "#!/bin/bash\nHAT_KORUMA_SURUMU=1   # açıklama\n")
+            self.assertFalse(self.ortam.hat_korumasi_var())                                   # ajan satır ekledi: yetmez
+            self.yaz(isaret, "1\n")
             self.assertTrue(self.ortam.hat_korumasi_var())
+            self.yaz(isaret, "2\n")
+            self.assertFalse(self.ortam.hat_korumasi_var())                                   # sürüm uyuşmaz
+            os.remove(isaret)
+            os.mkfifo(isaret)                                                                 # FIFO: bloke etmez
+            self.assertFalse(self.ortam.hat_korumasi_var())
 
-    def test_canli_hat_bugun_korumasiz(self):
-        """Gerçek ~/beyin/bin/calistir (bu kabul anında): işaret yok → hat adımları ikinci katmanda da kapalı."""
-        if not os.path.exists(akis_ofis.HAT_BETIGI):
-            self.skipTest("hat betiği yok")
-        with open(akis_ofis.HAT_BETIGI, encoding="utf-8", errors="replace") as f:
-            beklenen = "HAT_KORUMA_SURUMU=" in f.read()
-        self.assertEqual(self.ortam.hat_korumasi_var(), beklenen)
+    def test_fifo_gorev_dosyasi_bloke_etmez(self):
+        fifo = os.path.join(self.dizin["gorevler"], "F.md")
+        os.mkfifo(fifo)
+        with self.assertRaises(sunucu.IstekHatasi):
+            sunucu.gorev_oku(fifo)
+        self.assertIsNone(self.ortam.gelistirme_oku("F.md"))
+
+    def test_atomik_yaz_symlink_yerine_guvenli_kip(self):
+        hedef = os.path.join(self.d, "hedef2")
+        self.yaz(hedef, "x")
+        bag = os.path.join(self.dizin["gorevler"], "S.md")
+        os.symlink(hedef, bag)
+        sunucu.atomik_yaz(bag, "y")
+        self.assertEqual(os.stat(bag).st_mode & 0o113, 0)                                    # dünya yazamaz, çalıştırılamaz (0777 değil)
+        yeni = os.path.join(self.dizin["gorevler"], "Yeni.md")
+        sunucu.atomik_yaz(yeni, "z")
+        maske = os.umask(0); os.umask(maske)
+        self.assertEqual(os.stat(yeni).st_mode & 0o777, 0o666 & ~maske)                      # umask varsayılanı
+
+    def test_onay_kimligi_dal_ve_guncel_muhur(self):
+        self.muhurle("0.10.1", "a" * 64, gorev="G0.md")
+        fm = {"proje": "homeos", "surum": "0.10.1", "dal": "beyin/1119-x"}
+        sunucu.canli_onayi_yaz(fm, "G0.md")
+        self.assertTrue(self.ortam.canli_onay_var("homeos", "0.10.1", "a" * 64, "G0.md", "beyin/1119-x"))
+        self.assertFalse(self.ortam.canli_onay_var("homeos", "0.10.1", "a" * 64, "G0.md", "beyin/1119-y"))
+        self.muhurle("0.10.1", "a" * 64, gorev="Baska.md")                                   # mühür sonradan başka göreve
+        self.assertFalse(self.ortam.canli_onay_var("homeos", "0.10.1", "a" * 64, "G0.md", "beyin/1119-x"))
 
 
 class ApiTest(OfisTabani):

@@ -31,15 +31,34 @@ def guvenli_git_ortami(temel):
 
 
 HAT_BETIGI = os.path.expanduser(os.environ.get("OFIS_HAT_BETIGI", "~/beyin/bin/calistir"))
+# Hattın her koşuda yazdığı işaret: ajanların (Write ~/beyin/** dahil) ve kum havuzunun yazamadığı durum klasöründe
+HAT_KORUMA_ISARETI = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
+                                  "beyin", "hat-koruma-surumu")
+
+
+def duz_dosya_oku(yol, en_cok=400_000):
+    """Yalnız sıradan dosya: symlink izlenmez (O_NOFOLLOW), FIFO/aygıt açılırken bloke etmez (O_NONBLOCK, fstat önce).
+    Hata: OSError (FileNotFoundError dahil)."""
+    import stat as _stat
+    fd = os.open(yol, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        if not _stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(f"sıradan dosya değil: {os.path.basename(yol)}")
+        os.set_blocking(fd, True)
+        f = os.fdopen(fd, encoding="utf-8", errors="replace")
+        fd = None
+        with f:
+            return f.read(en_cok)
+    finally:
+        if fd is not None:
+            os.close(fd)
 
 
 def kimlik_oku(yol):
     """Hattın mühür kimliği (paket_muhurle) ya da onay kaydı kimliği: 'anahtar=değer' satırları. Symlink izlenmez.
     Geçersiz/eksikse None. Alanlar: gorev (görev dosyası adı), dal, sha256."""
     try:
-        fd = os.open(yol, os.O_RDONLY | os.O_NOFOLLOW)
-        with os.fdopen(fd, encoding="utf-8", errors="replace") as f:
-            metin = f.read(4096)
+        metin = duz_dosya_oku(yol, 4096)
     except OSError:
         return None
     k = {}
@@ -81,11 +100,15 @@ class OfisOrtami:
 
     def hat_korumasi_var(self):
         """Canlı hat (bin/calistir) görev kilidi + güvenli yazım + mühür kimliğiyle mi çalışıyor (HAT_KORUMA_SURUMU)?"""
+        # İki kanıt birlikte: betikte işaret satırı VE hattın ajanların yazamadığı durum klasörüne yazdığı işaret dosyası
+        # (yalnız betiğe satır eklemek yetmez; eski hat işaret dosyası yazmaz)
         try:
-            with open(HAT_BETIGI, encoding="utf-8", errors="replace") as f:
-                return re.search(r"^HAT_KORUMA_SURUMU=([1-9][0-9]*)\b", f.read(), re.M) is not None
+            betik = duz_dosya_oku(HAT_BETIGI, 2_000_000)
+            isaret = duz_dosya_oku(HAT_KORUMA_ISARETI, 64).strip()
         except OSError:
             return False
+        m = re.search(r"^HAT_KORUMA_SURUMU=([1-9][0-9]*)\b", betik, re.M)
+        return bool(m) and isaret == m.group(1)
 
     def yayinlandi(self, proje, surum, dal, sha, dosya=None):
         """'durum: bitti' kapısız yazılabilir. Yayın kanıtı üç parça: (1) hattın paket mühürü (ajanların yazamadığı
@@ -109,10 +132,8 @@ class OfisOrtami:
             return False
         taban = os.path.join(self.s.PAKET_MUHUR_DIZINI, f"{proje}-{surum}.zip")
         try:
-            fd = os.open(taban + ".sha256", os.O_RDONLY | os.O_NOFOLLOW)
-            with os.fdopen(fd, encoding="utf-8") as f:
-                if f.read().split()[0:1] != [sha]:
-                    return False
+            if duz_dosya_oku(taban + ".sha256", 4096).split()[0:1] != [sha]:
+                return False
         except OSError:
             return False
         if dosya is None:
@@ -146,7 +167,7 @@ class OfisOrtami:
     def kuyrukta_mi(self, ref):
         return ref in self.kuyruktaki_refler()
 
-    def canli_onay_var(self, proje, surum, sha, dosya=None):
+    def canli_onay_var(self, proje, surum, sha, dosya=None, dal=None):
         """Ofis girişinin (kapı imzası) yazdığı, mühürlü pakete bağlı canlı onay kaydı (sunucu.canli_onayi_yaz).
         dosya verilirse onay kimliği (.onay.kimlik, mühürden kopyalanır) de bu göreve ait olmalı."""
         if not (isinstance(proje, str) and re.fullmatch(r"[a-z-]{1,40}", proje) and isinstance(surum, str)
@@ -154,16 +175,16 @@ class OfisOrtami:
             return False
         taban = os.path.join(self.s.CANLI_ONAY_DIZINI, f"{proje}-{surum}.onay")
         try:
-            fd = os.open(taban, os.O_RDONLY | os.O_NOFOLLOW)
-            with os.fdopen(fd, encoding="utf-8") as f:
-                if f.read().strip() != sha:
-                    return False
+            if duz_dosya_oku(taban, 4096).strip() != sha:
+                return False
         except OSError:
             return False
         if dosya is None:
             return True
+        # onay kimliği = mühür kimliği = izlenen kart (ve dal): ikisi de bu görev/dal/sha'yı söylemeli
         k = kimlik_oku(taban + ".kimlik")
-        return bool(k and k["gorev"] == dosya and k["sha256"] == sha)
+        return bool(k and k["gorev"] == dosya and k["sha256"] == sha and (dal is None or k.get("dal") == dal)
+                    and self.muhur_var(proje, surum, sha, dosya, dal))
 
     @contextlib.contextmanager
     def baslatma_kilidi(self):
@@ -244,9 +265,7 @@ class OfisOrtami:
         if not yol:
             return None
         try:
-            fd = os.open(yol, os.O_RDONLY | os.O_NOFOLLOW)   # symlink izlenmez
-            with os.fdopen(fd, encoding="utf-8", errors="replace") as f:
-                fm, _ = self.s.on_bilgi(f.read(400_000))
+            fm, _ = self.s.on_bilgi(duz_dosya_oku(yol))   # symlink/FIFO izlenmez
         except OSError:
             return None
         return fm
