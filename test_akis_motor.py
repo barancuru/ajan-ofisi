@@ -808,7 +808,8 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         self.assertEqual(sorted(self.ortam.gorevler), ["G0.md", "G1.md"])   # yeni görev
         self.assertEqual(self.detay(k)["ajan_cagrisi"], cagri + 1)           # bütçeye sayıldı
 
-    def test_kart_okunamazsa_yeni_gorev_butceyle(self):
+    def test_kart_okunamazsa_yeni_gorev_acilmaz_inceleme(self):
+        """Okunamayan kart (geçici okuma hatası olabilir): kopya kart açılmaz, el kararına gider."""
         k = self.hat_incelemede()
         cagri = self.detay(k)["ajan_cagrisi"]
         self.ortam.gorevler["G0.md"]["durum"] = "hazir"
@@ -817,7 +818,37 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         self.ortam.gelistirme_oku = lambda d: None if d == "G0.md" else asil(d)
         self.m.tur()
         self.ortam.gelistirme_oku = asil
-        self.assertEqual(self.detay(k)["ajan_cagrisi"], cagri + 1)
+        self.assertEqual(list(self.ortam.gorevler), ["G0.md"])
+        self.assertEqual(self.detay(k)["ajan_cagrisi"], cagri)
+        self.assertEqual((self.detay(k)["durum"], self.detay(k)["neden"]["sebep"]), ("inceleme", "kaynak"))
+
+    def test_yayina_cikmis_kartta_yeniden_dene_kopya_acmaz(self):
+        k = self.hat_incelemede()
+        self.ortam.gorevler["G0.md"].update({"durum": "bitti", "onay": "evet"})
+        self.m.devam(k, "yeniden_dene")
+        self.m.tur()                                     # aynı kart yeniden izlenir
+        self.m.tur()                                     # uzlaştırma: bitti → erken_onay
+        self.assertEqual(list(self.ortam.gorevler), ["G0.md"])
+        self.assertEqual(self.detay(k)["neden"]["sebep"], "erken_onay")
+
+    def test_devam_sonrasi_yeniden_takilan_kart_deneme_harcamaz(self):
+        k = self.hat_incelemede()
+        self.ortam.gorevler["G0.md"]["durum"] = "hazir"
+        self.m.devam(k, "yeniden_dene")
+        self.ortam.gorevler["G0.md"]["durum"] = "takildi"          # devam ile tur arasında yine takıldı
+        once = len(self.depo.denemeler(k))
+        self.m.tur()
+        self.assertEqual(len(self.depo.denemeler(k)), once)
+        self.assertEqual(self.detay(k)["durum"], "inceleme")
+
+    def test_hata_geri_donen_kart_paket_kaydi_yoksa_da_ret(self):
+        k = self.pilot_onaya_kadar()
+        with self.depo.islem() as b:
+            b.execute("UPDATE adimlar SET cikti_json=? WHERE kosu_id=? AND adim_id='uygulama'",
+                      (json.dumps({"durum": "uat", "dosya": "G0.md", "surum": "", "dal": "", "sha256": "", "uyari": 0}), k))
+        self.ortam.gorevler["G0.md"].update({"durum": "calisiyor", "onay": ""})
+        self.m.tur()
+        self.assertEqual(self.adim(k, "uat_onayi")["durum"], "basarisiz")
 
     def test_yeniden_izleme_denemesi_dogrudan_calisiyor(self):
         """Çökme penceresi yok: yeniden izleme denemesi 'gonderiliyor' bırakılmaz, tutamacıyla yazılır."""

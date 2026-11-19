@@ -357,6 +357,8 @@ class Motor:
                 kaynak_adim = akis_tanim.adim_bul(self._tanim(kosu), adim_id)
                 if kaynak_adim["tur"] == "gelistirme_gorevi":
                     onceki = self._onceki_hat_karti(b, kosu_id, adim_id, self._adim_al(b, kosu_id, adim_id)["iterasyon"])
+                    if not onceki and kaynak_adim.get("mod") == "duzeltme":   # düzeltme: hedef kart
+                        onceki = self._son_tutamac(b, kosu_id, kaynak_adim["hedef_adim"])
                     fm = self.ortam.gelistirme_oku(onceki["dosya"]) if onceki else None
                     if fm and fm.get("durum") == "takildi":
                         raise AkisHatasi(409, "hat kartı hâlâ takılı: önce Geliştirme sekmesinden yeniden dene ya da iptal "
@@ -804,8 +806,15 @@ class Motor:
                 onceki = self._onceki_hat_karti(b, kosu_id, adim_id, r["iterasyon"])
                 if onceki:
                     fm = self.ortam.gelistirme_oku(onceki["dosya"])
-                    # yalnız okunabilen ve hâlâ canlı kart yeniden izlenir; reddedilmiş/bitmiş/okunamayan → yeni görev
-                    if fm and fm.get("durum") not in ("reddedildi", "bitti"):
+                    # Yalnız İPTAL edilmiş (reddedildi) kart yeni görev açtırır (bütçeli). Okunamayan ya da hâlâ takılı kart:
+                    # kopya kart açılmaz, deneme harcanmaz → el kararı. Diğer her durum (bitti dahil) aynı kart izlenir.
+                    if not fm or fm.get("durum") == "takildi":
+                        neden = ("hat kartı okunamadı" if not fm else "hat kartı yine takıldı") + \
+                                f" ({onceki['dosya']}); Geliştirme sekmesinden kontrol et, sonra yeniden dene"
+                        self._adim_yaz(b, kosu_id, adim_id, durum="inceleme", hata=neden)
+                        self._incelemeye_al(b, kosu, "kaynak", f"{adim_id}: {neden}", adim_id)
+                        return True
+                    if fm.get("durum") != "reddedildi":
                         yeniden_izle = onceki
             if yeniden_izle:
                 c = b.execute("UPDATE adimlar SET durum='calisiyor', deneme=deneme+1, guncelleme_ts=? "
@@ -1237,7 +1246,8 @@ class Motor:
             # görev dosyasındaki 'onay: evet' kapısız yazılabilir: kabul yalnız ofis girişinin yazdığı, mühürlü pakete
             # bağlı canlı onay kaydıyla ya da hattın o kayıtla yaptığı yayın sonucuyla (durum: bitti)
             adaylar = self._guvenilir_paketler(izlenen["proje"], paket, fm)
-            if not adaylar and not (onay == "hayir" or durum == "reddedildi"):   # kesin ret paket kanıtı istemez
+            if not adaylar and not (onay == "hayir" or durum == "reddedildi"
+                                    or (onay != "evet" and durum in ("hazir", "calisiyor"))):   # ret paket kanıtı istemez
                 self._adim_yaz(b, kosu["id"], adim["id"], durum="inceleme", hata="geçerli paket kaydı yok")
                 self._incelemeye_al(b, kosu, "kaynak", "izlenen hat görevinin UAT paketi (sürüm/sha) kaydedilmemiş; onay "
                                     "doğrulanamaz, elle kontrol et", adim["id"])
