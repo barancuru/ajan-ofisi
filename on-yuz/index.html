@@ -3271,6 +3271,7 @@ let notGrafiDurdur = null;
 async function sekmeAc(ad) {
   aktifSekme = ad;
   if (notGrafiDurdur) { notGrafiDurdur(); notGrafiDurdur = null; }
+  if (ad !== 'akis' && akisKaynak) { akisKaynak.close(); akisKaynak = null; }
   document.querySelectorAll('[data-sekme]').forEach(b => { const s = b.dataset.sekme === ad; b.classList.toggle('secili', s); if (s) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
   $('aracDugme').classList.toggle('secili', !!$('aracMenu').querySelector('[data-sekme="' + ad + '"]'));
   sekmeAdres(ad);
@@ -4224,6 +4225,29 @@ const AKIS_DURUM = { calisiyor:'çalışıyor', duraklatildi:'duraklatıldı', i
   gonderiliyor:'gönderiliyor', kuyrukta:'kuyrukta', bilinmeyen:'bilinmeyen', yok_sayildi:'yok sayıldı' };
 const akisAcik = new Set();
 let akisCanliZaman = null;
+// V1.1 #11: Workflow sekmesi açıkken yalnız workflow olayları (?tur=akis); olay gelen koşunun satırı yerinde güncellenir
+var akisKaynak = null;   // var: sekmeAc açılışta bu satırdan önce çağrılabilir (TDZ yok)
+const akisSatirZaman = new Map();
+function akisAkisiAc() {
+  if (DEMO || akisKaynak) return;
+  akisKaynak = new EventSource('/api/olaylar?tur=akis');
+  akisKaynak.addEventListener('akis', e => {
+    if (aktifSekme !== 'akis') { akisKaynak.close(); akisKaynak = null; return; }
+    let o; try { o = JSON.parse(e.data); } catch { return; }
+    akisSatirGuncelle(o.run_id);
+  });
+}
+function akisSatirGuncelle(id) {
+  const eski = id && sayfa.querySelector('.akis-kosu[data-run="' + CSS.escape(id) + '"]');
+  if (!eski) { akisCanli(); return; }          // yeni koşu: liste baştan
+  if (akisSatirZaman.has(id)) return;
+  akisSatirZaman.set(id, setTimeout(async () => {
+    akisSatirZaman.delete(id);
+    let dt; try { dt = await getJSON('/api/akis/detay?id=' + encodeURIComponent(id)); } catch { return; }
+    const simdiki = sayfa.querySelector('.akis-kosu[data-run="' + CSS.escape(id) + '"]');
+    if (simdiki && aktifSekme === 'akis') simdiki.replaceWith(akisKosuKarti(dt, dt));
+  }, 700));
+}
 function akisCanli() {
   if (aktifSekme !== 'akis' || akisCanliZaman) return;
   akisCanliZaman = setTimeout(() => {
@@ -4243,6 +4267,7 @@ async function akisIslem(yol, govde, tamam) {
 async function akisSayfasi() {
   const bas = [el('h2', null, 'Workflow'), el('p', 'alt', 'Sürüm kontrollü akışlar (akislar/*.json). Geçişler tanımdan gelir; model yeniden planlama yapmaz. Boştayken model çağrısı yok. Dağıtım onayı Geliştirme sekmesindeki UAT kartında kalır.')];
   if (DEMO) return [...bas, el('p', 'alt', 'Demo modunda workflow gösterilmez.')];
+  akisAkisiAc();
   let d;
   try { d = await getJSON('/api/akis'); } catch { return [...bas, el('p', 'alt', 'Workflow listesi alınamadı.')]; }
   // başlatma formu
@@ -4284,8 +4309,8 @@ async function akisSayfasi() {
   for (const k of d.kosular) icerik.push(akisKosuKarti(k));
   return icerik;
 }
-function akisKosuKarti(k) {
-  const kart = el('details', 'kart akis-kosu'); kart.open = akisAcik.has(k.run_id);
+function akisKosuKarti(k, hazirDetay = null) {
+  const kart = el('details', 'kart akis-kosu'); kart.open = akisAcik.has(k.run_id); kart.dataset.run = k.run_id;
   const ozet = el('summary');
   const cubuk = el('span', 'akis-ilerleme'); const dolu = el('i'); dolu.style.width = Math.round(100 * k.ilerleme.biten / Math.max(k.ilerleme.toplam, 1)) + '%'; cubuk.append(dolu);
   cubuk.setAttribute('role', 'img'); cubuk.setAttribute('aria-label', k.ilerleme.biten + '/' + k.ilerleme.toplam + ' adım');
@@ -4301,8 +4326,8 @@ function akisKosuKarti(k) {
     let dt; try { dt = await getJSON('/api/akis/detay?id=' + encodeURIComponent(k.run_id)); } catch { govde.replaceChildren(el('small', 'alt ong-hata', 'Ayrıntı alınamadı.')); return; }
     govde.replaceChildren(akisDugmeler(dt), akisAdimlar(dt));
   };
-  kart.ontoggle = () => { if (kart.open) { akisAcik.add(k.run_id); yukle(); } else akisAcik.delete(k.run_id); };
-  if (kart.open) yukle();
+  kart.ontoggle = () => { if (kart.open) { akisAcik.add(k.run_id); if (!hazirDetay) yukle(); hazirDetay = null; } else akisAcik.delete(k.run_id); };
+  if (kart.open) { if (hazirDetay) govde.replaceChildren(akisDugmeler(hazirDetay), akisAdimlar(hazirDetay)); else yukle(); }
   return kart;
 }
 function akisDugmeler(dt) {

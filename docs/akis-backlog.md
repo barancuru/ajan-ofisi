@@ -26,7 +26,7 @@
 8. **Hat ara durumları**: hat `calisiyor`/`deneme` alanlarını motor adım ilerlemesine yansıtsın (şimdi yalnız son durum).
 9. **Operatör kararları**: `inceleme`de "adımı başarılı say (gerekçe zorunlu, kapı imzalı)" ve "ek bütçe ver" eylemleri.
 10. **Saklama**: bitmiş koşular ve `durum/akis-sonuc/*` için 90 gün sonra arşiv/silme.
-11. **SSE süzgeci**: `/api/olaylar?tur=akis` ile yalnız workflow olayları; panel sayfa yenilemek yerine satır günceller.
+11. ~~**SSE süzgeci**~~ — V1.1: `?tur=` (geçmiş + canlı), Workflow sekmesi ayrı akış açar ve olay gelen koşu satırını yerinde günceller; önceden `akis` olayı istemcide hiç dinlenmiyordu:: `/api/olaylar?tur=akis` ile yalnız workflow olayları; panel sayfa yenilemek yerine satır günceller.
 
 ## V2 — agentic orchestration (deterministik çekirdeğin üstünde)
 - **Planlayıcı adım türü (`plan_step`)**: model, tanımın izin verdiği alt-grafik şablonlarından birini ve parametresini

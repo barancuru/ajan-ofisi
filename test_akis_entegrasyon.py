@@ -885,6 +885,34 @@ class ApiTest(OfisTabani):
         self.assertEqual(self.iste("POST", "/api/akis/iptal", {"run_id": run})[1]["durum"], "iptal")
         self.assertEqual(self.iste("POST", "/api/akis/iptal", {"run_id": run})[0], 409)
 
+    def test_sse_tur_suzgeci(self):
+        """V1.1 #11: /api/olaylar?tur=akis geçmişte ve canlı akışta yalnız workflow olaylarını yollar."""
+        import socket
+        with open(ortak.OLAYLAR, "w") as f:
+            for o in ({"tur": "hata", "metin": "x"}, {"tur": "akis", "run_id": "r1"}, {"tur": "kosu_bitti", "kosu_id": "k"}):
+                f.write(json.dumps(o) + "\n")
+        c = socket.create_connection(self.s.server_address, timeout=5)
+        self.addCleanup(c.close)
+        c.sendall(b"GET /api/olaylar?son=10&tur=akis HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+        dosya = c.makefile("rb")
+
+        def sonraki_olay():
+            while True:
+                satir = dosya.readline()
+                if not satir:
+                    return None
+                if satir.startswith(b"data: "):
+                    return json.loads(satir[6:])
+        self.assertEqual(sonraki_olay()["run_id"], "r1")
+        time.sleep(0.5)
+        with open(ortak.OLAYLAR, "a") as f:
+            for o in ({"tur": "hata", "metin": "y"}, "bozuk", {"tur": "akis", "run_id": "r2"}):
+                f.write((o if isinstance(o, str) else json.dumps(o)) + "\n")
+        self.assertEqual(sonraki_olay(), {"tur": "akis", "run_id": "r2"})
+        self.assertIsNone(sunucu.sse_tur_suzgeci({}))
+        self.assertIsNone(sunucu.sse_tur_suzgeci({"tur": ["../x"]}))
+        self.assertEqual(sunucu.sse_tur_suzgeci({"tur": ["akis,hata,X"]}), {"akis", "hata"})
+
     def test_girdi_dogrulama(self):
         for govde, kod in (({"akis": "../x"}, 400), ({"akis": "yok-boyle"}, 404),
                            ({"akis": "ornek-arastirma-ozeti", "girdiler": {"konu": "x" * 501}}, 400),

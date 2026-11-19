@@ -2779,11 +2779,12 @@ class Isleyici(SimpleHTTPRequestHandler):
             son = min(int((sorgu.get("son") or ["0"])[0]), 200)
         except ValueError:
             son = 0
+        turler = sse_tur_suzgeci(sorgu)
         try:
             if son:
                 # terminal_* ve token olayları tekrar oynatılmaz (durum /api/terminaller ve /api/token'dan gelir)
                 gecmis = [o for o in olaylari_oku() if not str(o.get("tur", "")).startswith("terminal_")
-                          and o.get("tur") != "token"]
+                          and o.get("tur") != "token" and (turler is None or o.get("tur") in turler)]
                 for olay in gecmis[-son:]:
                     self._sse_yaz(olay)
             konum = os.path.getsize(ortak.OLAYLAR) if os.path.exists(ortak.OLAYLAR) else 0
@@ -2801,9 +2802,11 @@ class Isleyici(SimpleHTTPRequestHandler):
                         konum += son_satir_sonu + 1
                         for satir in parca[:son_satir_sonu].splitlines():
                             try:
-                                self._sse_yaz(json.loads(satir.decode("utf-8")))
+                                olay = json.loads(satir.decode("utf-8"))
                             except (json.JSONDecodeError, UnicodeDecodeError):
                                 continue
+                            if isinstance(olay, dict) and (turler is None or olay.get("tur") in turler):
+                                self._sse_yaz(olay)
                 if time.time() - nabiz > 15:
                     self.wfile.write(b": nabiz\n\n")
                     self.wfile.flush()
@@ -2816,6 +2819,14 @@ class Isleyici(SimpleHTTPRequestHandler):
         self.wfile.write(f"event: {olay.get('tur', 'olay')}\ndata: {json.dumps(olay, ensure_ascii=False)}\n\n"
                          .encode("utf-8"))
         self.wfile.flush()
+
+
+def sse_tur_suzgeci(sorgu):
+    """/api/olaylar?tur=akis[,hata]: yalnız bu türler (V1.1 #11). Yoksa ya da geçersizse None = süzgeç yok.
+    En çok 10 tür, her biri [a-z_]{1,30}; geçersiz değer süzgeci daraltmaz, yok sayılır."""
+    ham = (sorgu.get("tur") or [""])[0]
+    turler = {t for t in ham.split(",") if re.fullmatch(r"[a-z_]{1,30}", t)} if ham else set()
+    return turler if 0 < len(turler) <= 10 else None
 
 
 def bos_port_ile_ac():
