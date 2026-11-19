@@ -414,22 +414,41 @@ def limit_bekleyenleri_al(kuyruk):
 AKIS_ALARM_ARALIK_SN = 600
 
 
+_AKIS_ALARM_SUREC = None   # (açılış, monotonik): dosya yazılamazsa süreç içi seyreltme
+
+
+def _alarm_saati():
+    """(açılış kimliği, monotonik saniye). Monotonik saat açılışta sıfırlanır; açılış kimliği bunu ayırt eder."""
+    try:
+        with open("/proc/sys/kernel/random/boot_id", encoding="ascii") as f:
+            acilis = f.read().strip()
+    except OSError:
+        acilis = "?"
+    return acilis, time.monotonic()
+
+
 def _akis_alarm_zamani_geldi():
     """'Workflow DB okunamadı' alarmı en çok 10 dakikada bir — ofis sunucusu ve systemd tekrar servisinin kısa ömürlü
-    süreçleri arasında ortak: zaman damgası durum/akis-alarm.ts'te (çağıranlar baslatma.lock altında). Monotonik saat:
-    duvar saati geri alınsa da alarm susmaz; açılıştan sonra (daha küçük değer) negatif fark = yeni alarm."""
+    süreçleri arasında ortak: 'açılış monotonik' durum/akis-alarm.ts'te (çağıranlar baslatma.lock altında). Duvar saati
+    değişse de etkilenmez; yeni açılış hemen alarm verir. Dosya yazılamazsa süreç içi zamanla seyreltilir."""
+    global _AKIS_ALARM_SUREC
     yol = os.path.join(ortak.DURUM_DIZINI, "akis-alarm.ts")
-    simdi = time.monotonic()
+    acilis, simdi = _alarm_saati()
+
+    def yakin(kayit):
+        return kayit is not None and kayit[0] == acilis and 0 <= simdi - kayit[1] < AKIS_ALARM_ARALIK_SN
     try:
         with open(yol, encoding="utf-8") as f:
-            son = float(f.read().strip() or "nan")
-        fark = simdi - son
-        if 0 <= fark < AKIS_ALARM_ARALIK_SN:
+            parca = f.read().split()
+        if yakin((parca[0], float(parca[1]))):
             return False
-    except (OSError, ValueError):
+    except (OSError, ValueError, IndexError):
         pass
+    if yakin(_AKIS_ALARM_SUREC):
+        return False
+    _AKIS_ALARM_SUREC = (acilis, simdi)
     try:
-        atomik_yaz(yol, f"{simdi}\n")
+        atomik_yaz(yol, f"{acilis} {simdi}\n")
     except OSError:
         pass
     return True

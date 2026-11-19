@@ -127,7 +127,17 @@ class Depo:
             except BaseException:
                 b.execute("ROLLBACK")
                 raise
-            b.execute("COMMIT")
+            try:
+                b.execute("COMMIT")
+            except BaseException:
+                # COMMIT başarısızsa bağlantı açık işlemde kalmamalı: sonraki islem() çağrıları bu işleme "katılıp"
+                # hiç commit etmezdi (sessiz durum kaybı)
+                if b.in_transaction:
+                    try:
+                        b.execute("ROLLBACK")
+                    except sqlite3.Error:
+                        pass
+                raise
 
     def migrate(self):
         b = self.baglanti()

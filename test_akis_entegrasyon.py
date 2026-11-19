@@ -48,6 +48,7 @@ class OfisTabani(unittest.TestCase):
                    mock.patch.object(ortak, "OLAYLAR", os.path.join(self.d, "olaylar.jsonl")),
                    mock.patch.object(sunucu, "GOREV_DIZINI", dizinler["gorevler"]),
                    mock.patch.object(sunucu, "kosucuyu_durt", lambda: None),
+                   mock.patch.object(sunucu, "_AKIS_ALARM_SUREC", None),
                    mock.patch.object(sunucu, "tmux_hazirla", lambda: "tmux"),
                    mock.patch.object(sunucu.subprocess, "run", self.sahte_tmux)]
         for y in yamalar:
@@ -464,10 +465,33 @@ class KuyrukIptalSiralamaTest(OfisTabani):
                 sunucu.kuyrugu_isle()
         self.assertEqual(len(self.hata_olaylari()), 1)
         self.assertEqual(self.tmux, [])
-        with mock.patch.object(sunucu, "motor", side_effect=RuntimeError("db kilitli")), \
-                mock.patch.object(sunucu.time, "monotonic", lambda: 10 ** 9):   # 10 dk geçti (ya da başka süreç)
-            sunucu.kuyrugu_isle()
-        self.assertEqual(len(self.hata_olaylari()), 2)
+
+    def alarm(self, saat):
+        with mock.patch.object(sunucu, "_alarm_saati", lambda: saat):
+            return sunucu._akis_alarm_zamani_geldi()
+
+    def test_alarm_seyreltme_acilis_ve_saat(self):
+        """Alarm: aynı açılışta 10 dk'da bir; yeni açılış (boot_id farklı) hemen; bozuk dosya alarm verir."""
+        self.assertTrue(self.alarm(("acilis-1", 100.0)))
+        self.assertFalse(self.alarm(("acilis-1", 400.0)))
+        self.assertTrue(self.alarm(("acilis-1", 701.0)))
+        self.assertTrue(self.alarm(("acilis-2", 5.0)))        # yeniden açılış: monotonik saat küçük ama yeni açılış
+        self.assertFalse(self.alarm(("acilis-2", 60.0)))
+        with open(os.path.join(self.dizin["durum"], "akis-alarm.ts"), "w") as f:
+            f.write("bozuk")
+        self.assertFalse(self.alarm(("acilis-2", 61.0)))      # aynı süreç az önce alarm verdi (süreç içi yedek)
+        with mock.patch.object(sunucu, "_AKIS_ALARM_SUREC", None):   # başka süreç (systemd tekrar servisi)
+            with open(os.path.join(self.dizin["durum"], "akis-alarm.ts"), "w") as f:
+                f.write("bozuk")
+            self.assertTrue(self.alarm(("acilis-2", 62.0)))     # bozuk dosya: alarm verir ve dosyayı düzeltir
+            self.assertFalse(self.alarm(("acilis-2", 63.0)))
+
+    def test_alarm_dosyasi_yazilamazsa_surec_ici_seyreltme(self):
+        """Disk dolu/salt okunur: dosya yazılamazsa her turda alarm yağmuru olmaz (süreç içi yedek)."""
+        with mock.patch.object(sunucu, "atomik_yaz", side_effect=OSError("disk dolu")):
+            sonuclar = [self.alarm(("acilis-1", t)) for t in (100.0, 120.0, 140.0)]
+            self.assertEqual(sonuclar, [True, False, False])
+            self.assertTrue(self.alarm(("acilis-1", 701.0)))
 
     def test_db_okunamazsa_limit_kaydi_korunur_baslatilmaz(self):
         arg = {"kosu_id": "2026-11-19-1-akis-okuyucu", "ajan": "akis-okuyucu", "prompt": "p", "kaynak": "akis",
@@ -479,6 +503,23 @@ class KuyrukIptalSiralamaTest(OfisTabani):
         self.assertEqual(len(os.listdir(kosucu.limit_bekleyen_dizini())), 1)   # limit kaydı yerinde
         self.assertFalse(os.path.exists(sunucu.kuyruk_yolu()))
         self.assertTrue(self.hata_olaylari())
+
+    def test_tek_kosunun_hatasi_digerlerini_durdurmaz(self):
+        """Önceden var olan: bir koşunun uzlaştırması hata verirse aynı turdaki diğer koşular yine işlenir."""
+        k1 = self.m.baslat("ornek-arastirma-ozeti", {"konu": "a"})["run_id"]
+        asil = self.m._kosu_isle
+
+        def bozuk(kosu_id):
+            if kosu_id == k1:
+                raise RuntimeError("bozuk tutamaç")
+            return asil(kosu_id)
+        self.m._kosu_isle = bozuk
+        k2 = self.m.baslat("ornek-arastirma-ozeti", {"konu": "b"})["run_id"]
+        self.m.tur()                                       # istisna dışarı sızmaz
+        self.assertEqual(len(self.tmux), 1)               # k2 başlatıldı
+        self.assertEqual(self.m.depo.denemeler(k2)[0]["durum"], "calisiyor")
+        with open(ortak.OLAYLAR) as f:
+            self.assertTrue(any(json.loads(s).get("olay") == "motor_hatasi" for s in f))
 
     def test_iptal_once_commit_sonra_kuyruk_kosmaz(self):
         k, ref = self.kuyruktaki_kosu()

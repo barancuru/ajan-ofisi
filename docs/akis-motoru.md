@@ -134,7 +134,12 @@ kosucu sonucu `son: false` yazar; motor aynı denemeyi beklemeyi sürdürür, ke
 - Bilinen bekleme: systemd tekrar servisi `baslatma.lock`'u tutarken (birkaç tmux penceresi açarken) iptal ve motor
   kilidi altındaki API çağrıları kısa süre bekler. `bilinmiyor` durumunda korunan workflow işleri kuyruk sınırına
   (`MAKS_KUYRUK`) sayılır; DB uzun süre okunamazsa yeni işler 429 alabilir. "Workflow DB okunamadı" alarmı süreç
-  başına en çok 10 dakikada bir yazılır.
+  başına değil, sunucu ile systemd tekrar servisi arasında ortak olarak en çok 10 dakikada bir yazılır
+  (`durum/akis-alarm.ts`: açılış kimliği + monotonik saat; dosya yazılamazsa süreç içi seyreltme).
+- Motor turunda bir koşunun uzlaştırması hata verirse `motor_hatasi` olayı yazılır, diğer koşular işlenmeye devam eder.
+  SQLite COMMIT hata verirse işlem geri alınır (bağlantı açık işlemde kalmaz).
+- `POST /api/akis/iptal` iptal commit edildikten sonra hata vermez; ayrıntı okunamazsa yanıt kısmidir:
+  `{run_id, durum: "iptal", notlar, adimlar: [], kismi: true}`.
 - Yayın kanıtı eksikse (`durum: bitti` ama mühür/etiket yok) `yayin_kaniti_yok` olayı bir kez yazılır, onay verilmez.
 - Sonuç işleme `UPDATE denemeler ... WHERE durum IN (uçuşta)` ile tek seferliktir. `olaylar.anahtar` UNIQUE olduğu
   için aynı olay iki kez yayınlanmaz.

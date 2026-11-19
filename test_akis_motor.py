@@ -567,8 +567,7 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         ref = self.son_ref()
         self.saat[0] += 601
         with mock.patch.object(self.m, "_adim_hatasi", side_effect=RuntimeError("işlem içinde hata")):
-            with self.assertRaises(RuntimeError):
-                self.m.tur()
+            self.m.tur()                                     # koşu başına yakalanır, tur sürer
         self.assertIn(ref, self.ortam.kuyruk)
         self.assertEqual(self.adim(k, "a")["denemeler"][0]["durum"], "kuyrukta")
 
@@ -594,7 +593,11 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         eksik = [o for o in self.ortam.olaylar if o["olay"] == "yayin_kaniti_yok"]
         self.assertEqual(len(eksik), 1)                     # bir kez, her turda değil
         self.assertIn("etiket", eksik[0]["neden"])
-        self.ortam.gorevler["G0.md"]["onay"] = "hayir"       # 'bitti' + ret: ret yolu öncelikli
+        self.ortam.gorevler["G0.md"].update({"durum": "calisiyor", "onay": "evet"})   # kapısız 'evet' + yayın sürüyor
+        self.m.tur()
+        self.assertEqual(self.adim(k, "uat_onayi")["durum"], "onay_bekliyor")   # reddedilmez, beklenir
+        self.assertTrue(any(o["olay"] == "onay_kaydi_yok" for o in self.ortam.olaylar))
+        self.ortam.gorevler["G0.md"].update({"durum": "bitti", "onay": "hayir"})  # 'bitti' + ret: ret yolu öncelikli
         self.m.tur()
         self.assertEqual(self.adim(k, "uat_onayi")["durum"], "basarisiz")
 

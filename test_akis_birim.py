@@ -9,6 +9,7 @@ import sqlite3
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 import akis_db
 import akis_kapi
@@ -216,6 +217,37 @@ class DepoTest(unittest.TestCase):
             self.assertTrue(akis_db.Depo.olay_ekle(b, "r1", "k1", "t", {}))
             self.assertFalse(akis_db.Depo.olay_ekle(b, "r1", "k1", "t", {}))
         self.assertEqual(len(dp.olaylar("r1")), 1)
+
+    def test_commit_hatasinda_islem_kapanir(self):
+        """Önceden var olan: COMMIT hata verirse bağlantı açık işlemde kalmamalı (sonraki işlemler sessizce kaybolurdu)."""
+        dp = akis_db.Depo(self.yol)
+        gercek = dp.baglanti()
+
+        class CommitKiran:
+            def __init__(self):
+                self.kir = True
+
+            def execute(self, sql, *a):
+                if sql == "COMMIT" and self.kir:
+                    self.kir = False
+                    raise sqlite3.OperationalError("disk I/O error")
+                return gercek.execute(sql, *a)
+
+            def __getattr__(self, ad):
+                return getattr(gercek, ad)
+        sarici = CommitKiran()
+        with mock.patch.object(dp, "baglanti", lambda: sarici):
+            with self.assertRaises(sqlite3.OperationalError):
+                with dp.islem() as b:
+                    b.execute("INSERT INTO kosular(id, akis_id, akis_surum, tanim_ozet, tanim_json, girdi_json, durum, "
+                              "olusturma_ts, guncelleme_ts) VALUES ('r1','x',1,'o','{}','{}','calisiyor',0,0)")
+            self.assertFalse(gercek.in_transaction)
+            with dp.islem() as b:
+                b.execute("INSERT INTO kosular(id, akis_id, akis_surum, tanim_ozet, tanim_json, girdi_json, durum, "
+                          "olusturma_ts, guncelleme_ts) VALUES ('r2','x',1,'o','{}','{}','calisiyor',0,0)")
+        dp2 = akis_db.Depo(self.yol)                         # başka bağlantı: r2 gerçekten commit edildi
+        self.assertIsNotNone(dp2.kosu("r2"))
+        self.assertIsNone(dp2.kosu("r1"))
 
     def test_islem_geri_alinir(self):
         dp = akis_db.Depo(self.yol)

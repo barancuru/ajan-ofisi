@@ -371,15 +371,21 @@ class Motor:
                         iade += d["tahmini_usd"] or 0
                 else:
                     notlar.append(f"{d['adim_id']}: çalışan ajan koşusu durdurulmadı; bitince sonucu yok sayılır")
-        try:   # iptal commit edildi: bundan sonraki hata yanıtı 500'e çevirmemeli (tekrar deneyen 409 alırdı)
+        # iptal commit edildi: bundan sonraki hata yanıtı 500'e çevirmemeli (tekrar deneyen 409 alırdı)
+        try:
             with self._islem() as b:
                 kosu = self._kosu_al(b, kosu_id)
                 self._kosu_yaz(b, kosu_id, tahmini_usd=max(kosu["tahmini_usd"] - iade, 0),
                                neden=json.dumps({"sebep": "operator", "metin": "; ".join(notlar) or "operatör iptal etti"},
                                                 ensure_ascii=False))
-            return {**self.detay(kosu_id), "notlar": notlar}
         except Exception as e:  # noqa: BLE001
-            return {"run_id": kosu_id, "durum": "iptal", "notlar": notlar + [f"not/iade yazılamadı ({type(e).__name__})"]}
+            notlar.append(f"not/iade yazılamadı ({type(e).__name__})")
+            ortak.olay_yaz({"tur": "hata", "ajan": "ofis", "detay": f"workflow iptali commit edildi ama not/iade "
+                            f"yazılamadı ({type(e).__name__}); koşu {kosu_id}"})
+        try:
+            return {**self.detay(kosu_id), "notlar": notlar}
+        except Exception:  # noqa: BLE001 - yanıt biçimi docs/akis-motoru.md'de: en az run_id, durum, notlar
+            return {"run_id": kosu_id, "durum": "iptal", "notlar": notlar, "adimlar": [], "kismi": True}
 
     def _iptal_commit(self, kosu_id, notlar, ajan_denemeleri):
         with self._islem() as b:
@@ -509,7 +515,11 @@ class Motor:
             self._kuyruk_refleri = None
         try:
             for k in self.depo.kosular(durumlar=akis_db.AKTIF_KOSU, sinir=MAKS_AKTIF_KOSU * 4):
-                self._kosu_isle(k["id"])
+                try:
+                    self._kosu_isle(k["id"])
+                except Exception as e:  # noqa: BLE001 - bir koşunun hatası diğerlerini durdurmasın
+                    ortak.olay_yaz({"tur": "akis", "olay": "motor_hatasi", "run_id": k["id"],
+                                    "neden": f"{type(e).__name__}: {akis_veri.maskele(str(e))[:200]}"})
         finally:
             self._kuyruk_refleri = None
 
@@ -1116,7 +1126,8 @@ class Motor:
                                cikti_json=json.dumps({"karar": "evet", "not": "Geliştirme kartından (ofis girişiyle) onaylandı"}))
                 self._olay(b, kosu, "onay_verildi", adim=adim["id"], durum="evet", iterasyon=r["iterasyon"], kaynak="kart")
                 self._gecisler_uygula(b, kosu, tanim, adim["sonraki"], adim["id"])
-            elif onay == "hayir" or durum in ("hazir", "calisiyor", "takildi", "reddedildi"):
+            elif onay == "hayir" or (onay != "evet" and durum in ("hazir", "calisiyor", "takildi", "reddedildi")):
+                # 'onay: evet' + kayıt yok: ret sayılmaz, aşağıda beklenir (yayın sürüyor ya da kapısız yazıldı)
                 self._adim_yaz(b, kosu["id"], adim["id"], durum="basarisiz",
                                cikti_json=json.dumps({"karar": "hayir", "not": f"kart reddedildi (durum {durum})"}))
                 self._olay(b, kosu, "onay_verildi", adim=adim["id"], durum="hayir", iterasyon=r["iterasyon"], kaynak="kart")
