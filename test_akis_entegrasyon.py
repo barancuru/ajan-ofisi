@@ -561,6 +561,41 @@ class KuyrukIptalSiralamaTest(OfisTabani):
         fm = self.ortam.gelistirme_oku(dosya)
         self.assertEqual((fm["sha256"], fm["onay"]), ("c" * 64, "bekliyor"))   # hattın yazdığı korunur
 
+    def uat_karti(self):
+        with mock.patch.object(sunucu, "gelistirme_projeleri", lambda: ["homeos"]):
+            dosya = self.ortam.gelistirme_yaz("homeos", "Rapor", "x", "sonnet", REF)
+        yol = os.path.join(self.dizin["gorevler"], dosya)
+        with open(yol) as f:
+            m = f.read()
+        with open(yol, "w") as f:
+            f.write(sunucu.on_bilgi_yaz(sunucu.on_bilgi_yaz(sunucu.on_bilgi_yaz(m, "durum", "uat"), "onay", "bekliyor"),
+                                        "sha256", "a" * 64))
+        return dosya, yol
+
+    def test_reddetme_okuma_hatalari_ayristirilir(self):
+        """İki okumada da: kayıp kart 410, diğer okuma hatası 409; kart değişmez."""
+        import builtins
+        dosya, yol = self.uat_karti()
+        with open(yol) as f:
+            once = f.read()
+        asil = builtins.open
+        for kacinci in (1, 2):
+            for hata, kod in ((FileNotFoundError, 410), (PermissionError, 409)):
+                sayac = [0]
+
+                def bozuk_open(p, *a, **k):
+                    if p == yol and (not a or "r" in a[0]) and "w" not in (a[0] if a else ""):
+                        sayac[0] += 1
+                        if sayac[0] == kacinci:
+                            raise hata("x")
+                    return asil(p, *a, **k)
+                with mock.patch("builtins.open", bozuk_open):
+                    with self.assertRaises(akis_motor.BaslatmaHatasi) as c:
+                        self.ortam.gelistirme_reddet(dosya, "düzelt", "a" * 64)
+                self.assertEqual(c.exception.kod, kod, (kacinci, hata))
+                with open(yol) as f:
+                    self.assertEqual(f.read(), once)
+
     def test_reddetme_beklenen_sha_kilit_altinda(self):
         with mock.patch.object(sunucu, "gelistirme_projeleri", lambda: ["homeos"]):
             dosya = self.ortam.gelistirme_yaz("homeos", "Rapor", "x", "sonnet", REF)

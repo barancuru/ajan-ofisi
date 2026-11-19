@@ -943,6 +943,17 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         self.assertEqual(d["durum"], "inceleme")
         self.assertIn("bilinmiyor", d["neden"]["metin"])
 
+    def test_paket_bilinmiyor_mesaji_uat_disinda_da_once(self):
+        k = self.hat_incelemede()
+        with self.depo.islem() as b:
+            b.execute("UPDATE kosular SET neden=? WHERE id=?", (json.dumps({"sebep": "kaynak", "metin": "x", "adim": "duzeltme"}), k))
+            b.execute("INSERT INTO denemeler(kosu_id, adim_id, iterasyon, deneme, ref, durum, tutamac_json, baslangic_ts) "
+                      "VALUES (?,?,?,?,?,?,?,?)", (k, "uygulama", 0, 9, "ak-00000000fffd", "basarili", json.dumps({"dosya": "G0.md"}), 0))
+        self.ortam.gorevler["G0.md"]["durum"] = "calisiyor"          # UAT değil ve test edilen sha yok
+        with self.assertRaises(akis_motor.AkisHatasi) as c:
+            self.m.devam(k, "yeniden_dene")
+        self.assertIn("bilinmiyor", str(c.exception))
+
     def test_duzeltme_hedef_karti_uat_degilse_yeniden_dene_409(self):
         k = self.hat_incelemede()
         with self.depo.islem() as b:   # uygulama başarılı sayıldı, düzeltme adımı ön koşulda kaldı (tutamaçsız)
