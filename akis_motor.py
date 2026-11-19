@@ -155,8 +155,13 @@ class Motor:
     def _kosu_bitir(self, b, kosu, durum, neden=None):
         if kosu["durum"] in akis_db.SON_KOSU:
             return
+        bekleme_alan = {}
+        if kosu.get("bekleme_baslangic_ts"):
+            bekleme_alan = {"bekleme_sn": (kosu.get("bekleme_sn") or 0) + max(self.saat() - kosu["bekleme_baslangic_ts"], 0),
+                            "bekleme_baslangic_ts": None}
         self._kosu_yaz(b, kosu["id"], durum=durum, neden=json.dumps(neden, ensure_ascii=False) if neden else None,
-                       bitis_ts=self.saat())
+                       bitis_ts=self.saat(), **bekleme_alan)
+        kosu.update(bekleme_alan)
         kosu["durum"] = durum
         toplam = self.saat() - kosu["olusturma_ts"]
         bekleme = (kosu.get("bekleme_sn") or 0) + (self.saat() - kosu["bekleme_baslangic_ts"]
@@ -785,8 +790,18 @@ class Motor:
                 self._olay(b, kosu, "onay_bekliyor", adim=adim_id, durum="onay_bekliyor", iterasyon=r["iterasyon"],
                            kategori=adim["kategori"])
                 return True
+            # aynı iterasyonda bu hat adımı zaten bir görev açtıysa (ör. takıldı/mühür incelemesinden sonra 'yeniden
+            # dene'): yeni görev AÇILMAZ, aynı kart yeniden izlenir (çift görev, izlenmeyen onaylanabilir kart olmasın)
+            yeniden_izle = None
+            if adim["tur"] == "gelistirme_gorevi":
+                for x in b.execute("SELECT tutamac_json FROM denemeler WHERE kosu_id=? AND adim_id=? AND iterasyon=? "
+                                   "ORDER BY id DESC", (kosu_id, adim_id, r["iterasyon"])).fetchall():
+                    t = json.loads(x["tutamac_json"] or "{}")
+                    if t.get("dosya"):
+                        yeniden_izle = t
+                        break
             # ajan/hat adımları: bütçe ve çağrı sınırı başlatmadan önce
-            if adim["tur"] in ("agent_task", "gelistirme_gorevi"):
+            if adim["tur"] in ("agent_task", "gelistirme_gorevi") and not yeniden_izle:
                 tahmin = self._tahmin(adim)
                 s = tanim["sinirlar"]
                 if kosu["ajan_cagrisi"] + 1 > s["max_ajan_cagrisi"]:
@@ -809,7 +824,7 @@ class Motor:
                       "VALUES (?,?,?,?,?,?,?,?)", (kosu_id, adim_id, r["iterasyon"], r["deneme"], ref,
                                                    "gonderiliyor", tahmin, self.saat()))
             deneme_id = b.execute("SELECT id FROM denemeler WHERE ref=?", (ref,)).fetchone()[0]
-            if adim["tur"] in ("agent_task", "gelistirme_gorevi"):
+            if adim["tur"] in ("agent_task", "gelistirme_gorevi") and not yeniden_izle:
                 self._kosu_yaz(b, kosu_id, ajan_cagrisi=kosu["ajan_cagrisi"] + 1, tahmini_usd=kosu["tahmini_usd"] + tahmin)
             self._olay(b, kosu, "adim_basladi", adim=adim_id, deneme=r["deneme"], durum="gonderiliyor",
                        iterasyon=r["iterasyon"], tahmini_usd=tahmin)
@@ -828,6 +843,8 @@ class Motor:
                     return True
                 if adim["tur"] == "agent_task":
                     self._ajan_gonder(kosu_id, adim, deneme_id, ref, baglam)
+                elif yeniden_izle and self.ortam.gelistirme_oku(yeniden_izle["dosya"]):
+                    self._gelistirme_izle(kosu_id, adim, deneme_id, yeniden_izle)
                 else:
                     self._gelistirme_gonder(kosu_id, adim, deneme_id, ref, baglam, hazirlik)
         elif adim["tur"] == "quality_gate":
@@ -1014,6 +1031,17 @@ class Motor:
         return (hata_sinifla(sonuc.get("hata")), None, maliyet, sonuc.get("hata") or "ajan hata ile bitti")
 
     # ---- gelistirme_gorevi (beyin hattı adaptörü)
+    def _gelistirme_izle(self, kosu_id, adim, deneme_id, tutamac):
+        """Yeni görev açmadan/yeniden reddetmeden mevcut kartı izlemeye başla."""
+        with self._islem() as b:
+            kosu = self._kosu_al(b, kosu_id)
+            soru = ",".join("?" * len(akis_db.UCUSTA))
+            b.execute(f"UPDATE denemeler SET durum='calisiyor', tutamac_json=? WHERE id=? AND durum IN ({soru})",
+                      (json.dumps(tutamac), deneme_id, *akis_db.UCUSTA))
+            r = self._adim_al(b, kosu_id, adim["id"])
+            self._olay(b, kosu, "yeniden_izleniyor", adim=adim["id"], deneme=r["deneme"], durum="calisiyor",
+                       iterasyon=r["iterasyon"], dosya=tutamac["dosya"])
+
     def _gelistirme_gonder(self, kosu_id, adim, deneme_id, ref, baglam, hedef_tutamac):
         try:
             if adim["mod"] == "yeni":
@@ -1088,7 +1116,8 @@ class Motor:
             proje = adim.get("proje") or (akis_tanim.adim_bul(tanim, adim.get("hedef_adim")) or {}).get("proje")
             if not self.ortam.muhur_var(proje, cikti["surum"], cikti["sha256"]):
                 # kart dosyası kapısız yazılabilir: kaydedilecek paket hattın mührüyle doğrulanmalı
-                return ("kaynak", "UAT paketi hattın mührüyle uyuşmuyor (sürüm/sha kartta değişmiş ya da mühür yok)")
+                return ("kaynak", "UAT paketi hattın mührüyle uyuşmuyor: kart değişmiş, mühür henüz yazılıyor ya da aynı "
+                                  "sürüm başka bir görevde mühürlenmiş. Kartı kontrol et; 'Yeniden dene' aynı kartı yeniden izler")
             return ("bitti", cikti)
         return ("bekle", None)   # hazir / calisiyor / sirada / uat+onay:hayir (ret sırada)
 
@@ -1190,7 +1219,10 @@ class Motor:
             # görev dosyasındaki 'onay: evet' kapısız yazılabilir: kabul yalnız ofis girişinin yazdığı, mühürlü pakete
             # bağlı canlı onay kaydıyla ya da hattın o kayıtla yaptığı yayın sonucuyla (durum: bitti)
             adaylar = self._guvenilir_paketler(izlenen["proje"], paket, fm)
-            if not adaylar:
+            if not adaylar and (onay == "hayir" or durum in ("reddedildi", "takildi")
+                                or (onay != "evet" and durum in ("hazir", "calisiyor"))):
+                adaylar = []   # ret paket kanıtı istemez: aşağıdaki ret yolu
+            elif not adaylar:
                 self._adim_yaz(b, kosu["id"], adim["id"], durum="inceleme", hata="geçerli paket kaydı yok")
                 self._incelemeye_al(b, kosu, "kaynak", "izlenen hat görevinin UAT paketi (sürüm/sha) kaydedilmemiş; onay "
                                     "doğrulanamaz, elle kontrol et", adim["id"])
@@ -1201,6 +1233,9 @@ class Motor:
             # → onay; (4) 'evet' olmayan hazir/calisiyor (kart geri döndü) → ret; (5) aksi hâlde beklenir.
             kesin_red = onay == "hayir" or durum == "reddedildi"
             kayit = not kesin_red and any(self.ortam.canli_onay_var(izlenen["proje"], s, h) for s, h in kayit_adaylari)
+            if durum == "takildi" and not kayit and not kesin_red:
+                # hat main'e alıp etiketledi ama canlıya geçemedi: onay kaydını siler, kartı takildi yapar
+                kayit = any(self.ortam.yayinlandi(izlenen["proje"], s, paket.get("dal"), h) for s, h in adaylar)
             if durum == "takildi" and kayit:
                 self._adim_yaz(b, kosu["id"], adim["id"], durum="inceleme", hata="yayın takıldı")
                 self._incelemeye_al(b, kosu, "yayin_takildi", "kart kapıdan onaylandı ama yayın takıldı; Geliştirme "

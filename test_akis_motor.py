@@ -740,6 +740,75 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         self.m.tur()
         self.assertEqual(self.adim(k, "uat_onayi")["durum"], "onay_bekliyor")
 
+    def test_yeniden_dene_ayni_hat_gorevini_izler(self):
+        """İnceleme sonrası 'yeniden dene' ikinci hat görevi açmaz; aynı kartı yeniden izler (çağrı/tahmin sayılmaz)."""
+        tanimlar, _ = akis_tanim.tanimlari_yukle()
+        self.tanimlar.update(tanimlar)
+        k = self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"})["run_id"]
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"plan": "p", "risk": "dusuk", "yetki_gerekli": False}) + '</akis_cikti>')
+        self.m.tur()
+        self.ortam.hat_uat("G0.md", muhurle=False)          # mühür uyuşmuyor → inceleme
+        self.m.tur()
+        self.assertEqual(self.detay(k)["durum"], "inceleme")
+        cagri = self.detay(k)["ajan_cagrisi"]
+        self.ortam.muhurler.add(("homeos", "0.10.1", "a" * 64))   # operatör kartı düzeltti
+        self.m.devam(k, "yeniden_dene")
+        self.m.tur()
+        self.m.tur()
+        self.assertEqual(list(self.ortam.gorevler), ["G0.md"])    # ikinci görev yok
+        self.assertEqual(self.adim(k, "uygulama")["durum"], "basarili")
+        uyg = [d for d in self.depo.denemeler(k) if d["adim_id"] == "uygulama"]
+        self.assertEqual((len(uyg), uyg[-1]["tahmini_usd"]), (2, 0))  # yeniden izleme: tahmin yok
+        gecen = [d for d in self.depo.denemeler(k) if d["adim_id"] not in ("planlama", "uygulama")]
+        self.assertEqual(self.detay(k)["ajan_cagrisi"], cagri + sum(1 for d in gecen if d["adim_id"] == "guvenlik"))
+
+    def test_takilan_hat_gorevi_yeniden_denenince_ayni_kart(self):
+        tanimlar, _ = akis_tanim.tanimlari_yukle()
+        self.tanimlar.update(tanimlar)
+        k = self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"})["run_id"]
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"plan": "p", "risk": "dusuk", "yetki_gerekli": False}) + '</akis_cikti>')
+        self.m.tur()
+        self.ortam.gorevler["G0.md"]["durum"] = "takildi"
+        self.m.tur()
+        self.assertEqual(self.detay(k)["durum"], "inceleme")
+        self.ortam.gorevler["G0.md"]["durum"] = "hazir"        # Geliştirme sekmesinden yeniden denendi
+        self.m.devam(k, "yeniden_dene")
+        self.m.tur()
+        self.ortam.hat_uat("G0.md")
+        self.m.tur()
+        self.assertEqual(list(self.ortam.gorevler), ["G0.md"])
+        self.assertEqual(self.adim(k, "uygulama")["durum"], "basarili")
+
+    def test_birlestirilmis_ama_canliya_gecmemis_kart_yayin_takildi(self):
+        """Hat main'e alıp etiketledi, canlıya geçemedi: onay kaydını siler, kartı takildi yapar → ret değil inceleme."""
+        k = self.pilot_onaya_kadar()
+        self.ortam.yayinlar.add(("homeos", "0.10.1", "beyin/1118-x", "a" * 64))
+        self.ortam.gorevler["G0.md"].update({"durum": "takildi", "onay": "evet"})
+        self.m.tur()
+        self.assertEqual(self.detay(k)["neden"]["sebep"], "yayin_takildi")
+
+    def test_paket_kaydi_yokken_ret_yine_ret(self):
+        k = self.pilot_onaya_kadar()
+        with self.depo.islem() as b:
+            b.execute("UPDATE adimlar SET cikti_json=? WHERE kosu_id=? AND adim_id='uygulama'",
+                      (json.dumps({"durum": "uat", "dosya": "G0.md", "surum": "", "dal": "", "sha256": "", "uyari": 0}), k))
+        self.ortam.gorevler["G0.md"]["onay"] = "hayir"
+        self.m.tur()
+        self.assertEqual(self.adim(k, "uat_onayi")["durum"], "basarisiz")
+
+    def test_basarisiz_sayinca_bekleme_satira_yazilir(self):
+        self.tanim(taban_tanim())
+        k = self.m.baslat("deneme", {"konu": "x"})["run_id"]
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>{"sonuc": "kotu"}</akis_cikti>')
+        self.m.tur()                                           # inceleme
+        self.saat[0] += 600
+        self.m.devam(k, "basarisiz_say")
+        kosu = self.depo.kosu(k)
+        self.assertEqual((kosu["bekleme_baslangic_ts"], kosu["bekleme_sn"]), (None, 600))
+
     def test_uat_paketi_muhurle_uyusmazsa_inceleme(self):
         tanimlar, _ = akis_tanim.tanimlari_yukle()
         self.tanimlar.update(tanimlar)

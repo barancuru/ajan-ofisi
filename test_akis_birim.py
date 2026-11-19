@@ -212,6 +212,7 @@ class DepoTest(unittest.TestCase):
         b.close()
         dp = akis_db.Depo(self.yol)
         self.assertEqual(dp.surum(), len(akis_db.MIGRATIONLAR))
+        self.assertGreaterEqual(dp.surum(), 3)                # doldurma ayrı migration'da (uygulanmış 2 değişmez)
         k = dp.kosu("r1")
         self.assertEqual((k["bekleme_sn"], k["bekleme_baslangic_ts"]), (0, None))
         self.assertEqual(dp.kosu("r2")["bekleme_baslangic_ts"], 500)   # beklemedeki koşu: son güncellemeden sayılır
