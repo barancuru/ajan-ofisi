@@ -146,9 +146,12 @@ kosucu sonucu `son: false` yazar; motor aynı denemeyi beklemeyi sürdürür, ke
 - `POST /api/akis/iptal` iptal commit edildikten sonra hata vermez; ayrıntı okunamazsa yanıt kısmidir:
   `{run_id, durum: "iptal", notlar, adimlar: [], kismi: true}`.
 - Yayın kanıtı eksikse (`durum: bitti` ama mühür/etiket yok) `yayin_kaniti_yok` olayı bir kez yazılır, onay verilmez.
-- Onay/yayın kanıtında güvenilen paketler: motorun UAT'de kaydettiği (sürüm, sha) ve yalnız ondan **daha yeni** sürümü
-  olan ve hattın o sürüm için mührü aynı sha olan kart değeri (yeniden temellendirme). Kart dosyasında eski bir sürümün
-  onay kaydına işaret etmek onay sağlamaz.
+- Güvenilen paket: motor UAT'de kartın (sürüm, sha) değerini hattın paket mührüyle doğrulayıp kaydeder (uyuşmazsa
+  `kaynak` incelemesi). **Onay kaydı yalnız bu paketle aranır**: kayıtlar proje-sürüme bağlıdır, göreve değil; kart
+  değeriyle eski ya da başka bir kartın onayı ödünç alınamaz. Yayın kanıtında ayrıca kartın, UAT paketinden daha yeni
+  ve mühürlü sürümü (yayından önceki yeniden temellendirme) kabul edilir; kanıt motorun kaydettiği dala bağlıdır.
+- Kalan risk: UAT anında (motor paketi kaydetmeden önce) kart dosyasının sürüm/sha/dal alanlarını değiştiren bir
+  yazıcı. Hat da aynı alanlara güvenir; kapatılması hattın onay kaydını ve mührü göreve/dala bağlamasını ister (V1.1).
 - `max_sure_sn` yalnız koşunun kendi çalışma süresini sayar: inceleme ve duraklatmada geçen operatör beklemesi
   (`bekleme_sn`, DB migration 2) düşülür. `yayin_takildi` incelemesinde kart hâlâ takılıysa "Yeniden dene" 409 verir.
 - Sonuç işleme `UPDATE denemeler ... WHERE durum IN (uçuşta)` ile tek seferliktir. `olaylar.anahtar` UNIQUE olduğu

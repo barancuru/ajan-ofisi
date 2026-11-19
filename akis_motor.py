@@ -158,8 +158,11 @@ class Motor:
         self._kosu_yaz(b, kosu["id"], durum=durum, neden=json.dumps(neden, ensure_ascii=False) if neden else None,
                        bitis_ts=self.saat())
         kosu["durum"] = durum
+        toplam = self.saat() - kosu["olusturma_ts"]
+        bekleme = (kosu.get("bekleme_sn") or 0) + (self.saat() - kosu["bekleme_baslangic_ts"]
+                                                   if kosu.get("bekleme_baslangic_ts") else 0)
         self._olay(b, kosu, "kosu_bitti", durum=durum, neden=(neden or {}).get("metin"),
-                   sure_sn=round(self.saat() - kosu["olusturma_ts"], 1),
+                   sure_sn=round(toplam, 1), bekleme_sn=round(bekleme, 1), calisma_sn=round(toplam - bekleme, 1),
                    cost_usd=round(kosu["maliyet_usd"], 4), tahmini_usd=round(kosu["tahmini_usd"], 2))
 
     def _incelemeye_al(self, b, kosu, sebep, metin, adim_id=None):
@@ -315,7 +318,7 @@ class Motor:
         with self._islem() as b:
             kosu = self._kosu_kontrol(b, kosu_id)
             bekleme = {}
-            if kosu.get("bekleme_baslangic_ts") and kosu["durum"] in ("duraklatildi", "inceleme") and karar != "basarisiz_say":
+            if kosu.get("bekleme_baslangic_ts") and kosu["durum"] in ("duraklatildi", "inceleme"):
                 bekleme = {"bekleme_sn": (kosu.get("bekleme_sn") or 0) + max(self.saat() - kosu["bekleme_baslangic_ts"], 0),
                            "bekleme_baslangic_ts": None}
             if kosu["durum"] == "duraklatildi":
@@ -1082,6 +1085,10 @@ class Motor:
             except ValueError:
                 cikti["uyari"] = -1
             cikti["rapor"] = f"UAT'ye hazır: sürüm {cikti['surum'] or '?'}, uyarı {cikti['uyari']}"
+            proje = adim.get("proje") or (akis_tanim.adim_bul(tanim, adim.get("hedef_adim")) or {}).get("proje")
+            if not self.ortam.muhur_var(proje, cikti["surum"], cikti["sha256"]):
+                # kart dosyası kapısız yazılabilir: kaydedilecek paket hattın mührüyle doğrulanmalı
+                return ("kaynak", "UAT paketi hattın mührüyle uyuşmuyor (sürüm/sha kartta değişmiş ya da mühür yok)")
             return ("bitti", cikti)
         return ("bekle", None)   # hazir / calisiyor / sirada / uat+onay:hayir (ret sırada)
 
@@ -1183,11 +1190,17 @@ class Motor:
             # görev dosyasındaki 'onay: evet' kapısız yazılabilir: kabul yalnız ofis girişinin yazdığı, mühürlü pakete
             # bağlı canlı onay kaydıyla ya da hattın o kayıtla yaptığı yayın sonucuyla (durum: bitti)
             adaylar = self._guvenilir_paketler(izlenen["proje"], paket, fm)
+            if not adaylar:
+                self._adim_yaz(b, kosu["id"], adim["id"], durum="inceleme", hata="geçerli paket kaydı yok")
+                self._incelemeye_al(b, kosu, "kaynak", "izlenen hat görevinin UAT paketi (sürüm/sha) kaydedilmemiş; onay "
+                                    "doğrulanamaz, elle kontrol et", adim["id"])
+                return
+            kayit_adaylari = adaylar[:1]   # onay kaydı yalnız motorun UAT'de mühürle doğruladığı paketle aranır
             # Karar sırası: (1) 'hayir'/reddedildi her zaman ret; (2) kapıdan onaylı (kayıt var) ama yayında takıldı →
             # manual_review (ret değil: 'yeniden dene' ile yayınlanabilir); kayıtsız takıldı → ret; (3) kayıt/yayın kanıtı
             # → onay; (4) 'evet' olmayan hazir/calisiyor (kart geri döndü) → ret; (5) aksi hâlde beklenir.
             kesin_red = onay == "hayir" or durum == "reddedildi"
-            kayit = not kesin_red and any(self.ortam.canli_onay_var(izlenen["proje"], s, h) for s, h in adaylar)
+            kayit = not kesin_red and any(self.ortam.canli_onay_var(izlenen["proje"], s, h) for s, h in kayit_adaylari)
             if durum == "takildi" and kayit:
                 self._adim_yaz(b, kosu["id"], adim["id"], durum="inceleme", hata="yayın takıldı")
                 self._incelemeye_al(b, kosu, "yayin_takildi", "kart kapıdan onaylandı ama yayın takıldı; Geliştirme "
@@ -1329,9 +1342,10 @@ class Motor:
         return sonuc
 
     def _guvenilir_paketler(self, proje, paket, fm):
-        """Onay/yayın kanıtında kullanılabilecek (sürüm, sha) çiftleri. Kart dosyası kapısız yazılabildiği için kartın
-        değerleri yalnız şu durumda kabul edilir: motorun UAT'de kaydettiği paketten DAHA YENİ bir sürüm (hat yeniden
-        temellendirince sürümü artırır) ve hattın o sürüm için mührü aynı sha. Eski bir sürümün onay kaydı kullanılamaz."""
+        """İlk öğe: motorun UAT'de kaydettiği ve hattın mührüyle doğruladığı paket — onay KAYDI yalnız bununla aranır
+        (kayıtlar proje-sürüme bağlıdır, göreve değil: kart değeriyle başka kartın onayı ödünç alınmasın). İkinci öğe
+        (yalnız yayın kanıtı için; o da motorun kaydettiği dala bağlı): kartın, UAT paketinden DAHA YENİ ve hattın mührü
+        aynı sha olan sürümü (yeniden temellendirme). Eski bir sürümün kaydı hiçbir yolda kullanılamaz."""
         def surum_t(s):
             return tuple(int(x) for x in s.split(".") if x.isdigit())
         adaylar = []

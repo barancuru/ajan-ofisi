@@ -139,9 +139,11 @@ class SahteOrtam:
         return 0, "tamam"
 
     # hat simülasyonu
-    def hat_uat(self, dosya, sha="a" * 64, uyari=0):
+    def hat_uat(self, dosya, sha="a" * 64, uyari=0, muhurle=True):
         self.gorevler[dosya].update({"durum": "uat", "onay": "bekliyor", "surum": "0.10.1", "dal": "beyin/1118-x",
                                      "sha256": sha, "uyari": str(uyari)})
+        if muhurle:   # gerçek hat: paket_muhurle UAT'den önce mühürler
+            self.muhurler.add(("homeos", "0.10.1", sha))
 
 
 class MotorTabani(unittest.TestCase):
@@ -729,6 +731,55 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         self.assertEqual(self.adim(k, "uat_onayi")["durum"], "onay_bekliyor")
         return k
 
+    def test_baska_kartin_onayi_odunc_alinamaz(self):
+        """Kart dosyası UAT sonrası başka (onaylı, mühürlü, daha yeni) bir sürüme çevrilirse onay kaydı sayılmaz."""
+        k = self.pilot_onaya_kadar()
+        self.ortam.muhurler.add(("homeos", "0.10.5", "b" * 64))
+        self.ortam.onaylar.add(("homeos", "0.10.5", "b" * 64))      # başka kartın kapıdan onaylı sürümü
+        self.ortam.gorevler["G0.md"].update({"onay": "evet", "surum": "0.10.5", "sha256": "b" * 64})
+        self.m.tur()
+        self.assertEqual(self.adim(k, "uat_onayi")["durum"], "onay_bekliyor")
+
+    def test_uat_paketi_muhurle_uyusmazsa_inceleme(self):
+        tanimlar, _ = akis_tanim.tanimlari_yukle()
+        self.tanimlar.update(tanimlar)
+        k = self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"})["run_id"]
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"plan": "p", "risk": "dusuk", "yetki_gerekli": False}) + '</akis_cikti>')
+        self.m.tur()
+        self.ortam.hat_uat("G0.md", muhurle=False)
+        self.m.tur()
+        d = self.detay(k)
+        self.assertEqual((d["durum"], d["neden"]["sebep"]), ("inceleme", "kaynak"))
+        self.assertIn("mühür", d["neden"]["metin"])
+
+    def test_duraklatilmis_kosuda_basarisiz_say_bekleme_zamanini_temizler(self):
+        self.tanim(taban_tanim())
+        k = self.m.baslat("deneme", {"konu": "x"})["run_id"]
+        self.m.duraklat(k)
+        self.saat[0] += 600
+        self.m.devam(k, "basarisiz_say")                           # duraklatılmış koşuda karar yok sayılır, devam eder
+        kosu = self.depo.kosu(k)
+        self.assertEqual((kosu["bekleme_baslangic_ts"], kosu["bekleme_sn"]), (None, 600))
+        self.saat[0] += 5000
+        self.m.duraklat(k)
+        self.saat[0] += 100
+        self.m.devam(k)
+        self.assertEqual(self.depo.kosu(k)["bekleme_sn"], 700)     # 5000 sn çalışma bekleme sayılmadı
+
+    def test_bitis_olayi_bekleme_suresini_ayirir(self):
+        self.tanim(taban_tanim())
+        k = self.m.baslat("deneme", {"konu": "x"})["run_id"]
+        self.m.duraklat(k)
+        self.saat[0] += 300
+        self.m.devam(k)
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>{"sonuc": "iyi"}</akis_cikti>')
+        self.saat[0] += 50
+        self.m.tur()
+        bitis = next(o for o in self.ortam.olaylar if o["olay"] == "kosu_bitti")
+        self.assertEqual((bitis["sure_sn"], bitis["bekleme_sn"], bitis["calisma_sn"]), (350.0, 300.0, 50.0))
+
     def test_eski_onay_kaydiyla_sahte_kart_onaylanmaz(self):
         """Kart dosyası kapısız yazılıp eski bir sürümün onay kaydına işaret ederse onay sayılmaz (sahtecilik)."""
         k = self.pilot_onaya_kadar()
@@ -739,10 +790,11 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         self.assertEqual(self.adim(k, "uat_onayi")["durum"], "onay_bekliyor")
 
     def test_yeniden_temellendirilmis_onayli_kart(self):
-        """Hat UAT'de yeniden temellendirdi (0.10.1 → 0.10.2, yeni mühür); kapı yeni sürümü onayladı."""
+        """Gerçek sıra (bin/calistir is_yayin): kapı UAT paketini (0.10.1) onaylar → hat yayından önce yeniden temellendirir
+        (0.10.2, yeni mühür; 0.10.1 kaydı yayın bitene dek durur) → yayın takılır: ret değil manual_review."""
         k = self.pilot_onaya_kadar()
+        self.ortam.onaylar.add(("homeos", "0.10.1", "a" * 64))
         self.ortam.muhurler.add(("homeos", "0.10.2", "c" * 64))
-        self.ortam.onaylar.add(("homeos", "0.10.2", "c" * 64))
         self.ortam.gorevler["G0.md"].update({"onay": "evet", "durum": "takildi", "surum": "0.10.2", "sha256": "c" * 64})
         self.m.tur()
         self.assertEqual(self.detay(k)["neden"]["sebep"], "yayin_takildi")   # ret değil

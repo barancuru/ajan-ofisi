@@ -79,7 +79,8 @@ MIGRATIONLAR = [
     # 2: operatör beklemesi (inceleme/duraklatma) süre sınırına sayılmaz
     """
     ALTER TABLE kosular ADD COLUMN bekleme_sn REAL NOT NULL DEFAULT 0;
-    ALTER TABLE kosular ADD COLUMN bekleme_baslangic_ts REAL
+    ALTER TABLE kosular ADD COLUMN bekleme_baslangic_ts REAL;
+    UPDATE kosular SET bekleme_baslangic_ts=guncelleme_ts WHERE durum IN ('inceleme','duraklatildi')
     """,
 ]
 

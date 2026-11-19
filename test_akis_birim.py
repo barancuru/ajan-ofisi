@@ -205,10 +205,16 @@ class DepoTest(unittest.TestCase):
                   "guncelleme_ts) VALUES ('r1','x',1,'o','{}','{}','basarili',0,0)")
         b.commit()
         b.close()
+        b = sq.connect(self.yol)
+        b.execute("INSERT INTO kosular(id, akis_id, akis_surum, tanim_ozet, tanim_json, girdi_json, durum, olusturma_ts, "
+                  "guncelleme_ts) VALUES ('r2','x',1,'o','{}','{}','inceleme',0,500)")
+        b.commit()
+        b.close()
         dp = akis_db.Depo(self.yol)
         self.assertEqual(dp.surum(), len(akis_db.MIGRATIONLAR))
         k = dp.kosu("r1")
         self.assertEqual((k["bekleme_sn"], k["bekleme_baslangic_ts"]), (0, None))
+        self.assertEqual(dp.kosu("r2")["bekleme_baslangic_ts"], 500)   # beklemedeki koşu: son güncellemeden sayılır
 
     def test_migration_wal_ve_tekrar(self):
         dp = akis_db.Depo(self.yol)
