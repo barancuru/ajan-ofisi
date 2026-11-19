@@ -1,5 +1,7 @@
 # Workflow & Loop Engine (V1) — mimari
 
+> Ürün vizyonu ve yol haritası: `akis-vizyon.md`. Sıradaki işler: `akis-backlog.md`.
+
 Ajan Ofisi'nin mevcut tek-koşu düzenini (buton/CEO → `gorev_baslat()` → kuyruk → tmux → `kosucu.py` → `claude -p`)
 değiştirmeden üstüne kurulan, sıralı ve koşullu akış motoru. Yalnız Python standart kütüphanesi ve SQLite.
 

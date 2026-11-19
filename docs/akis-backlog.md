@@ -1,4 +1,6 @@
-# Workflow backlog (V2, V3)
+# Workflow backlog (V1.1, V2, V3)
+
+> Kavramsal tasarım ve başarı ölçütleri: `akis-vizyon.md`.
 
 > Bilinçli olarak `~/beyin/gorevler/` görevi olarak açılmadı: hat `durum: hazir` görevleri kendiliğinden alır ve
 > ajan-ofisi oto-onaylı olabilir. Bir kalem seçilince Geliştirme sekmesinden (ya da elle) görev açılır.
