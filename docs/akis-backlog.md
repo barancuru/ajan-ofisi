@@ -3,9 +3,12 @@
 > Bilinçli olarak `~/beyin/gorevler/` görevi olarak açılmadı: hat `durum: hazir` görevleri kendiliğinden alır ve
 > ajan-ofisi oto-onaylı olabilir. Bir kalem seçilince Geliştirme sekmesinden (ya da elle) görev açılır.
 
-## V1 sonrası küçük işler (öncelikli)
-1. **Hat maliyeti**: pilot tavanı 30 $ (6 $ en kötü hat turu tahminiyle 3 düzeltme turu). Hattın gerçek maliyeti
-   (`sistem/kayit.md` / `.cache/kayit-tam.jsonl` maliyet sütunu) adaptöre okutulup tahmin gerçekleşenle değiştirilmeli.
+## V1.1 (öncelikli)
+1. **Hat maliyet eşlemesi** (kullanıcı kararı 2026-11-19: V1.1). Koşu başına gerçek maliyet var
+   (`~/.local/state/beyin/kosular/<zaman>-gelistir.json` → `total_cost_usd`, `.cache/kayit-tam.jsonl` → `maliyet`) ama
+   görev yolu yok; paralel hatlarda göreve bağlanamaz. Öneri: `~/beyin/bin/calistir` `kos()` `kayit`'e ve JSON yanına
+   `gorev` (4. argüman, görev dosyası) yazsın; adaptör bunu okuyup tahmini (6 $/tur) gerçekleşenle değiştirsin.
+   Kabul ölçümü: iki haiku hat turu gerçekte ≈0,0105 $, motor tahmini 12 $. Bütçe tavanı (30 $) değişmez.
 2. **UAT kartında workflow uyarısı**: `kaynak: akis` görevlerinde Geliştirme kartı "kalite kapısı bekleniyor" göstersin.
    Şu an kapıdan önce elle onay yalnız sonradan `erken_onay` olarak işaretleniyor.
 3. **Çalışan koşuyu iptal**: iptal şimdilik çalışan ajanı durdurmuyor. tmux penceresini kapatmak + `kosucu` sinyal

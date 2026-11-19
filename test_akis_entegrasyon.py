@@ -38,7 +38,9 @@ class OfisTabani(unittest.TestCase):
                 {"id": "ceo", "ad": "CEO", "oda": "ceo", "cwd": self.proje, "model": "sonnet"},
                 {"id": "arastirmaci", "ad": "Araştırmacı", "oda": "arastirma", "cwd": self.proje, "model": "sonnet",
                  "butce_usd": 1.0, "izinli_araclar": ["Read"]},
-                {"id": "gunlukcu", "ad": "Günlükçü", "oda": "yazi", "cwd": self.proje, "model": "haiku"}]}, f)
+                {"id": "gunlukcu", "ad": "Günlükçü", "oda": "yazi", "cwd": self.proje, "model": "haiku"},
+                {"id": "akis-okuyucu", "ad": "Akış Okuyucu", "oda": "arastirma", "cwd": self.proje, "model": "sonnet",
+                 "butce_usd": 1.5, "izinli_araclar": ["Read", "Glob", "Grep"], "tarayici": False}]}, f)
         yamalar = [mock.patch.object(ortak, "AJANLAR_DOSYASI", ajanlar),
                    mock.patch.object(ortak, "DURUM_DIZINI", dizinler["durum"]),
                    mock.patch.object(ortak, "KOSU_DIZINI", dizinler["kosular"]),
@@ -289,6 +291,7 @@ class UctanUcaTest(OfisTabani):
             f.write(metin)
         kosucu.akis_sonuc_yaz(arg, {"durum": "basarili", "maliyet_usd": 0.05, "sure_sn": 1,
                                     "cikti": os.path.relpath(yol, self.d)}, son=True)
+        ortak.durum_yaz(arg.get("durum_id") or arg["ajan"], {"durum": "bitti", "kosu_id": arg["kosu_id"]})   # kosucu.bitir gibi
 
     def test_ornek_akis_restartla_tamamlanir(self):
         with mock.patch.object(ortak, "KOK", self.d):
@@ -300,7 +303,7 @@ class UctanUcaTest(OfisTabani):
             m2 = self.motor()            # sunucu yeniden başladı
             m2.baslangic_uzlastir()
             m2.tur()
-            self.assertEqual(len(self.arglar()), 2)
+            self.assertEqual(len(self.tmux), 2)     # aynı ajan aynı saniyede: koşu kimliği saniye çözünürlüklü, arg dosyası aynı ad
             self.assertIn("notlarda 3 kayıt", self.arglar()[-1]["prompt"])
             self.kosucu_bitir('<akis_cikti>{"ozet": "- madde"}</akis_cikti>')
             m2.tur()

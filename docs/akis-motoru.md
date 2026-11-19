@@ -164,8 +164,9 @@ Motor iş parçacığı etkin koşu yoksa 30 sn'de bir tek bir `SELECT` yapar, m
 
 ## Pilot: `homeos-ozellik-gelistirme`
 
-Planlama (arastirmaci, salt okunur) → kaynak/yetki koşulu → Uygulama (beyin hattı, `oto_onay: hayir`) →
-Test kapısı (değişen PHP'ye `php -l`, `git diff --check`, paket mührü) → Güvenlik kontrolü (arastirmaci, salt okunur) →
+Planlama (`akis-okuyucu`: yalnız Read/Glob/Grep + salt okunur git/kod/not geçitleri, tarayıcı kapalı; `arastirmaci`
+kullanılmaz çünkü `~/beyin`'e yazabilir) → kaynak/yetki koşulu → Uygulama (beyin hattı, `oto_onay: hayir`) →
+Test kapısı (değişen PHP'ye `php -l`, `git diff --check`, paket mührü) → Güvenlik kontrolü (`akis-okuyucu`) →
 belirsizlik/uyarı koşulu → Kalite kapısı (paket mührü, temiz worktree, test geçti, güvenlik `gecti`) → UAT/dağıtım onayı
 (kartı izler) → bitti. Kapı geçmezse Düzeltme (UAT reddi + bulgular) → Test, `kalite` döngüsü en çok 3.
 

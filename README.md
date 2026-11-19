@@ -165,6 +165,10 @@ sır görünen çıktı aktarılmaz. Dağıtım onayı Geliştirme sekmesindeki 
 Boştayken motor yalnız bir SQL sorgusu yapar, model çağırmaz. Ayrıntı: [docs/akis-motoru.md](docs/akis-motoru.md),
 sonraki sürümler: [docs/akis-backlog.md](docs/akis-backlog.md).
 
+Pilot ve örnek akış `akis-okuyucu` ajanını kullanır (`ajanlar.example.json`; yalnız Read/Glob/Grep, tarayıcı
+kapalı): `ajanlar.json`'a ekle, yoksa adım `yetkisiz` ile durur. Canlıya alma ve geri dönüş:
+[docs/akis-canliya-alma.md](docs/akis-canliya-alma.md).
+
 Pilot `homeos-ozellik-gelistirme`: Planlama → Uygulama (hat) → Test kapısı → Güvenlik kontrolü → Kalite kapısı.
 Kapı geçmezse Düzeltme → Test (en çok 3 tur). Kapı geçince UAT/dağıtım onayı mevcut kart üzerinden verilir.
 Kaynak, yetki ya da güvenlik belirsizliğinde koşu manual_review'a alınır.

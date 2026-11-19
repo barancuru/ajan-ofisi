@@ -106,6 +106,10 @@
       "hazir_gorevler": [
         { "etiket": "Hızlı araştırma", "prompt": "<buraya kendi prompt'unu yaz>" }
       ]
-    }
+    },
+    { "id": "akis-okuyucu", "ad": "Akış Okuyucu", "oda": "arastirma", "cwd": "/path/to/your/notes", "model": "sonnet",
+      "ne_zaman": "istek", "ne_zaman_metin": "Workflow adımı gelince",
+      "aciklama": "Workflow planlama ve güvenlik inceleme adımları için salt okunur ajan: dosya yazmaz, web'e çıkmaz; yalnız okuma ve salt okunur git/kod/not geçitleri.",
+      "izinli_araclar": ["Read", "Glob", "Grep"], "tarayici": false, "butce_usd": 1.5, "hazir_gorevler": [] }
   ]
 }

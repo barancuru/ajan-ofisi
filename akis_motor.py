@@ -1159,6 +1159,12 @@ class Motor:
             self._adim_hatasi(b, kosu, tanim, adim, sinif, veri)
         self._uyandir.set()
 
+    def _baslamayan_cagriyi_dus(self, b, kosu, d):
+        """Hiç başlamamış deneme ajan çağrısı ve tahmini maliyet sayılmaz (_baslatma_hatasi ile aynı muhasebe)."""
+        self._kosu_yaz(b, kosu["id"], ajan_cagrisi=max(kosu["ajan_cagrisi"] - 1, 0),
+                       tahmini_usd=max(kosu["tahmini_usd"] - (d["tahmini_usd"] or 0), 0))
+        return self._kosu_al(b, kosu["id"])
+
     def _ajan_isini_kaldir(self, ref):
         """Terk edilen denemenin kuyruk/limit-bekleyen kaydı kalırsa iş sonradan yeniden koşar: kaldır."""
         try:
@@ -1187,6 +1193,7 @@ class Motor:
                             self._adim_hatasi(b, kosu, tanim, adim, "bilinmeyen", "yeniden başlatmada yarım gönderim, sonuç bilinmiyor")
                     else:
                         if self._deneme_bitir(b, d["id"], "basarisiz", siniflama="baslamadi", hata="gönderilmeden kesildi"):
+                            kosu = self._baslamayan_cagriyi_dus(b, kosu, d)
                             self._adim_hatasi(b, kosu, tanim, adim, "baslamadi", "gönderilmeden kesildi")
                 elif adim["tur"] == "gelistirme_gorevi":
                     dosya = self.ortam.gelistirme_bul(d["ref"])
@@ -1198,6 +1205,7 @@ class Motor:
                         self._olay(b, kosu, "kurtarma", adim=d["adim_id"], deneme=d["deneme"], durum="iz_bulundu",
                                    iterasyon=d["iterasyon"])
                     elif self._deneme_bitir(b, d["id"], "basarisiz", siniflama="baslamadi", hata="hat görevi yazılmadan kesildi"):
+                        kosu = self._baslamayan_cagriyi_dus(b, kosu, d)
                         self._adim_hatasi(b, kosu, tanim, adim, "baslamadi", "hat görevi yazılmadan kesildi")
                 elif adim["tur"] == "quality_gate":
                     if self._deneme_bitir(b, d["id"], "bilinmeyen", siniflama="bilinmeyen", hata="kapı yarıda kaldı"):

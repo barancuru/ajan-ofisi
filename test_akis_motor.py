@@ -31,6 +31,8 @@ class SahteOrtam:
         self.onaylar = set()          # (proje, sürüm, sha): ofis girişinin yazdığı canlı onay kayıtları
         self.ajanlar = {"arastirmaci": {"id": "arastirmaci", "kurulu": True, "butce_usd": 1.0},
                         "gunlukcu": {"id": "gunlukcu", "kurulu": True, "butce_usd": 0.5},
+                        "akis-okuyucu": {"id": "akis-okuyucu", "kurulu": True, "butce_usd": 1.5,
+                                         "izinli_araclar": ["Read", "Glob", "Grep"], "tarayici": False},
                         "gorevci": {"id": "gorevci", "kurulu": True, "ssh": {"host": "x"}}}
         self.wt = os.path.join(kok, "wt")
         os.makedirs(self.wt, exist_ok=True)
@@ -496,9 +498,11 @@ class KurtarmaTest(MotorTabani):
         m2 = self.yeni_motor()
         m2.baslangic_uzlastir()
         self.saat[0] += 100
+        self.assertEqual((self.detay(k)["ajan_cagrisi"], self.detay(k)["tahmini_usd"]), (0, 0))   # başlamayan sayılmaz
         m2.tur()
         self.assertEqual(len(self.ortam.baslatilan), 2)   # hiç başlamamıştı: yeniden gönderildi
         self.assertEqual(self.detay(k)["durum"], "calisiyor")
+        self.assertEqual(self.detay(k)["ajan_cagrisi"], 1)
 
     def test_yarim_kalmis_kosu_olu_surec(self):
         t = taban_tanim()
@@ -789,6 +793,17 @@ class PilotTest(MotorTabani):
         self.ortam.onaylar.add(("homeos", "0.10.1", "a" * 64))       # ofis girişi canlı onay kaydını yazdı
         self.m.tur()
         self.assertEqual(self.detay(self.k)["durum"], "basarili")
+
+    def test_pilot_ajani_salt_okunur(self):
+        """Pilot yalnız akis-okuyucu kullanır; örnek yapılandırmadaki tanımı motorun yazma kontrolünden geçer."""
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "ajanlar.example.json"), encoding="utf-8") as f:
+            ornek = {a["id"]: {**a, "kurulu": True} for a in json.load(f)["ajanlar"]}
+        self.ortam.ajanlar = ornek
+        self.assertIsNone(self.m.ajan_yazabilir("akis-okuyucu"))
+        self.assertIs(ornek["akis-okuyucu"]["tarayici"], False)
+        pilot = self.tanimlar["homeos-ozellik-gelistirme"]
+        self.assertEqual(pilot["izinli_ajanlar"], ["akis-okuyucu"])
+        self.assertEqual({a["ajan"] for a in pilot["adimlar"] if a["tur"] == "agent_task"}, {"akis-okuyucu"})
 
     def test_belirsiz_plan_inceleme(self):
         self.planla(risk="belirsiz")
