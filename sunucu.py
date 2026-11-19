@@ -1703,10 +1703,14 @@ def alarm_gordum(kapi_imzasi):
     """'Gördüm': marks every current critical alarm as read. Persisted under durum/; only the web login may do it."""
     if not kapidan_geldi(kapi_imzasi):
         raise IstekHatasi(403, "alarm yalnız ofis girişinden kapatılabilir")
-    with GELISTIRME_KILIDI:   # görev dosyası değil: hattın kilidini beklemez
+    if not GELISTIRME_KILIDI.acquire(timeout=GOREV_KILIDI_BEKLE_SN):   # görev dosyası değil; sınırlı bekler
+        raise IstekHatasi(503, "meşgul; biraz sonra yeniden dene")
+    try:
         okunan = _okunmuslar() | {a["id"] for a in alarmlar_oku() if a["seviye"] == "kritik"}
         os.makedirs(os.path.dirname(ALARM_OKUNDU_DOSYASI), exist_ok=True)
         atomik_yaz(ALARM_OKUNDU_DOSYASI, json.dumps({"okundu": sorted(okunan)[-500:]}))
+    finally:
+        GELISTIRME_KILIDI.release()
 
 
 def _teshis_metni(govde):
@@ -1815,6 +1819,21 @@ def kosucuyu_durt():
                    capture_output=True, timeout=10)
 
 
+def _umask_oku():
+    """Süreç umask'ı, değiştirmeden (çok iş parçacıklı sunucuda os.umask(0) başka iş parçacığının dosyasını açık bırakırdı)."""
+    try:
+        with open("/proc/self/status", encoding="ascii") as f:
+            for satir in f:
+                if satir.startswith("Umask:"):
+                    return int(satir.split()[1], 8)
+    except (OSError, ValueError):
+        pass
+    return 0o022
+
+
+_UMASK = _umask_oku()
+
+
 def atomik_yaz(yol, metin):
     """Aynı klasörde mkstemp (O_EXCL: yerleştirilmiş symlink/sabit ad izlenmez) + os.replace (hedef symlink ise bağın
     kendisi değişir, gösterdiği dosya değil). Var olan dosyanın izinleri korunur."""
@@ -1825,10 +1844,8 @@ def atomik_yaz(yol, metin):
         kip = st.st_mode & 0o777 if _stat.S_ISREG(st.st_mode) else None   # symlink'in kendi kipi (0777) alınmaz
     except FileNotFoundError:
         kip = None
-    if kip is None:   # yeni dosya ya da symlink yerine: umask varsayılanı (mkstemp'in 0600'ü değil)
-        maske = os.umask(0)
-        os.umask(maske)
-        kip = 0o666 & ~maske
+    if kip is None:   # yeni dosya ya da symlink yerine: main'deki open("w") ile aynı (umask varsayılanı)
+        kip = 0o666 & ~_UMASK
     fd, gecici = tempfile.mkstemp(dir=klasor, prefix=".ofis.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -1856,6 +1873,7 @@ def _gorev_kilidi_yolu():
         return GOREV_KILIDI_DOSYASI
     return os.path.join(GOREV_DIZINI, ".gorev-dosyasi.lock")
 GOREV_KILIDI_BEKLE_SN = 30
+GOREV_MAKS_BAYT = 5_000_000
 
 
 @contextlib.contextmanager
@@ -1888,11 +1906,13 @@ def gorev_kilidi():
 def gorev_oku(yol):
     """Kilit altında görev dosyası okuma: symlink izlenmez (O_NOFOLLOW), yalnız sıradan dosya."""
     try:
-        metin = akis_ofis.duz_dosya_oku(yol)
+        metin = akis_ofis.duz_dosya_oku(yol, GOREV_MAKS_BAYT + 1)   # tamamı: kesilmiş metin geri yazılmasın
     except FileNotFoundError:
         raise IstekHatasi(404, "görev yok")
     except OSError as e:
         raise IstekHatasi(409, f"görev dosyası okunamadı ({type(e).__name__}; symlink/FIFO olabilir)")
+    if len(metin) > GOREV_MAKS_BAYT:
+        raise IstekHatasi(413, "görev dosyası çok büyük; web'den değiştirilmez (elle kısalt)")
     return metin
 
 

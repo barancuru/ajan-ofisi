@@ -43,8 +43,11 @@ Açmak yapılandırma değil gözden geçirilmiş bir kod değişikliğidir.
   503); `atomik_yaz` mkstemp + replace, izin korunur; görev okumaları `O_NOFOLLOW`; `canli_onayi_yaz` kimliği mühürden
   yalnız aynı görev+dal ise `<proje>-<sürüm>.onay.kimlik`'e kopyalar; motor mühür kimliği = onay kimliği = izlediği kart
   (ve dal) olmadıkça UAT paketi, onay ya da yayın kanıtı kabul etmez.
-- **İkinci katman**: `HAT_ADIMLARI_ACIK`/`DAGITIM_ONAYI_ACIK` açılsa bile canlı `bin/calistir`'da `HAT_KORUMA_SURUMU`
-  yoksa hat/kapı/dağıtım adımları kapalı kalır.
+- **İkinci katman (dağıtım göstergesi, güvenlik sınırı değil)**: `HAT_ADIMLARI_ACIK`/`DAGITIM_ONAYI_ACIK` açılsa bile
+  canlı `bin/calistir`'da `HAT_KORUMA_SURUMU` satırı VE hattın her koşuda `~/.local/state/beyin/hat-koruma-surumu`'ya
+  yazdığı aynı sürüm yoksa hat/kapı/dağıtım adımları kapalı kalır: bayrakları beyin dalından önce açmak işe yaramaz.
+  Betiği değiştirebilen biri işareti de yazdırabilir; asıl sınır, hiçbir ajanın `~/beyin/bin/**`'e yazamamasıdır
+  (hat `YASAK`/`YASAK_GELISTIR` ve ofis `varsayilan_yasak_araclar` Edit/Write reddi; Bash geçit kancasıyla sınırlı).
 - Sıra: beyin dalı canlıya → yeni hatla bir HomeOS görevi UAT'ye gelip `.kimlik` yazıldığı görülür → ayrı PR ile
   `ETKIN_AKISLAR`, `HAT_ADIMLARI_ACIK`, `DAGITIM_ONAYI_ACIK`, `YAZAN_AJAN_ACIK` (gerekiyorsa) değiştirilir.
 - Kalan (kilitlenemez): ajanların kendi araçlarıyla görev dosyasına yaptığı yazımlar (teşhis ajanı, `Write(~/beyin/**)`

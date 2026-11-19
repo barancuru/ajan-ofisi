@@ -276,8 +276,7 @@ class OfisOrtami:
         for d in (self.s.GOREV_DIZINI, os.path.join(self.s.GOREV_DIZINI, "bitti")):
             for yol in glob.glob(os.path.join(d, "*.md")):
                 try:
-                    with open(yol, encoding="utf-8", errors="replace") as f:
-                        metin = f.read(400_000)
+                    metin = duz_dosya_oku(yol)   # FIFO/symlink izlenmez
                 except OSError:
                     continue
                 fm, govde = self.s.on_bilgi(metin)

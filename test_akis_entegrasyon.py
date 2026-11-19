@@ -786,6 +786,22 @@ class HatKorumaTest(OfisTabani):
         with self.assertRaises(sunucu.IstekHatasi):
             sunucu.gorev_oku(fifo)
         self.assertIsNone(self.ortam.gelistirme_oku("F.md"))
+        self.assertIsNone(self.ortam.gelistirme_bul("ak-0123456789ab"))                   # tarama da bloke olmaz
+
+    def test_buyuk_gorev_dosyasi_kesilmeden_okunur(self):
+        g = os.path.join(self.dizin["gorevler"], "B.md")
+        govde = "---\ndurum: uat\n---\n" + ("x" * 999 + "\n") * 600 + "SON SATIR\n"   # ~600 KB
+        self.yaz(g, govde)
+        self.assertTrue(sunucu.gorev_oku(g).endswith("SON SATIR\n"))
+        self.yaz(g, "x" * (sunucu.GOREV_MAKS_BAYT + 10))
+        with self.assertRaises(sunucu.IstekHatasi) as c:
+            sunucu.gorev_oku(g)
+        self.assertEqual(c.exception.kod, 413)
+
+    def test_umask_degistirilmez(self):
+        once = sunucu._UMASK
+        sunucu.atomik_yaz(os.path.join(self.d, "u.txt"), "x")
+        self.assertEqual(sunucu._umask_oku(), once)
 
     def test_atomik_yaz_symlink_yerine_guvenli_kip(self):
         hedef = os.path.join(self.d, "hedef2")
