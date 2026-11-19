@@ -2473,8 +2473,14 @@ def akis_islemi(yol, veri, kapi_imzasi=""):
             return 200, m.duraklat(kosu)
         if islem == "devam":
             karar = veri.get("karar")
-            if karar is not None and karar not in ("yeniden_dene", "basarisiz_say"):
-                raise akis_motor.AkisHatasi(400, "karar: yeniden_dene | basarisiz_say")
+            if karar is not None and karar not in ("yeniden_dene", "basarisiz_say", "basarili_say", "ek_butce"):
+                raise akis_motor.AkisHatasi(400, "karar: yeniden_dene | basarisiz_say | basarili_say | ek_butce")
+            if karar == "basarili_say":   # V1.1 #9: kapı motorda da denetlenir
+                return 200, m.basarili_say(kosu, veri.get("adim"), veri.get("gerekce"), veri.get("cikti"),
+                                           kapi_ok=kapidan_geldi(kapi_imzasi))
+            if karar == "ek_butce":
+                return 200, m.ek_butce(kosu, veri.get("gerekce"), veri.get("ek_usd", 0), veri.get("ek_cagri", 0),
+                                       kapi_ok=kapidan_geldi(kapi_imzasi))
             return 200, m.devam(kosu, karar)
         if islem == "iptal":
             return 200, m.iptal(kosu)

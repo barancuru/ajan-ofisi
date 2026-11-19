@@ -913,6 +913,14 @@ class ApiTest(OfisTabani):
         self.assertIsNone(sunucu.sse_tur_suzgeci({"tur": ["../x"]}))
         self.assertEqual(sunucu.sse_tur_suzgeci({"tur": ["akis,hata,X"]}), {"akis", "hata"})
 
+    def test_operator_kararlari_kapisiz_403(self):
+        """V1.1 #9: localhost (kapısız) istek başarılı sayamaz ve ek bütçe veremez."""
+        for govde in ({"run_id": "r000000000000", "karar": "basarili_say", "adim": "a", "gerekce": "x" * 20},
+                      {"run_id": "r000000000000", "karar": "ek_butce", "ek_usd": 1, "gerekce": "x" * 20}):
+            kod, v = self.iste("POST", "/api/akis/devam", govde)
+            self.assertEqual(kod, 403, v)
+        self.assertEqual(self.iste("POST", "/api/akis/devam", {"run_id": "r000000000000", "karar": "onayla"})[0], 400)
+
     def test_girdi_dogrulama(self):
         for govde, kod in (({"akis": "../x"}, 400), ({"akis": "yok-boyle"}, 404),
                            ({"akis": "ornek-arastirma-ozeti", "girdiler": {"konu": "x" * 501}}, 400),

@@ -369,6 +369,7 @@ td.sayi,th.sayi{text-align:right}
 .ara-baslik{font-family:"Space Grotesk",sans-serif;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--soluk);margin:14px 0 8px}
 .gelistirme-izgara{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
 .rozet{font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:rgba(59,52,44,.08);color:var(--murekkep)}
+.akis-karar{display:grid;gap:.4rem;margin:.5rem 0}.akis-karar .akis-alan{display:grid;gap:.2rem}.akis-karar .akis-alan span{font-size:.8rem;color:#555}
 .akis-uyari{margin:.4rem 0;padding:.35rem .5rem;border-left:3px solid #c98a14;background:#fff6e0;color:#6b4a0c;font-size:.85rem}.akis-uyari.tamam{border-color:#2f7d4f;background:#e4f4ea;color:#1f5a37}
 .rozet.uat{background:#ffe1d6;color:#b5401f}.rozet.calisiyor{background:#fff0c9;color:#8a5a14}
 .rozet.bitti{background:#dcefe1;color:#2f6e44}.rozet.oneri{background:#e4e1fb;color:#4b3fa8}
@@ -4341,6 +4342,20 @@ function akisDugmeler(dt) {
   if (dt.durum === 'inceleme' && !sinirda) {
     dug('Yeniden dene', 'devam', { karar: 'yeniden_dene' }, 'Takılan adım yeni bir denemeyle başlatılsın mı? Yan etkili bir adımsa önce sonucunu kontrol et.');
   }
+  if (dt.durum === 'inceleme') {
+    const sebep = dt.neden && dt.neden.sebep;
+    const adim = dt.neden && dt.adimlar.find(a => a.id === dt.neden.adim);
+    if (['adim', 'sir'].includes(sebep) && adim && adim.tur === 'agent_task' && adim.durum === 'inceleme') {
+      const b = el('button', 'mini', 'Adımı başarılı say…'); b.type = 'button';
+      b.onclick = () => { b.disabled = true; kutu.after(akisBasariliSayFormu(dt, adim)); };
+      kutu.append(b);
+    }
+    if (sebep === 'butce') {
+      const b = el('button', 'mini', 'Ek bütçe ver…'); b.type = 'button';
+      b.onclick = () => { b.disabled = true; kutu.after(akisEkButceFormu(dt)); };
+      kutu.append(b);
+    }
+  }
   if (dt.durum === 'inceleme') dug('Başarısız say', 'devam', { karar: 'basarisiz_say' }, 'Koşu başarısız olarak kapatılsın mı?');
   if (!['basarili', 'basarisiz', 'iptal'].includes(dt.durum)) dug('İptal', 'iptal', {}, 'Koşu iptal edilsin mi? Çalışan ajan koşusu durdurulmaz, sonucu yok sayılır.', 'İptal edildi');
   for (const a of dt.adimlar) {
@@ -4350,6 +4365,52 @@ function akisDugmeler(dt) {
     dug(a.ad + ': Reddet', 'onay', { adim: a.id, karar: 'hayir' }, 'Reddedilsin mi?', 'Reddedildi');
   }
   return kutu;
+}
+// V1.1 #9 operatör kararları: yalnız ofis girişinden (sunucu ve motor kapıyı denetler), gerekçe zorunlu
+function akisKararFormu(baslik, aciklama, alanlar, gonderGovde, tamam) {
+  const f = el('form', 'kart akis-form akis-karar'); f.autocomplete = 'off';
+  f.append(el('h4', null, baslik), el('small', 'alt', aciklama), ...alanlar);
+  const ger = el('textarea'); ger.rows = 2; ger.minLength = 10; ger.maxLength = 2000; ger.required = true;
+  ger.placeholder = 'Gerekçe (zorunlu, en az 10 karakter): neyi nasıl doğruladın?'; ger.setAttribute('aria-label', 'Gerekçe');
+  const gon = el('button', 'koyu', 'Kaydet'); gon.type = 'submit';
+  const vaz = el('button', 'mini', 'Vazgeç'); vaz.type = 'button'; vaz.onclick = () => sekmeAc('akis');
+  f.append(ger, gon, vaz);
+  f.onsubmit = async e => { e.preventDefault(); gon.disabled = true; const g = gonderGovde(); if (!g) { gon.disabled = false; return; }
+    if (!await akisIslem('devam', { ...g, gerekce: ger.value }, tamam)) gon.disabled = false; };
+  return f;
+}
+function akisBasariliSayFormu(dt, adim) {
+  const girdiler = Object.entries(adim.cikti_alanlari || {}).map(([ad, t]) => {
+    let x;
+    if (t.tur === 'secim') { x = el('select'); ['', ...(t.secenekler || [])].forEach(v => { const o = el('option', null, v || '— seç —'); o.value = v; x.append(o); }); }
+    else if (t.tur === 'evet_hayir') { x = el('select'); [['', '— seç —'], ['true', 'evet'], ['false', 'hayır']].forEach(([v, m]) => { const o = el('option', null, m); o.value = v; x.append(o); }); }
+    else if (t.tur === 'sayi') { x = el('input'); x.type = 'number'; x.step = 'any'; }
+    else { x = el('textarea'); x.rows = 2; x.maxLength = t.maks || 2000; }
+    x.name = ad; x.required = t.zorunlu !== false; x.setAttribute('aria-label', ad);
+    const l = el('label', 'akis-alan'); l.append(el('span', null, ad + (x.required ? ' *' : '')), x); l.dataset.tur = t.tur || 'metin';
+    return l;
+  });
+  return akisKararFormu(adim.ad + ': başarılı say', 'Ajanın yapamadığı işi sen doğruladıysan çıktıyı gir. Tanımın normal geçişi uygulanır; olay kaydına gerekçenle yazılır.',
+    girdiler, () => {
+      const cikti = {};
+      for (const l of girdiler) { const x = l.querySelector('[name]'); if (x.value === '') continue;
+        cikti[x.name] = l.dataset.tur === 'sayi' ? Number(x.value) : l.dataset.tur === 'evet_hayir' ? x.value === 'true' : x.value; }
+      return { run_id: dt.run_id, karar: 'basarili_say', adim: adim.id, cikti };
+    }, 'Adım başarılı sayıldı');
+}
+function akisEkButceFormu(dt) {
+  // etkin sınır = tanım + ek; kalan ek hakkı = tanım − verilmiş ek
+  const kalan = { usd: Math.max(0, +(dt.sinirlar.max_maliyet_usd - 2 * dt.ek.maliyet_usd).toFixed(2)),
+                  cagri: Math.max(0, dt.sinirlar.max_ajan_cagrisi - 2 * dt.ek.ajan_cagrisi) };
+  const usd = el('input'); usd.type = 'number'; usd.min = '0'; usd.step = '0.01'; usd.max = String(kalan.usd); usd.placeholder = 'Ek $ (en çok ' + kalan.usd + ')';
+  const cag = el('input'); cag.type = 'number'; cag.min = '0'; cag.step = '1'; cag.max = String(kalan.cagri); cag.placeholder = 'Ek ajan çağrısı (en çok ' + kalan.cagri + ')';
+  [usd, cag].forEach(x => x.setAttribute('aria-label', x.placeholder));
+  return akisKararFormu('Ek bütçe', 'Neden: ' + (dt.neden.metin || 'bütçe') + '. Toplam ek tanım sınırını aşamaz (bütçe en çok iki katı). Adım yeniden bütçe kontrolünden geçer.',
+    [usd, cag], () => {
+      const g = { run_id: dt.run_id, karar: 'ek_butce', ek_usd: Number(usd.value || 0), ek_cagri: Math.trunc(Number(cag.value || 0)) };
+      if (!(g.ek_usd > 0 || g.ek_cagri > 0)) { tost('Ek $ ya da çağrı gir'); return null; }
+      return g;
+    }, 'Ek bütçe verildi');
 }
 function akisAdimlar(dt) {
   const liste = el('ol', 'akis-adimlar');

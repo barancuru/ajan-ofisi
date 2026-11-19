@@ -177,6 +177,20 @@ kosucu sonucu `son: false` yazar; motor aynı denemeyi beklemeyi sürdürür, ke
 - İptal kuyruktaki denemeyi kuyruktan ve limit-bekleyen'den çıkarır. Çalışan ajan koşusu **durdurulmaz**; sonucu
   `yok_sayildi` olur. Hat görevi sürer ve Geliştirme sekmesinden yönetilir. Panel ve olaylar bunu açıkça söyler.
 
+## Operatör kararları (V1.1)
+
+- **Adımı başarılı say** (`karar: basarili_say, adim, gerekce, cikti`): yalnız ofis girişi (`X-Ofis-Kapi`; motor da
+  denetler), gerekçe 10–2000 karakter (sır taraması). Yalnız inceleme sebebi `adim` ya da `sir` olan, satırı
+  `inceleme` durumundaki ve uçuşta denemesi olmayan **agent_task** adımı. Kapı, onay, hat ve koşul adımı başarılı
+  sayılamaz (kanıtları komut çıkışı ya da insan onayıdır); tanım yönlendirmesi (`tanim`), `kaynak`, sınırlar,
+  `erken_onay`, `kapali` da hayır. Tanımın zorunlu çıktı alanlarını operatör verir (aynı tür/boyut doğrulaması).
+  Tanımın normal `sonraki` geçişi uygulanır; `operator_basarili_saydi` olayı gerekçeyi taşır.
+- **Ek bütçe** (`karar: ek_butce, ek_usd, ek_cagri, gerekce`): kapı + gerekçe, yalnız `butce` incelemesinde. Toplam ek
+  tanım sınırını aşamaz (bütçe ve çağrı en çok iki katı). Tanım anlık görüntüsü değişmez: ek, DB migration 4
+  sütunlarında (`ek_maliyet_usd`, `ek_ajan_cagrisi`); etkin sınır = tanım + ek. Adım `hazir` olur ve başlatmadan önceki
+  bütçe kontrolünden yeniden geçer. `butce` yine `yeniden_dene` ile açılmaz. `ek_butce` olayı denetim izidir.
+  Geri dönüşte (1.0.88) eski kod sütunları okumaz: ek bütçe yok sayılır.
+
 ## Saklama (V1.1)
 
 `python3 akis_saklama.py [--gun 90] [--uygula]`. Varsayılan kuru koşudur: neyin kaldırılacağını JSON olarak yazar,
@@ -217,7 +231,7 @@ serbest kalır; ona bağlı eski Geliştirme kartı "kapı durumu okunamadı" g�
 | `GET /api/akis/detay?id=r…` | — | adımlar, denemeler, olaylar (istem/ham çıktı yok) |
 | `POST /api/akis/baslat` | `{akis, girdiler, idem_anahtari?}` | 202; aynı anahtar → aynı koşu (`tekrar: true`) |
 | `POST /api/akis/duraklat` | `{run_id}` | |
-| `POST /api/akis/devam` | `{run_id, karar?: yeniden_dene \| basarisiz_say}` | inceleme için karar zorunlu |
+| `POST /api/akis/devam` | `{run_id, karar?: yeniden_dene \| basarisiz_say \| basarili_say \| ek_butce}` | inceleme için karar zorunlu; son ikisi kapı + `gerekce` ister |
 | `POST /api/akis/iptal` | `{run_id}` | |
 | `POST /api/akis/onay` | `{run_id, adim, karar: evet \| hayir, not?}` | hassas kategori kapı ister; dağıtım onayı burada verilmez |
 
