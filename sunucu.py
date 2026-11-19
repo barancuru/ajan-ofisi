@@ -412,7 +412,27 @@ def limit_bekleyenleri_al(kuyruk):
 
 
 AKIS_ALARM_ARALIK_SN = 600
-_AKIS_ALARM_TS = 0.0   # bu süreçte son "workflow DB okunamadı" alarmı (her kuyruk turunda yeni alarm yazılmasın)
+
+
+def _akis_alarm_zamani_geldi():
+    """'Workflow DB okunamadı' alarmı en çok 10 dakikada bir — ofis sunucusu ve systemd tekrar servisinin kısa ömürlü
+    süreçleri arasında ortak: zaman damgası durum/akis-alarm.ts'te (çağıranlar baslatma.lock altında). Monotonik saat:
+    duvar saati geri alınsa da alarm susmaz; açılıştan sonra (daha küçük değer) negatif fark = yeni alarm."""
+    yol = os.path.join(ortak.DURUM_DIZINI, "akis-alarm.ts")
+    simdi = time.monotonic()
+    try:
+        with open(yol, encoding="utf-8") as f:
+            son = float(f.read().strip() or "nan")
+        fark = simdi - son
+        if 0 <= fark < AKIS_ALARM_ARALIK_SN:
+            return False
+    except (OSError, ValueError):
+        pass
+    try:
+        atomik_yaz(yol, f"{simdi}\n")
+    except OSError:
+        pass
+    return True
 
 
 def akis_ref_durumu(ref):
@@ -424,9 +444,7 @@ def akis_ref_durumu(ref):
     try:
         return "gecerli" if motor().ref_ucusta(ref) else "gecersiz"
     except Exception as e:  # noqa: BLE001
-        global _AKIS_ALARM_TS
-        if time.time() - _AKIS_ALARM_TS >= AKIS_ALARM_ARALIK_SN:
-            _AKIS_ALARM_TS = time.time()
+        if _akis_alarm_zamani_geldi():
             ortak.olay_yaz({"tur": "hata", "ajan": "ofis", "detay": f"workflow durumu okunamadı ({type(e).__name__}); "
                             "kuyruktaki workflow işleri korunuyor, başlatılmıyor"})
         return "bilinmiyor"

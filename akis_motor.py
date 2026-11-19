@@ -360,8 +360,10 @@ class Motor:
                 try:
                     cikarildi = self.ortam.kuyruktan_cikar_kilitsiz(d["ref"])
                 except Exception as e:  # noqa: BLE001 - iptal zaten commit edildi; kuyruk tarafı iptali görüp işi düşürür
-                    notlar.append(f"{d['adim_id']}: kuyruk temizlenemedi ({type(e).__name__}); kuyruk işi iptal edilmiş "
-                                  "denemeyi görünce koşturmaz")
+                    notlar.append(f"{d['adim_id']}: kuyruk temizliği hata verdi ({type(e).__name__}); kayıt kaldıysa "
+                                  "iptal edilmiş deneme olarak koşturulmaz")
+                    if d["durum"] == "calisiyor":
+                        notlar.append(f"{d['adim_id']}: çalışan ajan koşusu durdurulmadı; bitince sonucu yok sayılır")
                     continue
                 if cikarildi:
                     notlar.append(f"{d['adim_id']}: kuyruktan çıkarıldı")
@@ -369,12 +371,15 @@ class Motor:
                         iade += d["tahmini_usd"] or 0
                 else:
                     notlar.append(f"{d['adim_id']}: çalışan ajan koşusu durdurulmadı; bitince sonucu yok sayılır")
-        with self._islem() as b:
-            kosu = self._kosu_al(b, kosu_id)
-            self._kosu_yaz(b, kosu_id, tahmini_usd=max(kosu["tahmini_usd"] - iade, 0),
-                           neden=json.dumps({"sebep": "operator", "metin": "; ".join(notlar) or "operatör iptal etti"},
-                                            ensure_ascii=False))
-        return {**self.detay(kosu_id), "notlar": notlar}
+        try:   # iptal commit edildi: bundan sonraki hata yanıtı 500'e çevirmemeli (tekrar deneyen 409 alırdı)
+            with self._islem() as b:
+                kosu = self._kosu_al(b, kosu_id)
+                self._kosu_yaz(b, kosu_id, tahmini_usd=max(kosu["tahmini_usd"] - iade, 0),
+                               neden=json.dumps({"sebep": "operator", "metin": "; ".join(notlar) or "operatör iptal etti"},
+                                                ensure_ascii=False))
+            return {**self.detay(kosu_id), "notlar": notlar}
+        except Exception as e:  # noqa: BLE001
+            return {"run_id": kosu_id, "durum": "iptal", "notlar": notlar + [f"not/iade yazılamadı ({type(e).__name__})"]}
 
     def _iptal_commit(self, kosu_id, notlar, ajan_denemeleri):
         with self._islem() as b:
@@ -1111,30 +1116,29 @@ class Motor:
                                cikti_json=json.dumps({"karar": "evet", "not": "Geliştirme kartından (ofis girişiyle) onaylandı"}))
                 self._olay(b, kosu, "onay_verildi", adim=adim["id"], durum="evet", iterasyon=r["iterasyon"], kaynak="kart")
                 self._gecisler_uygula(b, kosu, tanim, adim["sonraki"], adim["id"])
-            elif durum == "bitti":
-                self._olay(b, kosu, "yayin_kaniti_yok", adim=adim["id"], durum="bekliyor", iterasyon=r["iterasyon"],
-                           neden="görev 'bitti' ama yayın kanıtı yok: o sürümün paket mührü, tam dal ucunda ve main'den "
-                                 "erişilebilen v<sürüm> etiketi gerekir (etiket başka commit'te olabilir); elle kontrol et",
-                           anahtar=f"{kosu['id']}:yayin_kaniti_yok:{adim['id']}:{fm.get('surum')}:{fm.get('sha256')}")
-            elif onay == "evet":
-                self._olay(b, kosu, "onay_kaydi_yok", adim=adim["id"], durum="bekliyor", iterasyon=r["iterasyon"],
-                           neden="görev dosyasında onay var ama ofis girişinin canlı onay kaydı yok; kabul edilmedi")
             elif onay == "hayir" or durum in ("hazir", "calisiyor", "takildi", "reddedildi"):
                 self._adim_yaz(b, kosu["id"], adim["id"], durum="basarisiz",
                                cikti_json=json.dumps({"karar": "hayir", "not": f"kart reddedildi (durum {durum})"}))
                 self._olay(b, kosu, "onay_verildi", adim=adim["id"], durum="hayir", iterasyon=r["iterasyon"], kaynak="kart")
                 self._gecisler_uygula(b, kosu, tanim, adim["reddedilirse"], adim["id"])
+            elif durum == "bitti":
+                self._olay(b, kosu, "yayin_kaniti_yok", adim=adim["id"], durum="bekliyor", iterasyon=r["iterasyon"],
+                           neden="görev 'bitti' ama yayın kanıtı yok: o sürümün paket mührü, tam dal ucunda ve main'den "
+                                 "erişilebilen v<sürüm> etiketi gerekir (etiket başka commit'te olabilir); elle kontrol et",
+                           anahtar=f"{kosu['id']}:yayin_kaniti_yok:{adim['id']}:{r['iterasyon']}:{fm.get('surum')}:{fm.get('sha256')}")
+            elif onay == "evet":
+                self._olay(b, kosu, "onay_kaydi_yok", adim=adim["id"], durum="bekliyor", iterasyon=r["iterasyon"],
+                           neden="görev dosyasında onay var ama ofis girişinin canlı onay kaydı yok; kabul edilmedi")
             if kosu["durum"] != "calisiyor":
                 return
 
     # ------------------------------------------------------------------ uzlaştırma
     def _deneme_uzlastir(self, kosu_id, deneme_id):
         kaldir = []   # kuyruk/limit temizliği commit'ten SONRA: yazma kilidini tutarken baslatma.lock beklenmez
-        try:
-            self._deneme_uzlastir_islem(kosu_id, deneme_id, kaldir)
-        finally:
-            for ref in kaldir:
-                self._ajan_isini_kaldir(ref)
+        self._deneme_uzlastir_islem(kosu_id, deneme_id, kaldir)
+        # yalnız işlem commit olduysa (istisna yoksa): geri alınan işlemde deneme hâlâ uçuşta, kayıt silinmemeli
+        for ref in kaldir:
+            self._ajan_isini_kaldir(ref)
 
     def _deneme_uzlastir_islem(self, kosu_id, deneme_id, kaldir):
         with self._islem() as b:
@@ -1216,11 +1220,11 @@ class Motor:
                 return
             # hata / bilinmeyen / kaynak / erken onay
             sinif = {"hata": "kalici"}.get(durum, durum)
-            if adim["tur"] == "agent_task" and sinif == "bilinmeyen":
-                kaldir.append(d["ref"])
             if not self._deneme_bitir(b, deneme_id, "bilinmeyen" if sinif == "bilinmeyen" else "basarisiz",
                                       siniflama=sinif, hata=str(veri)[:300]):
                 return
+            if adim["tur"] == "agent_task" and sinif == "bilinmeyen":
+                kaldir.append(d["ref"])   # bu işlem kapattı; temizlik commit'ten sonra
             self._adim_hatasi(b, kosu, tanim, adim, sinif, veri)
         self._uyandir.set()
 

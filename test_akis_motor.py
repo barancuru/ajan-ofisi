@@ -536,7 +536,7 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         self.ortam.cikar_hatasi = OSError("disk dolu")
         d = self.m.iptal(k)
         self.assertEqual(d["durum"], "iptal")
-        self.assertIn("kuyruk temizlenemedi", " ".join(d["notlar"]))
+        self.assertIn("kuyruk temizliği hata verdi", " ".join(d["notlar"]))
 
     def test_zaman_asimi_kuyruk_temizligi_db_islemi_disinda(self):
         """Son inceleme 3: motor turu kuyruk/flock'u SQLite yazma kilidini tutarken beklemez."""
@@ -547,9 +547,30 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         self.ortam.davranis = ["kuyruk"]
         self.m.tur()
         self.ortam.motor = self.m
-        self.saat[0] += 601
+        ref = self.son_ref()
+        self.saat[0] += 300
+        self.m.tur()                                         # zaman aşımı öncesi: kuyruk kaydına dokunulmaz
+        self.assertIn(ref, self.ortam.kuyruk)
+        self.saat[0] += 301
         self.m.tur()
         self.assertIs(self.ortam.cikarirken_islemde, False)
+        self.assertNotIn(ref, self.ortam.kuyruk)
+
+    def test_islem_geri_alinirsa_kuyruk_kaydi_silinmez(self):
+        """Commit olmayan (geri alınan) uzlaştırma kuyruk/limit kaydını silmemeli: deneme hâlâ uçuşta."""
+        t = taban_tanim()
+        t["adimlar"][0].update({"zaman_asimi_sn": 600, "yan_etkili": False})
+        self.tanim(t)
+        k = self.m.baslat("deneme", {"konu": "x"})["run_id"]
+        self.ortam.davranis = ["kuyruk"]
+        self.m.tur()
+        ref = self.son_ref()
+        self.saat[0] += 601
+        with mock.patch.object(self.m, "_adim_hatasi", side_effect=RuntimeError("işlem içinde hata")):
+            with self.assertRaises(RuntimeError):
+                self.m.tur()
+        self.assertIn(ref, self.ortam.kuyruk)
+        self.assertEqual(self.adim(k, "a")["denemeler"][0]["durum"], "kuyrukta")
 
     def test_yayin_kaniti_eksikse_neden_gorunur(self):
         """Son inceleme 6: 'durum: bitti' ama kanıt yok (ör. etiket başka commit'te) → ayrı olay, onay verilmez."""
@@ -573,6 +594,9 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         eksik = [o for o in self.ortam.olaylar if o["olay"] == "yayin_kaniti_yok"]
         self.assertEqual(len(eksik), 1)                     # bir kez, her turda değil
         self.assertIn("etiket", eksik[0]["neden"])
+        self.ortam.gorevler["G0.md"]["onay"] = "hayir"       # 'bitti' + ret: ret yolu öncelikli
+        self.m.tur()
+        self.assertEqual(self.adim(k, "uat_onayi")["durum"], "basarisiz")
 
     def test_iptal_kuyruk_temizligi_db_commit_sonrasi(self):
         self.tanim(taban_tanim())

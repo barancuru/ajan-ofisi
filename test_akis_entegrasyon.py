@@ -48,7 +48,6 @@ class OfisTabani(unittest.TestCase):
                    mock.patch.object(ortak, "OLAYLAR", os.path.join(self.d, "olaylar.jsonl")),
                    mock.patch.object(sunucu, "GOREV_DIZINI", dizinler["gorevler"]),
                    mock.patch.object(sunucu, "kosucuyu_durt", lambda: None),
-                   mock.patch.object(sunucu, "_AKIS_ALARM_TS", 0.0),
                    mock.patch.object(sunucu, "tmux_hazirla", lambda: "tmux"),
                    mock.patch.object(sunucu.subprocess, "run", self.sahte_tmux)]
         for y in yamalar:
@@ -465,6 +464,10 @@ class KuyrukIptalSiralamaTest(OfisTabani):
                 sunucu.kuyrugu_isle()
         self.assertEqual(len(self.hata_olaylari()), 1)
         self.assertEqual(self.tmux, [])
+        with mock.patch.object(sunucu, "motor", side_effect=RuntimeError("db kilitli")), \
+                mock.patch.object(sunucu.time, "monotonic", lambda: 10 ** 9):   # 10 dk geçti (ya da başka süreç)
+            sunucu.kuyrugu_isle()
+        self.assertEqual(len(self.hata_olaylari()), 2)
 
     def test_db_okunamazsa_limit_kaydi_korunur_baslatilmaz(self):
         arg = {"kosu_id": "2026-11-19-1-akis-okuyucu", "ajan": "akis-okuyucu", "prompt": "p", "kaynak": "akis",
@@ -503,10 +506,12 @@ class KuyrukIptalSiralamaTest(OfisTabani):
             iptal_ilerledi.set()              # düzeltme yoksa: kontrol ile başlatma arasında commit etti
             return sonuc
 
+        bekleme_sonucu = []
+
         def ucusta_sonra_bekle(r):
             sonuc = asil_ucusta(r)
             kontrol_yapildi.set()
-            self.assertTrue(iptal_ilerledi.wait(10))
+            bekleme_sonucu.append(iptal_ilerledi.wait(10))   # akis_ref_durumu istisnayı yutar: ana iş parçacığında doğrula
             return sonuc
         self.ortam.baslatma_kilidi = kilit_izle
         self.m._iptal_commit = commit_izle
@@ -525,6 +530,7 @@ class KuyrukIptalSiralamaTest(OfisTabani):
             kuyruk_is.join(10)
             iptal_is.join(10)
         self.assertFalse(kuyruk_is.is_alive() or iptal_is.is_alive(), "kilitlenme")
+        self.assertEqual(bekleme_sonucu, [True], "iptal ne kilide ulaştı ne commit etti")
         self.assertEqual(baslatma_anindaki_durum, ["calisiyor"])        # iptal commit'inden sonra başlatma yok
         d = self.m.detay(k)
         self.assertEqual(d["durum"], "iptal")
