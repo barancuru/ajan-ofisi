@@ -63,6 +63,7 @@ MAKS_ISTEM = ortak.MAKS_GIRDI
 UYANMA_AKTIF_SN = 5
 # Bu incelemelerde "yeniden dene" aynı sonucu verir ya da sınırı aşar. 'tanim' (tanım @inceleme'ye yönlendirdi) ayrıca
 # kaynak adıma göre karar verilir: yan etkisiz adım yeniden denenebilir, yan etkili adım (hat görevi, yazabilen ajan) değil.
+HAT_ARA_DURUMLARI = ("hazir", "sirada", "calisiyor", "uat")   # hat kartının gösterilen ara durumları (V1.1 #8)
 YENIDEN_DENENEMEZ = ("dongu_siniri", "butce", "sure", "erken_onay", "kapali")   # yayin_takildi denenebilir: onay adımı yan etkisiz
 UYANMA_BOS_SN = 30
 DEGER_DESENLERI = {"surum": re.compile(r"^[0-9.]{1,24}$"), "dal": re.compile(r"^beyin/[a-z0-9-]{1,80}$"),
@@ -574,7 +575,7 @@ class Motor:
                                "siniflama": x["siniflama"], "hata": x["hata"], "maliyet_usd": x["maliyet_usd"],
                                "sure_sn": round(x["bitis_ts"] - x["baslangic_ts"], 1) if x["bitis_ts"] else None,
                                "tutamac": {kk: vv for kk, vv in json.loads(x["tutamac_json"]).items()
-                                           if kk in ("kosu_id", "kuyruk_id", "dosya")}}
+                                           if kk in ("kosu_id", "kuyruk_id", "dosya", "hat")}}
                               for x in denemeler if x["adim_id"] == a["id"]]})
         sonuc["olaylar"] = [{"tur": o["tur"], "zaman": o["zaman_ts"], **json.loads(o["veri_json"])}
                             for o in self.depo.olaylar(kosu_id, 100)]
@@ -1281,7 +1282,16 @@ class Motor:
                 return ("kaynak", "UAT paketi hattın mührüyle uyuşmuyor: kart değişmiş, mühür henüz yazılıyor ya da aynı "
                                   "sürüm başka bir görevde mühürlenmiş. Kartı kontrol et; 'Yeniden dene' aynı kartı yeniden izler")
             return ("bitti", cikti)
-        return ("bekle", None)   # hazir / calisiyor / sirada / uat+onay:hayir (ret sırada)
+        # hazir / calisiyor / sirada / uat+onay:hayir (ret sırada). V1.1 #8: hattın ara durumu (yalnız bilinen
+        # değerler) adım ilerlemesine yansır; karar vermez, yalnız gösterilir
+        try:
+            deneme = max(0, min(int(fm.get("deneme") or 0), 99))
+        except ValueError:
+            deneme = None
+        hat = {"durum": durum if durum in HAT_ARA_DURUMLARI else "?", "deneme": deneme}
+        if t.get("reddedildi") and durum == "uat":
+            hat["durum"] = "ret_isleniyor"
+        return ("bekle", {"hat": hat})
 
     # ---- quality_gate (gerçek komut, çıkış kodu)
     def _kapi_degerleri(self, hazirlik):
@@ -1462,6 +1472,15 @@ class Motor:
                 if self.saat() - d["baslangic_ts"] > adim["zaman_asimi_sn"]:
                     durum, veri = "bilinmeyen", "adım zaman aşımı"
                 else:
+                    if isinstance(veri, dict) and isinstance(veri.get("hat"), dict):
+                        t = json.loads(d["tutamac_json"] or "{}")
+                        if t.get("hat") != veri["hat"]:
+                            t["hat"] = veri["hat"]
+                            b.execute("UPDATE denemeler SET tutamac_json=? WHERE id=?", (json.dumps(t), deneme_id))
+                            self._olay(b, kosu, "hat_ilerledi", adim=d["adim_id"], deneme=d["deneme"],
+                                       durum=veri["hat"]["durum"], iterasyon=d["iterasyon"],
+                                       hat_deneme=veri["hat"]["deneme"],
+                                       anahtar=f"{kosu['id']}:hat:{d['id']}:{veri['hat']['durum']}:{veri['hat']['deneme']}")
                     return
             if durum in ("kuyrukta", "calisiyor"):
                 if self.saat() - d["baslangic_ts"] > adim["zaman_asimi_sn"]:

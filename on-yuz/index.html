@@ -4223,6 +4223,7 @@ let ongZaman = null;
 const AKIS_DURUM = { calisiyor:'çalışıyor', duraklatildi:'duraklatıldı', inceleme:'manual review', basarili:'başarılı',
   basarisiz:'başarısız', iptal:'iptal', bekliyor:'bekliyor', hazir:'sırada', onay_bekliyor:'onay bekliyor',
   gonderiliyor:'gönderiliyor', kuyrukta:'kuyrukta', bilinmeyen:'bilinmeyen', yok_sayildi:'yok sayıldı' };
+const AKIS_UCUSTA = ['gonderiliyor', 'kuyrukta', 'calisiyor'];
 const akisAcik = new Set();
 let akisCanliZaman = null;
 // V1.1 #11: Workflow sekmesi açıkken yalnız workflow olayları (?tur=akis); olay gelen koşunun satırı yerinde güncellenir
@@ -4361,7 +4362,11 @@ function akisAdimlar(dt) {
     if (a.hata) li.append(el('small', 'ong-hata', a.hata));
     const son = a.denemeler[a.denemeler.length - 1];
     if (a.denemeler.length) li.append(el('small', null, a.denemeler.map(x => '#' + x.deneme + ' ' + (AKIS_DURUM[x.durum] || x.durum) + (x.siniflama && x.siniflama !== 'basarili' ? ' (' + x.siniflama + ')' : '') + (x.sure_sn != null ? ' ' + x.sure_sn + ' sn' : '') + (x.maliyet_usd != null ? ' ' + akisPara(x.maliyet_usd) : '')).join(' · ')));
-    if (son && son.tutamac && son.tutamac.dosya) li.append(el('small', null, 'Hat görevi: ' + son.tutamac.dosya));
+    if (son && son.tutamac && son.tutamac.dosya) {
+      const h = AKIS_UCUSTA.includes(son.durum) && son.tutamac.hat;
+      const hd = h ? ({ hazir:'sırada', sirada:'sırada', calisiyor:'çalışıyor', uat:'UAT', ret_isleniyor:'ret işleniyor, yeni paket bekleniyor' }[h.durum] || h.durum) : '';
+      li.append(el('small', null, 'Hat görevi: ' + son.tutamac.dosya + (h ? ' · hat: ' + hd + (h.deneme ? ' · hat denemesi ' + h.deneme + '/3' : '') : '')));
+    }
     const cikti = Object.entries(a.cikti || {}).filter(([kk]) => kk !== 'dosya');
     if (cikti.length) li.append(el('pre', null, cikti.map(([kk, v]) => kk + ': ' + (typeof v === 'string' ? v : JSON.stringify(v))).join('\n')));
     liste.append(li);

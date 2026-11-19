@@ -890,6 +890,29 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         self.assertIsNone(self.m.hat_karti_durumu("ak-000000000000"))
         self.assertIsNone(self.m.hat_karti_durumu("../x"))
 
+    def test_hat_ara_durumu_adima_yansir(self):
+        """V1.1 #8: hat kartının durum/deneme alanları adım denemesinde görünür; olay yalnız değişince yazılır."""
+        tanimlar, _ = akis_tanim.tanimlari_yukle()
+        self.tanimlar.update(tanimlar)
+        k = self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"})["run_id"]
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"plan": "p", "risk": "dusuk", "yetki_gerekli": False}) + '</akis_cikti>')
+        self.m.tur()
+        self.saat[0] += 120
+        self.m.tur()
+        hat = lambda: self.adim(k, "uygulama")["denemeler"][-1]["tutamac"].get("hat")
+        self.assertEqual(hat(), {"durum": "hazir", "deneme": 0})
+        self.ortam.gorevler["G0.md"].update({"durum": "calisiyor", "deneme": "1"})
+        self.m.tur()
+        self.m.tur()
+        self.assertEqual(hat(), {"durum": "calisiyor", "deneme": 1})
+        olaylar = [o for o in self.detay(k)["olaylar"] if o["tur"] == "hat_ilerledi"]
+        self.assertEqual(sorted((o["status"], o["hat_deneme"]) for o in olaylar), [("calisiyor", 1), ("hazir", 0)])
+        self.ortam.gorevler["G0.md"].update({"durum": "<script>", "deneme": "x"})
+        self.m.tur()
+        self.assertEqual(hat(), {"durum": "?", "deneme": None})
+        self.assertEqual(self.adim(k, "uygulama")["durum"], "calisiyor")   # ara durum karar vermez
+
     def test_baska_kartin_onayi_odunc_alinamaz(self):
         """Kart dosyası UAT sonrası başka (onaylı, mühürlü, daha yeni) bir sürüme çevrilirse onay kaydı sayılmaz."""
         k = self.pilot_onaya_kadar()

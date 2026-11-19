@@ -23,7 +23,7 @@
    Şu an kapıdan önce elle onay yalnız sonradan `erken_onay` olarak işaretleniyor.
 7. **Çalışan koşuyu iptal**: iptal şimdilik çalışan ajanı durdurmuyor. tmux penceresini kapatmak + `kosucu` sinyal
    yakalayıp bitiş yazmak (yarım yan etkiler için yine manual_review).
-8. **Hat ara durumları**: hat `calisiyor`/`deneme` alanlarını motor adım ilerlemesine yansıtsın (şimdi yalnız son durum).
+8. ~~**Hat ara durumları**~~ — V1.1: deneme tutamacında `hat: {durum, deneme}`, değişince `hat_ilerledi` olayı; karar vermez:: hat `calisiyor`/`deneme` alanlarını motor adım ilerlemesine yansıtsın (şimdi yalnız son durum).
 9. **Operatör kararları**: `inceleme`de "adımı başarılı say (gerekçe zorunlu, kapı imzalı)" ve "ek bütçe ver" eylemleri.
 10. **Saklama**: bitmiş koşular ve `durum/akis-sonuc/*` için 90 gün sonra arşiv/silme.
 11. ~~**SSE süzgeci**~~ — V1.1: `?tur=` (geçmiş + canlı), Workflow sekmesi ayrı akış açar ve olay gelen koşu satırını yerinde günceller; önceden `akis` olayı istemcide hiç dinlenmiyordu:: `/api/olaylar?tur=akis` ile yalnız workflow olayları; panel sayfa yenilemek yerine satır günceller.
