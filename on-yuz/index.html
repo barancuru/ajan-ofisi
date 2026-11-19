@@ -369,7 +369,7 @@ td.sayi,th.sayi{text-align:right}
 .ara-baslik{font-family:"Space Grotesk",sans-serif;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--soluk);margin:14px 0 8px}
 .gelistirme-izgara{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
 .rozet{font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:rgba(59,52,44,.08);color:var(--murekkep)}
-.akis-karar{display:grid;gap:.4rem;margin:.5rem 0}.akis-karar .akis-alan{display:grid;gap:.2rem}.akis-karar .akis-alan span{font-size:.8rem;color:#555}
+.akis-karar{display:grid;gap:.4rem;margin:.5rem 0}.akis-karar-dugmeler{display:flex;gap:.5rem;align-items:center}.akis-karar-dugmeler .koyu{flex:1}.akis-karar .akis-alan{display:grid;gap:.2rem}.akis-karar .akis-alan span{font-size:.8rem;color:#555}
 .akis-uyari{margin:.4rem 0;padding:.35rem .5rem;border-left:3px solid #c98a14;background:#fff6e0;color:#6b4a0c;font-size:.85rem}.akis-uyari.tamam{border-color:#2f7d4f;background:#e4f4ea;color:#1f5a37}
 .rozet.uat{background:#ffe1d6;color:#b5401f}.rozet.calisiyor{background:#fff0c9;color:#8a5a14}
 .rozet.bitti{background:#dcefe1;color:#2f6e44}.rozet.oneri{background:#e4e1fb;color:#4b3fa8}
@@ -4368,13 +4368,14 @@ function akisDugmeler(dt) {
 }
 // V1.1 #9 operatör kararları: yalnız ofis girişinden (sunucu ve motor kapıyı denetler), gerekçe zorunlu
 function akisKararFormu(baslik, aciklama, alanlar, gonderGovde, tamam) {
-  const f = el('form', 'kart akis-form akis-karar'); f.autocomplete = 'off';
+  const f = el('form', 'kart gelistirme-form akis-form akis-karar'); f.autocomplete = 'off';
   f.append(el('h4', null, baslik), el('small', 'alt', aciklama), ...alanlar);
   const ger = el('textarea'); ger.rows = 2; ger.minLength = 10; ger.maxLength = 2000; ger.required = true;
   ger.placeholder = 'Gerekçe (zorunlu, en az 10 karakter): neyi nasıl doğruladın?'; ger.setAttribute('aria-label', 'Gerekçe');
   const gon = el('button', 'koyu', 'Kaydet'); gon.type = 'submit';
   const vaz = el('button', 'mini', 'Vazgeç'); vaz.type = 'button'; vaz.onclick = () => sekmeAc('akis');
-  f.append(ger, gon, vaz);
+  const satir = el('div', 'akis-karar-dugmeler'); satir.append(gon, vaz);
+  f.append(ger, satir);
   f.onsubmit = async e => { e.preventDefault(); gon.disabled = true; const g = gonderGovde(); if (!g) { gon.disabled = false; return; }
     if (!await akisIslem('devam', { ...g, gerekce: ger.value }, tamam)) gon.disabled = false; };
   return f;
