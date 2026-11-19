@@ -36,7 +36,9 @@ Açmak yapılandırma değil gözden geçirilmiş bir kod değişikliğidir.
   ortak görev dosyası kilidi (`fm_set`, `teslim_yaz`, eski-paket `sed`, `bitti/` taşıma, görev açan iki Python bloğu),
   `mktemp`+`mv` atomik yazım ve symlink reddi, `O_EXCL|O_NOFOLLOW` görev açılışı, paket mührüne görev kimliği
   (`<zip>.kimlik`: gorev, dal, sha256; `.sha256` ve `onay_gecerli` biçimi değişmez), oto-onayda kimlik kopyası,
-  `hassas_degisim`'e `akis_*.py`/`akislar/`, `HAT_KORUMA_SURUMU=1` işareti. Test: `bin/test-hat-koruma` (13/13).
+  `hassas_degisim`'e `akis_*.py`/`akislar/` ve workflow/kimlik anahtar sözcükleri, `HAT_KORUMA_SURUMU=1` + durum klasöründe
+  işaret; kilit kum havuzunda gizli, kum'a kilit fd'leri devredilmez; kilit beklenirken yazım atlanmaz (uyarıyla beklenir).
+  Commit'ler `9711e4c`, `dd145ba`, `b589973`; test: `bin/test-hat-koruma` (20/20, geçici HOME).
   `~/beyin` `main`'ine alınması hattı **anında** değiştirir (betik çalışma ağacından koşar): hat boştayken,
   `beyin-gorev.timer` durdurularak al.
 - **Ofis tarafı** (bu dal, canlıda bayraklar kapalı): `sunucu.gorev_kilidi()` aynı kilit dosyasını alır (30 sn, sonra
