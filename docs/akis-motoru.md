@@ -177,6 +177,15 @@ kosucu sonucu `son: false` yazar; motor aynı denemeyi beklemeyi sürdürür, ke
 - İptal kuyruktaki denemeyi kuyruktan ve limit-bekleyen'den çıkarır. Çalışan ajan koşusu **durdurulmaz**; sonucu
   `yok_sayildi` olur. Hat görevi sürer ve Geliştirme sekmesinden yönetilir. Panel ve olaylar bunu açıkça söyler.
 
+## Saklama (V1.1)
+
+`python3 akis_saklama.py [--gun 90] [--uygula]`. Varsayılan kuru koşudur: neyin kaldırılacağını JSON olarak yazar,
+hiçbir şeye dokunmaz. `--uygula` her koşu için önce `durum/akis-arsiv/<run>.json.gz` (0600, fsync, atomik ad) yazar,
+sonra tek işlemde koşulları yeniden kontrol edip DB satırlarını, ardından `durum/akis-sonuc/<ref>*` dosyalarını siler.
+Arşiv yazılamazsa koşu silinmez. Yalnız bitmiş (`basarili|basarisiz|iptal`) ve uçuşta denemesi kalmamış koşular;
+`--gun` en az 7. Sahipsiz sonuç dosyası (ref DB'de yok) yalnız süreden eskiyse. Silinen koşunun idempotency anahtarı
+serbest kalır; ona bağlı eski Geliştirme kartı "kapı durumu okunamadı" gösterir. Zamanlanmış değildir.
+
 ## Veri güvenliği
 
 - Ajan çıktısından yalnız tanımda bildirilen alanlar, yalnız son `<akis_cikti>{...}</akis_cikti>` bloğundan,
