@@ -343,6 +343,16 @@ class HatAdaptoruTest(OfisTabani):
             git("checkout", "-q", "main")
             self.assertFalse(self.ortam._yayinlandi("homeos", "0.10.11", "beyin/1119-alinmadi", "a" * 64))
 
+    def test_muhur_var(self):
+        muhur = os.path.join(self.d, "muhur2")
+        os.makedirs(muhur)
+        with open(os.path.join(muhur, "homeos-0.10.2.zip.sha256"), "w") as f:
+            f.write("c" * 64 + "  homeos-0.10.2.zip\n")
+        with mock.patch.object(sunucu, "PAKET_MUHUR_DIZINI", muhur):
+            self.assertTrue(self.ortam.muhur_var("homeos", "0.10.2", "c" * 64))
+            self.assertFalse(self.ortam.muhur_var("homeos", "0.10.2", "d" * 64))
+            self.assertFalse(self.ortam.muhur_var("homeos", "../0.10.2", "c" * 64))
+
     def test_canli_onay_kaydi(self):
         with mock.patch.object(sunucu, "CANLI_ONAY_DIZINI", self.d):
             with open(os.path.join(self.d, "homeos-0.10.1.onay"), "w") as f:

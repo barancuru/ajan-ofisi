@@ -194,6 +194,22 @@ class DepoTest(unittest.TestCase):
     def tearDown(self):
         self.d.cleanup()
 
+    def test_migration_2_eski_veritabaninda(self):
+        """Sürüm 1 şemalı (kabul testlerinden kalan) DB açılınca bekleme sütunları eklenir, kayıtlar korunur."""
+        import sqlite3 as sq
+        b = sq.connect(self.yol)
+        for parca in [p.strip() for p in akis_db.MIGRATIONLAR[0].split(";") if p.strip()]:
+            b.execute(parca)
+        b.execute("PRAGMA user_version=1")
+        b.execute("INSERT INTO kosular(id, akis_id, akis_surum, tanim_ozet, tanim_json, girdi_json, durum, olusturma_ts, "
+                  "guncelleme_ts) VALUES ('r1','x',1,'o','{}','{}','basarili',0,0)")
+        b.commit()
+        b.close()
+        dp = akis_db.Depo(self.yol)
+        self.assertEqual(dp.surum(), len(akis_db.MIGRATIONLAR))
+        k = dp.kosu("r1")
+        self.assertEqual((k["bekleme_sn"], k["bekleme_baslangic_ts"]), (0, None))
+
     def test_migration_wal_ve_tekrar(self):
         dp = akis_db.Depo(self.yol)
         self.assertEqual(dp.surum(), len(akis_db.MIGRATIONLAR))

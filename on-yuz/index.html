@@ -4305,7 +4305,7 @@ function akisDugmeler(dt) {
   if (dt.durum === 'inceleme') dug('Başarısız say', 'devam', { karar: 'basarisiz_say' }, 'Koşu başarısız olarak kapatılsın mı?');
   if (!['basarili', 'basarisiz', 'iptal'].includes(dt.durum)) dug('İptal', 'iptal', {}, 'Koşu iptal edilsin mi? Çalışan ajan koşusu durdurulmaz, sonucu yok sayılır.', 'İptal edildi');
   for (const a of dt.adimlar) {
-    if (a.tur !== 'approval' || a.durum !== 'onay_bekliyor') continue;
+    if (a.tur !== 'approval' || !(a.durum === 'onay_bekliyor' || (a.izle && a.durum === 'inceleme'))) continue;
     if (a.izle) { const b = el('button', 'mini', a.ad + ': Geliştirme kartına git'); b.type = 'button'; b.onclick = () => sekmeAc('gelistirme'); kutu.append(b); continue; }
     dug(a.ad + ': Onayla', 'onay', { adim: a.id, karar: 'evet' }, a.mesaj + '\n\nOnaylıyor musun?', 'Onaylandı');
     dug(a.ad + ': Reddet', 'onay', { adim: a.id, karar: 'hayir' }, 'Reddedilsin mi?', 'Reddedildi');

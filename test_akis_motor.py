@@ -30,6 +30,7 @@ class SahteOrtam:
         self.komutlar = []
         self.onaylar = set()          # (proje, sürüm, sha): ofis girişinin yazdığı canlı onay kayıtları
         self.yayinlar = set()         # (proje, sürüm, dal, sha): mühür + klonda v<sürüm> etiketi + dal etikete alınmış
+        self.muhurler = set()         # (proje, sürüm, sha): hattın paket mühürü
         self.ajanlar = {"arastirmaci": {"id": "arastirmaci", "kurulu": True, "butce_usd": 1.0, "izinli_araclar": ["Read", "Grep"]},
                         "gunlukcu": {"id": "gunlukcu", "kurulu": True, "butce_usd": 0.5, "izinli_araclar": ["Read", "Glob"]},
                         "akis-okuyucu": {"id": "akis-okuyucu", "kurulu": True, "butce_usd": 1.5,
@@ -60,6 +61,9 @@ class SahteOrtam:
 
     def canli_onay_var(self, proje, surum, sha):
         return (proje, surum, sha) in self.onaylar
+
+    def muhur_var(self, proje, surum, sha):
+        return (proje, surum, sha) in self.muhurler
 
     def yayinlandi(self, proje, surum, dal, sha):
         return (proje, surum, dal, sha) in self.yayinlar
@@ -709,6 +713,70 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         self.m.tur()
         self.assertEqual(self.detay(k)["durum"], "basarili")
 
+    def pilot_onaya_kadar(self):
+        tanimlar, _ = akis_tanim.tanimlari_yukle()
+        self.tanimlar.update(tanimlar)
+        k = self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"})["run_id"]
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"plan": "p", "risk": "dusuk", "yetki_gerekli": False}) + '</akis_cikti>')
+        self.m.tur()
+        self.ortam.hat_uat("G0.md")
+        self.m.tur()
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"karar": "gecti", "bulgular": "-"}) + '</akis_cikti>')
+        self.m.tur()
+        self.m.tur()
+        self.assertEqual(self.adim(k, "uat_onayi")["durum"], "onay_bekliyor")
+        return k
+
+    def test_eski_onay_kaydiyla_sahte_kart_onaylanmaz(self):
+        """Kart dosyası kapısız yazılıp eski bir sürümün onay kaydına işaret ederse onay sayılmaz (sahtecilik)."""
+        k = self.pilot_onaya_kadar()
+        self.ortam.onaylar.add(("homeos", "0.9.0", "e" * 64))
+        self.ortam.muhurler.add(("homeos", "0.9.0", "e" * 64))      # eski sürümün mührü de var
+        self.ortam.gorevler["G0.md"].update({"onay": "evet", "surum": "0.9.0", "sha256": "e" * 64})
+        self.m.tur()
+        self.assertEqual(self.adim(k, "uat_onayi")["durum"], "onay_bekliyor")
+
+    def test_yeniden_temellendirilmis_onayli_kart(self):
+        """Hat UAT'de yeniden temellendirdi (0.10.1 → 0.10.2, yeni mühür); kapı yeni sürümü onayladı."""
+        k = self.pilot_onaya_kadar()
+        self.ortam.muhurler.add(("homeos", "0.10.2", "c" * 64))
+        self.ortam.onaylar.add(("homeos", "0.10.2", "c" * 64))
+        self.ortam.gorevler["G0.md"].update({"onay": "evet", "durum": "takildi", "surum": "0.10.2", "sha256": "c" * 64})
+        self.m.tur()
+        self.assertEqual(self.detay(k)["neden"]["sebep"], "yayin_takildi")   # ret değil
+        self.ortam.gorevler["G0.md"]["surum"] = "0.10.3"                      # mühürsüz daha yeni sürüm kabul edilmez
+        self.ortam.onaylar.add(("homeos", "0.10.3", "c" * 64))
+        self.assertFalse(any(s == "0.10.3" for s, _ in self.m._guvenilir_paketler(
+            "homeos", {"surum": "0.10.1", "sha256": "a" * 64}, self.ortam.gorevler["G0.md"])))
+
+    def test_yayin_takildi_uzun_beklemeden_sonra_devam(self):
+        """İncelemede geçen süre max_sure_sn'ye sayılmaz: hafta sonu bekleyen yayın sonra tamamlanabilir."""
+        k = self.pilot_onaya_kadar()
+        self.ortam.onaylar.add(("homeos", "0.10.1", "a" * 64))
+        self.ortam.gorevler["G0.md"].update({"durum": "takildi", "onay": "evet"})
+        self.m.tur()
+        self.assertEqual(self.detay(k)["neden"]["sebep"], "yayin_takildi")
+        with self.assertRaises(akis_motor.AkisHatasi) as c:       # kart hâlâ takılı: yeniden dene anlamsız
+            self.m.devam(k, "yeniden_dene")
+        self.assertEqual(c.exception.kod, 409)
+        self.saat[0] += 4 * 86400                                  # 4 gün (sınır 3 gün)
+        self.ortam.gorevler["G0.md"].update({"durum": "bitti"})
+        self.ortam.yayinlar.add(("homeos", "0.10.1", "beyin/1118-x", "a" * 64))
+        self.m.devam(k, "yeniden_dene")
+        self.m.tur()
+        self.m.tur()
+        self.assertEqual(self.detay(k)["durum"], "basarili")
+
+    def test_basarisiz_sayinca_bekleyen_adimlar_kapanir(self):
+        k = self.pilot_onaya_kadar()
+        self.ortam.onaylar.add(("homeos", "0.10.1", "a" * 64))
+        self.ortam.gorevler["G0.md"].update({"durum": "takildi", "onay": "evet"})
+        self.m.tur()
+        self.m.devam(k, "basarisiz_say")
+        self.assertNotIn(self.adim(k, "uat_onayi")["durum"], ("inceleme", "onay_bekliyor"))
+
     def test_takilma_karari_kart_dosyasina_degil_muhurlu_pakete_bakar(self):
         """Kayıtsız (kapıdan geçmemiş) kart, dosyasındaki sürüm/sha eski bir onay kaydına uysa da ret alır."""
         tanimlar, _ = akis_tanim.tanimlari_yukle()
@@ -1165,6 +1233,7 @@ class PilotTest(MotorTabani):
         self.ortam.gorevler["G0.md"].update({"durum": "bitti", "onay": "evet", "surum": "0.10.2", "sha256": "c" * 64})
         self.m.tur()
         self.assertEqual(self.adim(self.k, "uat_onayi")["durum"], "onay_bekliyor")   # kanıt yok
+        self.ortam.muhurler.add(("homeos", "0.10.2", "c" * 64))     # hat yeniden temellendirince yeni sürümü mühürler
         self.ortam.yayinlar.add(("homeos", "0.10.2", "beyin/1118-x", "c" * 64))
         self.m.tur()
         self.assertEqual(self.detay(self.k)["durum"], "basarili")

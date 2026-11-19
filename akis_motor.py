@@ -167,7 +167,9 @@ class Motor:
         if kosu["durum"] in akis_db.SON_KOSU:
             return
         neden = {"sebep": sebep, "metin": metin[:500], **({"adim": adim_id} if adim_id else {})}
-        self._kosu_yaz(b, kosu["id"], durum="inceleme", neden=json.dumps(neden, ensure_ascii=False))
+        self._kosu_yaz(b, kosu["id"], durum="inceleme", neden=json.dumps(neden, ensure_ascii=False),
+                       bekleme_baslangic_ts=kosu.get("bekleme_baslangic_ts") or self.saat())
+        kosu["bekleme_baslangic_ts"] = kosu.get("bekleme_baslangic_ts") or self.saat()
         kosu["durum"] = "inceleme"
         self._olay(b, kosu, "inceleme", adim=adim_id, durum="inceleme", neden=metin,
                    anahtar=f"{kosu['id']}:inceleme:{adim_id}:{self.saat()}")
@@ -303,7 +305,7 @@ class Motor:
             kosu = self._kosu_kontrol(b, kosu_id)
             if kosu["durum"] != "calisiyor":
                 raise AkisHatasi(409, f"koşu duraklatılamaz (durum: {kosu['durum']})")
-            self._kosu_yaz(b, kosu_id, durum="duraklatildi")
+            self._kosu_yaz(b, kosu_id, durum="duraklatildi", bekleme_baslangic_ts=kosu.get("bekleme_baslangic_ts") or self.saat())
             kosu["durum"] = "duraklatildi"
             self._olay(b, kosu, "duraklatildi", durum="duraklatildi", anahtar=f"{kosu_id}:duraklat:{self.saat()}")
         return self.detay(kosu_id)
@@ -312,11 +314,18 @@ class Motor:
         """duraklatildi → calisiyor. inceleme → karar: yeniden_dene (takılan adımı yeni denemeyle) | basarisiz_say."""
         with self._islem() as b:
             kosu = self._kosu_kontrol(b, kosu_id)
+            bekleme = {}
+            if kosu.get("bekleme_baslangic_ts") and kosu["durum"] in ("duraklatildi", "inceleme") and karar != "basarisiz_say":
+                bekleme = {"bekleme_sn": (kosu.get("bekleme_sn") or 0) + max(self.saat() - kosu["bekleme_baslangic_ts"], 0),
+                           "bekleme_baslangic_ts": None}
             if kosu["durum"] == "duraklatildi":
-                self._kosu_yaz(b, kosu_id, durum="calisiyor")
+                self._kosu_yaz(b, kosu_id, durum="calisiyor", **bekleme)
             elif kosu["durum"] == "inceleme":
                 neden = json.loads(kosu["neden"] or "{}")
                 if karar == "basarisiz_say":
+                    b.execute("UPDATE adimlar SET durum='basarisiz' WHERE kosu_id=? AND durum IN ('inceleme','onay_bekliyor')",
+                              (kosu_id,))
+                    b.execute("UPDATE adimlar SET durum='iptal' WHERE kosu_id=? AND durum='hazir'", (kosu_id,))
                     self._kosu_bitir(b, kosu, "basarisiz", {"sebep": "operator", "metin": "operatör başarısız saydı"})
                     return self.detay(kosu_id)
                 if karar != "yeniden_dene":
@@ -337,9 +346,16 @@ class Motor:
                                               "yeniden denenmez: başarısız say ya da iptal et")
                 if any(d["adim_id"] == adim_id for d in self._ucusta(b, kosu_id)):
                     raise AkisHatasi(409, "adımın sonucu hâlâ bekleniyor")
+                if neden.get("sebep") == "yayin_takildi":
+                    izle = akis_tanim.adim_bul(self._tanim(kosu), adim_id).get("izle_adim")
+                    t = self._son_tutamac(b, kosu_id, izle) if izle else None
+                    fm = self.ortam.gelistirme_oku(t["dosya"]) if t and t.get("dosya") else None
+                    if fm and fm.get("durum") == "takildi":
+                        raise AkisHatasi(409, "kart hâlâ takılı: önce Geliştirme sekmesinden yeniden dene, yayın çıkınca "
+                                              "bu koşuyu yeniden dene")
                 a = self._adim_al(b, kosu_id, adim_id)
                 self._adim_yaz(b, kosu_id, adim_id, durum="hazir", deneme=a["deneme"], sonraki_ts=0, hata=None)
-                self._kosu_yaz(b, kosu_id, durum="calisiyor", neden=None)
+                self._kosu_yaz(b, kosu_id, durum="calisiyor", neden=None, **bekleme)
             else:
                 raise AkisHatasi(409, f"koşu devam ettirilemez (durum: {kosu['durum']})")
             kosu["durum"] = "calisiyor"
@@ -594,7 +610,7 @@ class Motor:
                 if not kosu or kosu["durum"] != "calisiyor":
                     return
                 tanim = self._tanim(kosu)
-                if self.saat() - kosu["olusturma_ts"] > tanim["sinirlar"]["max_sure_sn"]:
+                if self.saat() - kosu["olusturma_ts"] - (kosu.get("bekleme_sn") or 0) > tanim["sinirlar"]["max_sure_sn"]:
                     self._incelemeye_al(b, kosu, "sure", "süre sınırı aşıldı (max_sure_sn)")
                     return
                 self._izlenen_onaylar(b, kosu, tanim)
@@ -1166,15 +1182,13 @@ class Motor:
             paket = self._son_basarili_cikti(b, kosu["id"], adim["izle_adim"]) or {}
             # görev dosyasındaki 'onay: evet' kapısız yazılabilir: kabul yalnız ofis girişinin yazdığı, mühürlü pakete
             # bağlı canlı onay kaydıyla ya da hattın o kayıtla yaptığı yayın sonucuyla (durum: bitti)
-            adaylar = {(paket.get("surum"), paket.get("sha256")), (fm.get("surum"), fm.get("sha256"))}  # yeniden temellendirme sürümü değiştirir
+            adaylar = self._guvenilir_paketler(izlenen["proje"], paket, fm)
             # Karar sırası: (1) 'hayir'/reddedildi her zaman ret; (2) kapıdan onaylı (kayıt var) ama yayında takıldı →
             # manual_review (ret değil: 'yeniden dene' ile yayınlanabilir); kayıtsız takıldı → ret; (3) kayıt/yayın kanıtı
             # → onay; (4) 'evet' olmayan hazir/calisiyor (kart geri döndü) → ret; (5) aksi hâlde beklenir.
             kesin_red = onay == "hayir" or durum == "reddedildi"
             kayit = not kesin_red and any(self.ortam.canli_onay_var(izlenen["proje"], s, h) for s, h in adaylar)
-            # takılma kararı yalnız motorun kaydettiği mühürlü paketle: kart dosyası kapısız yazılabilir
-            paket_kaydi = not kesin_red and self.ortam.canli_onay_var(izlenen["proje"], paket.get("surum"), paket.get("sha256"))
-            if durum == "takildi" and paket_kaydi:
+            if durum == "takildi" and kayit:
                 self._adim_yaz(b, kosu["id"], adim["id"], durum="inceleme", hata="yayın takıldı")
                 self._incelemeye_al(b, kosu, "yayin_takildi", "kart kapıdan onaylandı ama yayın takıldı; Geliştirme "
                                     "sekmesinden yeniden dene. Yayın çıkınca bu koşuda 'Yeniden dene' onayı yeniden "
@@ -1313,6 +1327,22 @@ class Motor:
             if v and v.get("ref") == ref:
                 sonuc.append(v)
         return sonuc
+
+    def _guvenilir_paketler(self, proje, paket, fm):
+        """Onay/yayın kanıtında kullanılabilecek (sürüm, sha) çiftleri. Kart dosyası kapısız yazılabildiği için kartın
+        değerleri yalnız şu durumda kabul edilir: motorun UAT'de kaydettiği paketten DAHA YENİ bir sürüm (hat yeniden
+        temellendirince sürümü artırır) ve hattın o sürüm için mührü aynı sha. Eski bir sürümün onay kaydı kullanılamaz."""
+        def surum_t(s):
+            return tuple(int(x) for x in s.split(".") if x.isdigit())
+        adaylar = []
+        ps, ph = paket.get("surum"), paket.get("sha256")
+        if DEGER_DESENLERI["surum"].match(str(ps or "")) and DEGER_DESENLERI["sha256"].match(str(ph or "")):
+            adaylar.append((ps, ph))
+        fs, fh = fm.get("surum"), fm.get("sha256")
+        if adaylar and DEGER_DESENLERI["surum"].match(str(fs or "")) and DEGER_DESENLERI["sha256"].match(str(fh or "")) \
+                and (fs, fh) != (ps, ph) and surum_t(fs) > surum_t(ps) and self.ortam.muhur_var(proje, fs, fh):
+            adaylar.append((fs, fh))
+        return adaylar
 
     def _ara_maliyet_ekle(self, b, kosu, d, ara):
         """Limitte yarıda kalan koşunun gerçek maliyeti bir kez koşu maliyetine eklenir (bütçe kontrolü eksik saymasın)."""

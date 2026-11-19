@@ -70,16 +70,19 @@ class OfisOrtami:
             onbellek[anahtar] = time.time()
         return sonuc
 
-    def _yayinlandi(self, proje, surum, dal, sha):
+    def muhur_var(self, proje, surum, sha):
+        """Hattın paket mührü (ajanların yazamadığı ~/.local/state/beyin/paket-muhur) bu sürüm için bu sha mı."""
         if proje not in akis_tanim.GELISTIRME_PROJELERI or not isinstance(surum, str) or not isinstance(sha, str) \
-                or not akis_motor.DEGER_DESENLERI["surum"].match(surum) or not akis_motor.DEGER_DESENLERI["sha256"].match(sha) \
-                or not akis_motor.DEGER_DESENLERI["dal"].match(dal or ""):
+                or not akis_motor.DEGER_DESENLERI["surum"].match(surum) or not akis_motor.DEGER_DESENLERI["sha256"].match(sha):
             return False
         try:
             with open(os.path.join(self.s.PAKET_MUHUR_DIZINI, f"{proje}-{surum}.zip.sha256"), encoding="utf-8") as f:
-                if f.read().split()[0:1] != [sha]:
-                    return False
-        except (OSError, IndexError):
+                return f.read().split()[0:1] == [sha]
+        except OSError:
+            return False
+
+    def _yayinlandi(self, proje, surum, dal, sha):
+        if not akis_motor.DEGER_DESENLERI["dal"].match(dal or "") or not self.muhur_var(proje, surum, sha):
             return False
         klon = os.path.join(IS_DIZINI, proje)
         ortam = guvenli_git_ortami({"PATH": "/usr/bin:/bin", "HOME": os.path.expanduser("~"), "LANG": "C.UTF-8"})

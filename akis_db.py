@@ -76,6 +76,11 @@ MIGRATIONLAR = [
     );
     CREATE INDEX olaylar_kosu ON olaylar(kosu_id, id);
     """,
+    # 2: operatör beklemesi (inceleme/duraklatma) süre sınırına sayılmaz
+    """
+    ALTER TABLE kosular ADD COLUMN bekleme_sn REAL NOT NULL DEFAULT 0;
+    ALTER TABLE kosular ADD COLUMN bekleme_baslangic_ts REAL
+    """,
 ]
 
 AKTIF_KOSU = ("calisiyor", "duraklatildi", "inceleme")
