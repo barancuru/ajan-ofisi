@@ -781,6 +781,66 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         self.assertEqual(list(self.ortam.gorevler), ["G0.md"])
         self.assertEqual(self.adim(k, "uygulama")["durum"], "basarili")
 
+    def hat_incelemede(self):
+        tanimlar, _ = akis_tanim.tanimlari_yukle()
+        self.tanimlar.update(tanimlar)
+        k = self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"})["run_id"]
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"plan": "p", "risk": "dusuk", "yetki_gerekli": False}) + '</akis_cikti>')
+        self.m.tur()
+        self.ortam.gorevler["G0.md"]["durum"] = "takildi"
+        self.m.tur()
+        self.assertEqual(self.detay(k)["durum"], "inceleme")
+        return k
+
+    def test_kart_hala_takiliyken_yeniden_dene_409(self):
+        k = self.hat_incelemede()
+        with self.assertRaises(akis_motor.AkisHatasi) as c:
+            self.m.devam(k, "yeniden_dene")
+        self.assertEqual(c.exception.kod, 409)
+
+    def test_iptal_edilen_kartta_yeniden_dene_yeni_gorev_ve_butce(self):
+        k = self.hat_incelemede()
+        cagri = self.detay(k)["ajan_cagrisi"]
+        self.ortam.gorevler["G0.md"]["durum"] = "reddedildi"    # operatör kartı Geliştirme'de iptal etti
+        self.m.devam(k, "yeniden_dene")
+        self.m.tur()
+        self.assertEqual(sorted(self.ortam.gorevler), ["G0.md", "G1.md"])   # yeni görev
+        self.assertEqual(self.detay(k)["ajan_cagrisi"], cagri + 1)           # bütçeye sayıldı
+
+    def test_kart_okunamazsa_yeni_gorev_butceyle(self):
+        k = self.hat_incelemede()
+        cagri = self.detay(k)["ajan_cagrisi"]
+        self.ortam.gorevler["G0.md"]["durum"] = "hazir"
+        self.m.devam(k, "yeniden_dene")
+        asil = self.ortam.gelistirme_oku
+        self.ortam.gelistirme_oku = lambda d: None if d == "G0.md" else asil(d)
+        self.m.tur()
+        self.ortam.gelistirme_oku = asil
+        self.assertEqual(self.detay(k)["ajan_cagrisi"], cagri + 1)
+
+    def test_yeniden_izleme_denemesi_dogrudan_calisiyor(self):
+        """Çökme penceresi yok: yeniden izleme denemesi 'gonderiliyor' bırakılmaz, tutamacıyla yazılır."""
+        k = self.hat_incelemede()
+        self.ortam.gorevler["G0.md"]["durum"] = "hazir"
+        self.m.devam(k, "yeniden_dene")
+        with mock.patch.object(self.m, "_gelistirme_gonder", side_effect=SystemExit):   # dış çağrı yapılmamalı
+            self.m.tur()
+        son = [d for d in self.depo.denemeler(k) if d["adim_id"] == "uygulama"][-1]
+        self.assertEqual((son["durum"], json.loads(son["tutamac_json"])["dosya"]), ("calisiyor", "G0.md"))
+        cagri = self.detay(k)["ajan_cagrisi"]
+        self.yeni_motor().baslangic_uzlastir()                   # yeniden başlatma: sayaç düşmez
+        self.assertEqual(self.detay(k)["ajan_cagrisi"], cagri)
+
+    def test_paket_kaydi_yokken_takildi_inceleme(self):
+        k = self.pilot_onaya_kadar()
+        with self.depo.islem() as b:
+            b.execute("UPDATE adimlar SET cikti_json=? WHERE kosu_id=? AND adim_id='uygulama'",
+                      (json.dumps({"durum": "uat", "dosya": "G0.md", "surum": "", "dal": "", "sha256": "", "uyari": 0}), k))
+        self.ortam.gorevler["G0.md"].update({"durum": "takildi", "onay": "evet"})
+        self.m.tur()
+        self.assertEqual((self.detay(k)["durum"], self.detay(k)["neden"]["sebep"]), ("inceleme", "kaynak"))
+
     def test_birlestirilmis_ama_canliya_gecmemis_kart_yayin_takildi(self):
         """Hat main'e alıp etiketledi, canlıya geçemedi: onay kaydını siler, kartı takildi yapar → ret değil inceleme."""
         k = self.pilot_onaya_kadar()
