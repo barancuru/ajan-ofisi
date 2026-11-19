@@ -375,10 +375,10 @@ class Motor:
         try:
             self._islem_iade(kosu_id, iade, "; ".join(notlar) or "operatör iptal etti")
         except Exception as e:  # noqa: BLE001
-            notlar.append(f"not/iade yazılamadı ({type(e).__name__}); iade sonraki motor turunda yeniden denenecek")
-            if iade:
-                self.__dict__.setdefault("_bekleyen_iadeler", {})[kosu_id] = \
-                    self.__dict__.setdefault("_bekleyen_iadeler", {}).get(kosu_id, 0) + iade
+            notlar.append(f"not/iade yazılamadı ({type(e).__name__}); motor bunları yeniden yazmayı deneyecek")
+            bekleyen = self.__dict__.setdefault("_bekleyen_iadeler", {})
+            onceki = bekleyen.get(kosu_id, (0.0, None))[0]
+            bekleyen[kosu_id] = (onceki + iade, "; ".join(notlar))
             try:
                 ortak.olay_yaz({"tur": "hata", "ajan": "ofis", "detay": f"workflow iptali commit edildi ama not/iade "
                                 f"yazılamadı ({type(e).__name__}); koşu {kosu_id}"})
@@ -493,6 +493,7 @@ class Motor:
         def dongu():
             while True:
                 try:
+                    self.bekleyen_isler()   # ör. iptal iadesi: etkin koşu kalmamış olabilir
                     aktif = self.depo.aktif_var_mi()
                     if aktif:
                         self.tur()
@@ -516,10 +517,13 @@ class Motor:
         except Exception:  # noqa: BLE001
             self._kuyruk_refleri = None
         try:
-            self._bekleyen_iadeleri_uygula()
             for k in self.depo.kosular(durumlar=akis_db.AKTIF_KOSU, sinir=MAKS_AKTIF_KOSU * 4):
                 try:
                     self._kosu_isle(k["id"])
+                    son = self.__dict__.get("_motor_hatasi_son")
+                    if son:   # iyileşti: sonraki hata hemen görünsün
+                        for anahtar in [a for a in son if a[0] == k["id"]]:
+                            son.pop(anahtar, None)
                 except Exception as e:  # noqa: BLE001 - bir koşunun hatası diğerlerini durdurmasın
                     self._motor_hatasi(k["id"], e)
         finally:
@@ -530,7 +534,7 @@ class Motor:
     def _motor_hatasi(self, kosu_id, e):
         """Koşu+hata türü başına en çok 10 dakikada bir olay (sürekli bozuk koşu her 5 sn'de satır yazmasın).
         Olay yazılamazsa sessiz: yalıtım bozulmasın."""
-        anahtar = (kosu_id, type(e).__name__)
+        anahtar = (kosu_id, type(e).__name__, str(e)[:80])
         son = self.__dict__.setdefault("_motor_hatasi_son", {})
         if anahtar in son and 0 <= self.saat() - son[anahtar] < self.MOTOR_HATASI_ARALIK_SN:
             return
@@ -550,14 +554,20 @@ class Motor:
                 alan["neden"] = json.dumps({"sebep": "operator", "metin": metin}, ensure_ascii=False)
             self._kosu_yaz(b, kosu_id, **alan)
 
-    def _bekleyen_iadeleri_uygula(self):
+    def bekleyen_isler(self):
+        """Commit sonrası yazılamamış iptal not/iadeleri (bellekte; süreç yeniden başlarsa kaybolur, yalnız bitmiş koşunun
+        gösterilen tahminini etkiler, bütçe kontrolünü etkilemez). Koşu yoksa bırakılır; hata seyreltilmiş kaydedilir."""
         bekleyen = self.__dict__.setdefault("_bekleyen_iadeler", {})
-        for kosu_id, iade in list(bekleyen.items()):
+        for kosu_id, (iade, metin) in list(bekleyen.items()):
             try:
-                self._islem_iade(kosu_id, iade, None)
+                if not self.depo.kosu(kosu_id):
+                    bekleyen.pop(kosu_id, None)
+                    continue
+                self._islem_iade(kosu_id, iade, metin)
                 bekleyen.pop(kosu_id, None)
-            except Exception:  # noqa: BLE001 - sonraki turda yeniden
-                pass
+            except Exception as e:  # noqa: BLE001 - sonraki turda yeniden
+                self._motor_hatasi(kosu_id, e)
+
 
     def _kuyrukta(self, ref):
         refler = getattr(self, "_kuyruk_refleri", None)
@@ -1155,19 +1165,21 @@ class Motor:
             # görev dosyasındaki 'onay: evet' kapısız yazılabilir: kabul yalnız ofis girişinin yazdığı, mühürlü pakete
             # bağlı canlı onay kaydıyla ya da hattın o kayıtla yaptığı yayın sonucuyla (durum: bitti)
             adaylar = {(paket.get("surum"), paket.get("sha256")), (fm.get("surum"), fm.get("sha256"))}  # yeniden temellendirme sürümü değiştirir
-            kayitli = any(self.ortam.canli_onay_var(izlenen["proje"], s, h) for s, h in adaylar) or (
-                durum == "bitti" and any(self.ortam.yayinlandi(izlenen["proje"], s, paket.get("dal"), h) for s, h in adaylar))
-            if kayitli:
+            # ret önce: takılan/reddedilen ya da 'hayir' kart, eski bir canlı onay kaydı olsa da onay sayılmaz.
+            # 'onay: evet' + hazir/calisiyor (kayıt yok) ret değildir: aşağıda beklenir.
+            red = onay == "hayir" or durum in ("takildi", "reddedildi") or (onay != "evet" and durum in ("hazir", "calisiyor"))
+            kayitli = not red and (any(self.ortam.canli_onay_var(izlenen["proje"], s, h) for s, h in adaylar) or (
+                durum == "bitti" and any(self.ortam.yayinlandi(izlenen["proje"], s, paket.get("dal"), h) for s, h in adaylar)))
+            if red:
+                self._adim_yaz(b, kosu["id"], adim["id"], durum="basarisiz",
+                               cikti_json=json.dumps({"karar": "hayir", "not": f"kart reddedildi ya da takıldı (durum {durum})"}))
+                self._olay(b, kosu, "onay_verildi", adim=adim["id"], durum="hayir", iterasyon=r["iterasyon"], kaynak="kart")
+                self._gecisler_uygula(b, kosu, tanim, adim["reddedilirse"], adim["id"])
+            elif kayitli:
                 self._adim_yaz(b, kosu["id"], adim["id"], durum="basarili",
                                cikti_json=json.dumps({"karar": "evet", "not": "Geliştirme kartından (ofis girişiyle) onaylandı"}))
                 self._olay(b, kosu, "onay_verildi", adim=adim["id"], durum="evet", iterasyon=r["iterasyon"], kaynak="kart")
                 self._gecisler_uygula(b, kosu, tanim, adim["sonraki"], adim["id"])
-            elif onay == "hayir" or durum in ("takildi", "reddedildi") or (onay != "evet" and durum in ("hazir", "calisiyor")):
-                # 'onay: evet' + kayıt yok: ret sayılmaz, aşağıda beklenir (yayın sürüyor ya da kapısız yazıldı)
-                self._adim_yaz(b, kosu["id"], adim["id"], durum="basarisiz",
-                               cikti_json=json.dumps({"karar": "hayir", "not": f"kart reddedildi (durum {durum})"}))
-                self._olay(b, kosu, "onay_verildi", adim=adim["id"], durum="hayir", iterasyon=r["iterasyon"], kaynak="kart")
-                self._gecisler_uygula(b, kosu, tanim, adim["reddedilirse"], adim["id"])
             elif durum == "bitti":
                 self._olay(b, kosu, "yayin_kaniti_yok", adim=adim["id"], durum="bekliyor", iterasyon=r["iterasyon"],
                            neden="görev 'bitti' ama yayın kanıtı yok: o sürümün paket mührü, tam dal ucunda ve main'den "

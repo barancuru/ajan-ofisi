@@ -435,17 +435,18 @@ def _akis_alarm_zamani_geldi():
     yol = os.path.join(ortak.DURUM_DIZINI, "akis-alarm.ts")
     acilis, simdi = _alarm_saati()
 
-    def yakin(kayit):
-        return (kayit is not None and acilis != "?" and kayit[0] == acilis
+    def yakin(kayit, dosyadan):
+        # açılış kimliği bilinmiyorsa dosyadaki (başka süreç/açılış) kayıt eşleşmiş sayılmaz; süreç içi kayıt sayılır
+        return (kayit is not None and kayit[0] == acilis and not (dosyadan and acilis == "?")
                 and 0 <= simdi - kayit[1] < AKIS_ALARM_ARALIK_SN)
     try:
         with open(yol, encoding="utf-8") as f:
             parca = f.read().split()
-        if yakin((parca[0], float(parca[1]))):
+        if yakin((parca[0], float(parca[1])), True):
             return False
     except (OSError, ValueError, IndexError):
         pass
-    if yakin(_AKIS_ALARM_SUREC):
+    if yakin(_AKIS_ALARM_SUREC, False):
         return False
     _AKIS_ALARM_SUREC = (acilis, simdi)
     try:

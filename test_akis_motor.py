@@ -623,8 +623,25 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         with mock.patch.object(self.m, "_islem_iade", side_effect=OSError("db meşgul")):
             self.m.iptal(k)
         self.assertEqual(self.detay(k)["tahmini_usd"], 1.0)
-        self.m.tur()                                          # bekleyen iade uygulanır
+        self.assertFalse(self.depo.aktif_var_mi())            # tek koşu iptal edildi: etkin koşu yok
+        self.m.bekleyen_isler()                               # döngü etkin koşu yokken de bunu çağırır
         self.assertEqual(self.detay(k)["tahmini_usd"], 0)
+
+    def test_bekleyen_iade_kosu_yoksa_birakilir(self):
+        self.m.__dict__["_bekleyen_iadeler"] = {"r000000000000": (1.0, None)}
+        self.m.bekleyen_isler()
+        self.assertEqual(self.m._bekleyen_iadeler, {})
+
+    def test_motor_hatasi_iyilesince_yeni_hata_gorunur(self):
+        self.tanim(taban_tanim())
+        self.m.baslat("deneme", {"konu": "x"})
+        with mock.patch.object(ortak, "olay_yaz") as yaz:
+            with mock.patch.object(self.m, "_kosu_isle", side_effect=KeyError("a")):
+                self.m.tur()
+            self.m.tur()                                      # iyileşti
+            with mock.patch.object(self.m, "_kosu_isle", side_effect=KeyError("b")):
+                self.m.tur()
+            self.assertEqual(sum(1 for c in yaz.call_args_list if c.args[0].get("olay") == "motor_hatasi"), 2)
 
     def test_yayin_kaniti_eksikse_neden_gorunur(self):
         """Son inceleme 6: 'durum: bitti' ama kanıt yok (ör. etiket başka commit'te) → ayrı olay, onay verilmez."""
@@ -652,7 +669,8 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         self.m.tur()
         self.assertEqual(self.adim(k, "uat_onayi")["durum"], "onay_bekliyor")   # reddedilmez, beklenir
         self.assertTrue(any(o["olay"] == "onay_kaydi_yok" for o in self.ortam.olaylar))
-        self.ortam.gorevler["G0.md"].update({"durum": "takildi", "onay": "evet"})   # takıldı: kayıtsız 'evet' olsa da ret
+        self.ortam.onaylar.add(("homeos", "0.10.1", "a" * 64))       # onay kaydı VAR ama yayın takıldı
+        self.ortam.gorevler["G0.md"].update({"durum": "takildi", "onay": "evet"})   # takıldı: kayıt olsa da ret
         self.m.tur()
         self.assertEqual(self.adim(k, "uat_onayi")["durum"], "basarisiz")
 

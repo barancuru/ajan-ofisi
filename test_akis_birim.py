@@ -275,6 +275,15 @@ class DepoTest(unittest.TestCase):
                       "olusturma_ts, guncelleme_ts) VALUES ('r3','x',1,'o','{}','{}','calisiyor',0,0)")
         self.assertIsNotNone(akis_db.Depo(self.yol).kosu("r3"))
 
+    def test_geri_alma_asil_istisnayi_gizlemez(self):
+        dp = akis_db.Depo(self.yol)
+        with self.assertRaises(KeyError):
+            with dp.islem() as b:
+                dp.kapat()                                    # gövde bağlantıyı kapattı, sonra asıl hata
+                raise KeyError("asıl")
+        with dp.islem() as b:                                 # yeni bağlantı açılır
+            b.execute("SELECT 1")
+
     def test_islem_geri_alinir(self):
         dp = akis_db.Depo(self.yol)
         with self.assertRaises(RuntimeError):

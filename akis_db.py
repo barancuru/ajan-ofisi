@@ -143,7 +143,11 @@ class Depo:
                 b.execute("ROLLBACK")
         except sqlite3.Error:
             pass
-        if getattr(b, "in_transaction", False):
+        try:
+            acik = b.in_transaction
+        except sqlite3.Error:   # kapalı bağlantı: yenisi açılsın
+            acik = True
+        if acik:
             try:
                 b.close()
             except Exception:  # noqa: BLE001

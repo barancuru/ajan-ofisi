@@ -488,6 +488,7 @@ class KuyrukIptalSiralamaTest(OfisTabani):
 
     def test_acilis_kimligi_okunamazsa_eslesmez(self):
         self.assertTrue(self.alarm(("?", 500.0)))
+        self.assertFalse(self.alarm(("?", 520.0)))           # aynı süreç: süreç içi seyreltme yine çalışır
         with mock.patch.object(sunucu, "_AKIS_ALARM_SUREC", None):   # yeniden açılış, kimlik yine okunamıyor
             self.assertTrue(self.alarm(("?", 600.0)))
 
