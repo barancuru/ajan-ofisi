@@ -1923,8 +1923,13 @@ def uat_reddet(dosya, not_, kimden="workflow", beklenen_sha=None):
     if os.path.islink(yol) or not os.path.isfile(yol):
         raise IstekHatasi(404, "görev yok")
     with GELISTIRME_KILIDI:
-        with open(yol, encoding="utf-8", errors="replace") as f:
-            metin = f.read()
+        try:
+            with open(yol, encoding="utf-8", errors="replace") as f:
+                metin = f.read()
+        except FileNotFoundError:
+            raise IstekHatasi(410, "kart bu arada kayboldu ya da taşındı; ret yazılmadı")
+        except OSError as e:
+            raise IstekHatasi(409, f"kart okunamadı ({type(e).__name__}); ret yazılmadı")
         fm, _ = on_bilgi(metin)
         if fm.get("durum") != "uat":
             raise IstekHatasi(409, f"görev UAT'de değil (durum: {fm.get('durum') or '-'})")
@@ -1939,11 +1944,14 @@ def uat_reddet(dosya, not_, kimden="workflow", beklenen_sha=None):
         try:
             with open(yol, encoding="utf-8", errors="replace") as f:
                 degisti = f.read() != metin
-        except OSError:
+        except FileNotFoundError:
             raise IstekHatasi(410, "kart bu arada kayboldu ya da taşındı; ret yazılmadı")
+        except OSError as e:
+            raise IstekHatasi(409, f"kart okunamadı ({type(e).__name__}); ret yazılmadı")
         if degisti:
-            raise IstekHatasi(409, "kart bu arada değişti (hat yazdı); ret yazılmadı. Koşu incelemede bekler: kartı "
-                                   "kontrol edip 'Yeniden dene' ile yeniden değerlendir")
+            raise IstekHatasi(409, "kart bu arada değişti (hat yazdı); ret yazılmadı. Kart yeni bir pakete geçtiyse "
+                                   "kalite kapısı onu test etmedi: başarısız say/iptal et; yalnız ilgisiz bir düzenlemeyse "
+                                   "'Yeniden dene'")
         atomik_yaz(yol, yeni)
     try:   # ret yazıldı: tetik hatası (systemctl) reddi geri almaz, 5 dk zamanlayıcı yine alır
         kosucuyu_durt()

@@ -162,8 +162,9 @@ kosucu sonucu `son: false` yazar; motor aynı denemeyi beklemeyi sürdürür, ke
   ve mühürlü sürümü (yayından önceki yeniden temellendirme) kabul edilir; kanıt motorun kaydettiği dala bağlıdır.
 - Kalan risk (hat yazımı): `bin/calistir fm_set` kartı kilitsiz ve yerinde (`cat >`) yazar. `uat_reddet` yazmadan önce
   kartı yeniden okur ama `fm_set`'in oku-değiştir-yaz aralığına düşen bir ret hat tarafından ezilebilir; motor bunu
-  işlenmekte olan retten ayıramaz ve adım zaman aşımında (`zaman_asimi_sn`, pilotta 24 saat) incelemeye düşer. Kapatma
-  ortak dosya kilidi ister (V1.1 #2).
+  işlenmekte olan retten ayıramaz ve adım zaman aşımında (`zaman_asimi_sn`, pilotta 24 saat) incelemeye düşer. Ters yön
+  de mümkün: `uat_reddet`'in atomik yeniden adlandırması `fm_set`'in yerinde yazımıyla çakışırsa hattın o anki alan
+  güncellemesi kaybolabilir. İki yönü de ortak dosya kilidi kapatır (V1.1 #2).
 - Kalan risk: UAT anında (motor paketi kaydetmeden önce) kart dosyasının sürüm/sha/dal alanlarını değiştiren bir
   yazıcı. Hat da aynı alanlara güvenir; kapatılması hattın onay kaydını ve mührü göreve/dala bağlamasını ister (V1.1).
 - `max_sure_sn` yalnız koşunun kendi çalışma süresini sayar: inceleme ve duraklatmada geçen operatör beklemesi

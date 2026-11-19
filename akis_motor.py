@@ -1121,11 +1121,11 @@ class Motor:
                     raise BaslatmaHatasi(410, "hat görevi bulunamadı")
                 if fm.get("onay") == "evet" or fm.get("durum") == "bitti":
                     raise BaslatmaHatasi(423, "görev elle onaylandı ya da yayına geçti; workflow reddetmez")
+                test_edilen = hedef_tutamac.get("test_edilen_sha")
+                if not test_edilen:   # kalıcı: geçici 'UAT değil'den önce
+                    raise BaslatmaHatasi(409, "kalite kapısının test ettiği paket bilinmiyor; düzeltme yapılmaz")
                 if fm.get("durum") != "uat":
                     raise BaslatmaHatasi(409, f"görev UAT'de değil (durum: {fm.get('durum') or '-'})")
-                test_edilen = hedef_tutamac.get("test_edilen_sha")
-                if not test_edilen:
-                    raise BaslatmaHatasi(409, "kalite kapısının test ettiği paket bilinmiyor; düzeltme yapılmaz")
                 if fm.get("sha256") != test_edilen:
                     raise BaslatmaHatasi(409, "kart yeni bir sürümde: kalite kapısı bu sürümü test etmedi, eski rapora göre "
                                               "reddedilmez")
