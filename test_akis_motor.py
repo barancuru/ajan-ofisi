@@ -822,6 +822,32 @@ class KuyrukVeEszamanlilikTest(MotorTabani):
         self.assertEqual(self.detay(k)["ajan_cagrisi"], cagri)
         self.assertEqual((self.detay(k)["durum"], self.detay(k)["neden"]["sebep"]), ("inceleme", "kaynak"))
 
+    def test_silinmis_kartta_yeniden_dene_409(self):
+        k = self.hat_incelemede()
+        del self.ortam.gorevler["G0.md"]                         # kart silindi/taşındı
+        with self.assertRaises(akis_motor.AkisHatasi) as c:
+            self.m.devam(k, "yeniden_dene")
+        self.assertEqual(c.exception.kod, 409)
+        self.assertIn("okunamıyor", str(c.exception))
+
+    def test_duzeltme_hedef_karti_iptalse_yeniden_dene_409(self):
+        tanimlar, _ = akis_tanim.tanimlari_yukle()
+        self.tanimlar.update(tanimlar)
+        k = self.m.baslat("homeos-ozellik-gelistirme", {"baslik": "Rapor", "istek": "x"})["run_id"]
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), '<akis_cikti>' + json.dumps({"plan": "p", "risk": "dusuk", "yetki_gerekli": False}) + '</akis_cikti>')
+        self.m.tur()
+        self.ortam.hat_uat("G0.md")
+        self.ortam.komut_kodu = {"php-lint": 1}
+        self.m.tur()                                              # test kaldı → düzeltme reddetti
+        self.ortam.gorevler["G0.md"]["durum"] = "takildi"         # düzeltme turu takıldı
+        self.m.tur()
+        self.assertEqual(self.detay(k)["durum"], "inceleme")
+        self.ortam.gorevler["G0.md"]["durum"] = "reddedildi"      # operatör kartı iptal etti
+        with self.assertRaises(akis_motor.AkisHatasi) as c:
+            self.m.devam(k, "yeniden_dene")
+        self.assertEqual(c.exception.kod, 409)
+
     def test_yayina_cikmis_kartta_yeniden_dene_kopya_acmaz(self):
         k = self.hat_incelemede()
         self.ortam.gorevler["G0.md"].update({"durum": "bitti", "onay": "evet"})

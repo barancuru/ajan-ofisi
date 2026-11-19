@@ -359,10 +359,18 @@ class Motor:
                     onceki = self._onceki_hat_karti(b, kosu_id, adim_id, self._adim_al(b, kosu_id, adim_id)["iterasyon"])
                     if not onceki and kaynak_adim.get("mod") == "duzeltme":   # düzeltme: hedef kart
                         onceki = self._son_tutamac(b, kosu_id, kaynak_adim["hedef_adim"])
-                    fm = self.ortam.gelistirme_oku(onceki["dosya"]) if onceki else None
-                    if fm and fm.get("durum") == "takildi":
-                        raise AkisHatasi(409, "hat kartı hâlâ takılı: önce Geliştirme sekmesinden yeniden dene ya da iptal "
-                                              "et, sonra bu koşuyu yeniden dene")
+                    if onceki:
+                        # "yeniden dene" yalnız işe yarayabilecekse kabul edilir: aksi hâlde sessiz döngü ya da boşa bütçe
+                        fm = self.ortam.gelistirme_oku(onceki["dosya"])
+                        if not fm:
+                            raise AkisHatasi(409, f"hat kartı okunamıyor ({onceki['dosya']}; silinmiş ya da taşınmış "
+                                                  "olabilir): başarısız say ya da iptal et; gerekirse yeni koşu başlat")
+                        if fm.get("durum") == "takildi":
+                            raise AkisHatasi(409, "hat kartı hâlâ takılı: önce Geliştirme sekmesinden yeniden dene ya da "
+                                                  "iptal et, sonra bu koşuyu yeniden dene")
+                        if kaynak_adim.get("mod") == "duzeltme" and fm.get("durum") == "reddedildi":
+                            raise AkisHatasi(409, "düzeltilecek hat kartı iptal edilmiş: düzeltme yapılamaz; başarısız say "
+                                                  "ya da iptal et")
                 if neden.get("sebep") == "yayin_takildi":
                     izle = akis_tanim.adim_bul(self._tanim(kosu), adim_id).get("izle_adim")
                     t = self._son_tutamac(b, kosu_id, izle) if izle else None

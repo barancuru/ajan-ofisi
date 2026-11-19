@@ -145,6 +145,10 @@ kosucu sonucu `son: false` yazar; motor aynı denemeyi beklemeyi sürdürür, ke
   SQLite COMMIT hata verirse işlem geri alınır (bağlantı açık işlemde kalmaz).
 - `POST /api/akis/iptal` iptal commit edildikten sonra hata vermez; ayrıntı okunamazsa yanıt kısmidir:
   `{run_id, durum: "iptal", notlar, adimlar: [], kismi: true}`.
+- Hat adımında "Yeniden dene": aynı iterasyonda açılmış kart canlıysa (bitti dahil) **aynı kart yeniden izlenir**
+  (yeni görev, çağrı, tahmin yok); yalnız iptal edilmiş (`reddedildi`) kart yeni görev açtırır (bütçeli). Kart
+  okunamıyor ya da takılıysa, düzeltmede hedef kart iptal edilmişse "Yeniden dene" 409 verir (başarısız say/iptal ya
+  da yeni koşu); devam ile tur arasında yeniden takılan/okunamayan kart için deneme harcanmadan `kaynak` incelemesi.
 - Yayın kanıtı eksikse (`durum: bitti` ama mühür/etiket yok) `yayin_kaniti_yok` olayı bir kez yazılır, onay verilmez.
 - Güvenilen paket: motor UAT'de kartın (sürüm, sha) değerini hattın paket mührüyle doğrulayıp kaydeder (uyuşmazsa
   `kaynak` incelemesi). **Onay kaydı yalnız bu paketle aranır**: kayıtlar proje-sürüme bağlıdır, göreve değil; kart
