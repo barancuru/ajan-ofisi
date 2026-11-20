@@ -171,7 +171,7 @@ Geri dönüş: 1.0.89'a `git reset --hard` (Aşama 1 geri dönüşü); etkin Hom
 Davranış değişmez: `FANOUT_ACIK = False`, örnek akış `ETKIN_AKISLAR`'da değil. Tek etkisi DB migration 5 (yalnız ekleme).
 1. Yedek: `python3 -c "import os,sqlite3; h=os.path.expanduser('~'); s=sqlite3.connect(h+'/ajan-ofisi/durum/akis.db'); s.backup(sqlite3.connect(h+'/akis.db.1.0.90.bak'))"`
    ve `git -C ~/ajan-ofisi rev-parse HEAD > ~/ajan-ofisi-onceki-sha`.
-2. Merge → `git -C ~/ajan-ofisi pull --ff-only` → **hemen** `systemctl --user restart ofis` (tekrar timer'ı
+2. Merge → `git -C ~/ajan-ofisi pull --ff-only` → **hemen** `systemctl --user restart ajan-ofisi.service` (tekrar timer'ı
    `zamanlayici.py --tetikle` çalışma ağacından `Depo` açıp migrate eder; eski süreç yeni şemayla sorunsuz çalışır,
    migration yalnız ekler).
 3. Kontrol: `PRAGMA user_version` = 5, testler 573/573.
