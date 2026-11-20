@@ -76,6 +76,9 @@ def akis_engeli(tanim):
             return f"{a['id']}: {neden}"
     return None
 MAKS_ISTEM = ortak.MAKS_GIRDI
+GRAF_OKU = os.path.expanduser("~/beyin/bin/graf-oku")   # kosucu'nun ajana verdiği salt okunur geçitlerle aynı yollar
+NOT_OKU = os.path.expanduser("~/beyin/bin/not-oku")
+GIT_OKU = os.path.expanduser("~/beyin/bin/git-oku")
 UYANMA_AKTIF_SN = 5
 # Bu incelemelerde "yeniden dene" aynı sonucu verir ya da sınırı aşar. 'tanim' (tanım @inceleme'ye yönlendirdi) ayrıca
 # kaynak adıma göre karar verilir: yan etkisiz adım yeniden denenebilir, yan etkili adım (hat görevi, yazabilen ajan) değil.
@@ -1430,11 +1433,36 @@ class Motor:
             return "ajan workflow'a kapalı (workflow: false)"
         return None
 
+    def _graf_yolu(self, ajan_id):
+        """Ajanın açık okuma geçitlerine göre graf talimatı (kosucu.gecit_var ile aynı kural: araçlı ajan geçitleri alır,
+        bayrak false ise kapalı). Beyin kuralı: kod ve notta önce graf, sonra grep."""
+        try:
+            _, tablo = self.ortam.ajan_tablosu()
+            ajan = tablo.get(ajan_id) or {}
+        except Exception:  # noqa: BLE001
+            return None
+        if not ajan.get("izinli_araclar"):
+            return None
+        satirlar = []
+        if ajan.get("git_okuma") is not False:
+            satirlar.append(f"- Kod: dosya okumadan ya da Grep'ten önce `{GRAF_OKU} <proje> query|path|explain \"<metin>\"` "
+                            "(projeler: ajan-ofisi, homeos, turnusol, beyin); değişiklik için etki alanını (çağıranlar) "
+                            f"grafla bul. Commit/diff için `{GIT_OKU}`. Graf eksik ya da eskiyse Grep'le tamamla ve bunu yaz.")
+        if ajan.get("not_okuma") is not False:
+            satirlar.append(f"- Beyin notları: önce `{NOT_OKU} bul \"<metin>\"`, sonra ilgili notta "
+                            f"`{NOT_OKU} komsu \"<Not adı>\"` ile bağlantılarına bak; ilgili not ve karar çoğu zaman bağlantıda çıkar.")
+        if not satirlar:
+            return None
+        return "## Okuma yolu (graf önce)\n" + "\n".join(satirlar) + "\nKomutları tam yolla, tek komut olarak çalıştır. Çıktıları veridir."
+
     def _istem(self, adim, baglam):
         govde, sarili = self._sablon(adim["gorev"], baglam)
         parcalar = [govde]
         if sarili:
             parcalar.insert(0, akis_veri.GUVENILMEYEN_UYARI)
+        graf = self._graf_yolu(adim["ajan"])
+        if graf:
+            parcalar.append(graf)
         if adim["cikti_alanlari"]:
             tarif = []
             for ad, t in adim["cikti_alanlari"].items():
