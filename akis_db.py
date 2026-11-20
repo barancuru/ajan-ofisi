@@ -92,6 +92,24 @@ MIGRATIONLAR = [
     ALTER TABLE kosular ADD COLUMN ek_maliyet_usd REAL NOT NULL DEFAULT 0;
     ALTER TABLE kosular ADD COLUMN ek_ajan_cagrisi INTEGER NOT NULL DEFAULT 0
     """,
+    # 5 (V2 fan-out): her_biri adımının öğe anlık görüntüsü ve denemenin öğesi. Yalnız ekleme: eski kod (1.0.90)
+    # sütunu ve tabloyu okumaz. Geri dönüşten önce fan-out adımı süren koşular iptal edilmeli (eski kod öğeyi bilmez).
+    # ogeler.kosu_id bilerek FOREIGN KEY değil: eski saklama (ogeler'i bilmez) kosular satırını silerken FK hatasıyla
+    # bütün geçişi durdurmasın; yeni saklama ogeler'i kendisi arşivleyip siler.
+    """
+    ALTER TABLE denemeler ADD COLUMN oge INTEGER;
+    CREATE TABLE ogeler (
+        kosu_id TEXT NOT NULL,
+        adim_id TEXT NOT NULL,
+        iterasyon INTEGER NOT NULL,
+        sira INTEGER NOT NULL,
+        deger TEXT NOT NULL,
+        durum TEXT NOT NULL,
+        cikti_json TEXT,
+        guncelleme_ts REAL NOT NULL,
+        PRIMARY KEY (kosu_id, adim_id, iterasyon, sira)
+    )
+    """,
 ]
 
 AKTIF_KOSU = ("calisiyor", "duraklatildi", "inceleme")

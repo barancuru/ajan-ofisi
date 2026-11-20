@@ -26,7 +26,7 @@ import ortak
 VARSAYILAN_GUN = 90
 EN_AZ_GUN = 7   # yanlışlıkla --gun 0 ile yeni koşular silinmesin
 SONUC_ADI = re.compile(r"^(ak-[0-9a-f]{12})\.(?:json|basladi\.json|ara-[A-Za-z0-9_.-]{1,80}\.json)$")
-TABLOLAR = ("kosular", "adimlar", "denemeler", "olaylar")
+TABLOLAR = ("kosular", "adimlar", "denemeler", "olaylar", "ogeler")
 
 
 def arsiv_dizini():
@@ -129,7 +129,7 @@ def calistir(depo=None, gun=VARSAYILAN_GUN, uygula=False, saat=time.time):
             if {t: len(v) for t, v in _satirlar(b, kosu_id).items()} != {t: len(v) for t, v in veri.items()}:
                 rapor["atlanan"].append({"run_id": kosu_id, "neden": "arşivden sonra satır değişti"})
                 continue
-            for t in ("olaylar", "denemeler", "adimlar"):
+            for t in ("olaylar", "ogeler", "denemeler", "adimlar"):
                 b.execute(f"DELETE FROM {t} WHERE kosu_id=?", (kosu_id,))
             b.execute("DELETE FROM kosular WHERE id=?", (kosu_id,))
         for yol in dosyalar:

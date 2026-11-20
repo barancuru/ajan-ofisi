@@ -166,3 +166,16 @@ Durum (2026-11-19):
 İlk pilot koşusu (kullanıcı başlatır): Workflow sekmesinden `homeos-ozellik-gelistirme`, küçük ve geri alınabilir bir
 istek. Tavan 3 tur / 12 çağrı / 72 saat / 30 $. Dağıtım onayı yalnız Geliştirme UAT kartından (kapı imzalı).
 Geri dönüş: 1.0.89'a `git reset --hard` (Aşama 1 geri dönüşü); etkin HomeOS koşusu önce panelden iptal edilir.
+
+## V2 fan-out (dal `akis-fanout`, 1.0.91, taslak PR)
+Davranış değişmez: `FANOUT_ACIK = False`, örnek akış `ETKIN_AKISLAR`'da değil. Tek etkisi DB migration 5 (yalnız ekleme).
+1. Yedek: `python3 -c "import os,sqlite3; h=os.path.expanduser('~'); s=sqlite3.connect(h+'/ajan-ofisi/durum/akis.db'); s.backup(sqlite3.connect(h+'/akis.db.1.0.90.bak'))"`
+   ve `git -C ~/ajan-ofisi rev-parse HEAD > ~/ajan-ofisi-onceki-sha`.
+2. Merge → `git -C ~/ajan-ofisi pull --ff-only` → **hemen** `systemctl --user restart ajan-ofisi.service` (tekrar timer'ı
+   `zamanlayici.py --tetikle` çalışma ağacından `Depo` açıp migrate eder; eski süreç yeni şemayla sorunsuz çalışır,
+   migration yalnız ekler).
+3. Kontrol: `PRAGMA user_version` = 5, testler 573/573.
+Geri dönüş: `git reset --hard $(cat ~/ajan-ofisi-onceki-sha)` + restart. Eski kod sürüm 5 DB'de migration çalıştırmaz
+ve `oge`/`ogeler`'i okumaz (eski INSERT/okuma test edildi). `ogeler.kosu_id` bilerek FK değildir: eski saklama koşuyu
+silince `ogeler` satırları sahipsiz kalır (zararsız, yeni kod geri gelince okunmaz). Fan-out bayrağı açıldıysa süren fan-out koşuları önce iptal edilir.
+Bayrağı açmak (`FANOUT_ACIK = True` + örneği `ETKIN_AKISLAR`'a eklemek) ayrı kod değişikliği ve kullanıcı kararıdır.

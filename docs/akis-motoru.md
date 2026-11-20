@@ -195,6 +195,27 @@ kosucu sonucu `son: false` yazar; motor aynı denemeyi beklemeyi sürdürür, ke
   işlenmemiş denemelerin sonuç dosyasını bir kez okur, maliyeti koşuya ekler (`gec_maliyet` olayı; geçiş yok). Sonuç
   1 saatte gelmezse 0 yazılıp taranmaz. İptal edilen deneme maliyet modeline örnek olmaz.
 
+## Fan-out: `her_biri` (V2, bayrak `FANOUT_ACIK`, varsayılan kapalı)
+Bir ajan adımının **liste** çıktısındaki her öğe için başka bir ajan adımı ayrı bir çağrıyla koşar:
+- Kaynak: `agent_task` çıktı alanı `{"tur": "liste", "maks_oge": ≤10, "maks": öğe başı ≤2000}`. Öğeler kısa metindir;
+  boşlar atılır, tekrar eden öğe bir kez sayılır. `liste` başlatma girdisi olamaz.
+- Hedef: `agent_task` + `"her_biri": "adim.<kaynak>.<liste alanı>"`; görevde `{{oge}}` o anki öğedir ve **güvenilmeyen
+  veri** olarak sarılır (model çıktısından gelir). `{{oge}}` başka adımda geçersizdir. İç içe fan-out (çıktısı liste
+  olan her_biri adımı) ve `hata.eylem: loop` reddedilir. `gelistirme_gorevi`, kapı ve onay adımında yoktur.
+- Yürütme **sıralıdır** (kosucu ortak beyin kilidi zaten çağrıları sıraya koyar): ilk gönderimde liste bu iterasyon
+  için `ogeler` tablosuna dondurulur, öğeler sırayla gönderilir; biri bitmeden sonraki gitmez. Her öğe ayrı deneme
+  (`denemeler.oge`) ve maliyet satırıdır; deneme sınırı ve geri çekilme **öğe başınadır**.
+- Bütçe: gönderimden önce **kalan öğelerin hepsi** sığmalı (`ajan_cagrisi + kalan ≤ sınır`, `maliyet + tahmin×kalan ≤
+  sınır`); sığmazsa hiçbir öğe başlamadan `inceleme/butce` (yarım dağılım yok). Ek bütçe sonrası kaldığı öğeden sürer.
+- Çıktı: hepsi bitince adım `{"sonuclar": [{"oge": …, <öğe alanları>}], "adet": n}` ile başarılı olur. Dışa açık alanlar
+  yalnız bunlardır; birleştirme adımı `{{adim.<id>.sonuclar}}` ile JSON olarak alır (sınır aşılırsa bütünüyle düşmez,
+  kırpılır). Koşulda liste/sonuclar kullanılamaz; `adet` kullanılabilir.
+- Boş liste: çağrı yapılmaz, adım `adet: 0` ile geçer. Kaynak yoksa/liste değilse `inceleme/kaynak`.
+- İnceleme → *yeniden dene*: biten öğeler tekrar koşmaz, takılan öğeden sürer. Fan-out adımı **başarılı sayılamaz**
+  (409). İptal ve geç maliyet öğe denemelerinde aynı çalışır. Döngüyle yeniden girilen adım yeni anlık görüntü alır.
+- DB: migration 5 (yalnız ekleme: `denemeler.oge`, `ogeler`). Saklama `ogeler` satırlarını da arşivler/siler.
+- Örnek: `akislar/ornek-notlari-tek-tek-ozetle.json` (salt okunur; `ETKIN_AKISLAR`'da değil).
+
 ## Zamanlayıcı tetiklemesi (V2)
 Öngörülebilirlik'te tekrar eden iş türü **Workflow**: `{akis, girdiler, cron}` (`durum/tekrarlar.json`, aynı systemd
 timer'ı). Hat görevi, kalite kapısı ya da dağıtım/yayın onayı içeren akış aşama bayraklarından bağımsız olarak

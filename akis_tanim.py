@@ -25,7 +25,11 @@ HATA_EYLEMLERI = ("retry", "pause", "fail", "loop")
 ONAY_KATEGORILERI = ("genel", "dagitim", "yayin", "odeme", "posta", "guvenlik")
 HASSAS_KATEGORILER = ("dagitim", "yayin", "odeme", "posta", "guvenlik")   # her zaman ofis girişi (kapı) ister
 OPERATORLER = ("eq", "ne", "in", "not_in", "lt", "le", "gt", "ge", "var")
-ALAN_TURLERI = ("metin", "secim", "sayi", "evet_hayir")
+ALAN_TURLERI = ("metin", "secim", "sayi", "evet_hayir", "liste")
+GIRDI_TURLERI = ("metin", "secim", "sayi", "evet_hayir")   # liste yalnız ajan çıktısıdır (fan-out kaynağı)
+MAKS_FANOUT = 10        # bir liste alanında / fan-out adımında en çok öğe
+MAKS_OGE = 2000          # liste öğesi başına karakter
+FANOUT_CIKTILARI = {"sonuclar": "liste_nesne", "adet": "sayi"}   # her_biri adımının dışa açık çıktısı
 MODELLER = ("haiku", "sonnet", "opus")
 GELISTIRME_PROJELERI = ("homeos", "turnusol", "ajan-ofisi")
 
@@ -93,7 +97,7 @@ def _gecis(deger, ne, liste_olabilir=False):
     raise TanimHatasi(f"{ne}: geçiş adım id'si, '@inceleme' ya da {{hedef, dongu}} olmalı")
 
 
-def _alanlar(deger, ne):
+def _alanlar(deger, ne, turler=ALAN_TURLERI):
     if deger is None:
         return {}
     if not isinstance(deger, dict) or len(deger) > 12:
@@ -103,10 +107,12 @@ def _alanlar(deger, ne):
         _id(ad, f"{ne}.{ad}")
         if not isinstance(t, dict):
             raise TanimHatasi(f"{ne}.{ad}: nesne olmalı")
-        _bilinmeyen_anahtar(t, ("tur", "maks", "secenekler", "zorunlu", "aciklama"), f"{ne}.{ad}")
+        _bilinmeyen_anahtar(t, ("tur", "maks", "maks_oge", "secenekler", "zorunlu", "aciklama"), f"{ne}.{ad}")
         tur = t.get("tur", "metin")
-        if tur not in ALAN_TURLERI:
-            raise TanimHatasi(f"{ne}.{ad}: tur {ALAN_TURLERI} olmalı")
+        if tur not in turler:
+            raise TanimHatasi(f"{ne}.{ad}: tur {turler} olmalı")
+        if "maks_oge" in t and tur != "liste":
+            raise TanimHatasi(f"{ne}.{ad}: maks_oge yalnız liste alanında")
         n = {"tur": tur, "zorunlu": t.get("zorunlu", True) is not False}
         if tur == "metin":
             maks = t.get("maks", 2000)
@@ -118,6 +124,9 @@ def _alanlar(deger, ne):
             if not isinstance(s, list) or not s or len(s) > 12 or not all(isinstance(x, str) and 0 < len(x) <= 40 for x in s):
                 raise TanimHatasi(f"{ne}.{ad}: secenekler 1–12 kısa metin")
             n["secenekler"] = list(s)
+        if tur == "liste":   # kısa metin öğeleri: fan-out (her_biri) kaynağı
+            n["maks_oge"] = _sayi(t.get("maks_oge", MAKS_FANOUT), f"{ne}.{ad}.maks_oge", 1, MAKS_FANOUT)
+            n["maks"] = _sayi(t.get("maks", 500), f"{ne}.{ad}.maks", 1, MAKS_OGE)
         if t.get("aciklama") is not None:
             n["aciklama"] = _metin(t["aciklama"], f"{ne}.{ad}.aciklama", 300)
         sonuc[ad] = n
@@ -221,7 +230,7 @@ def _adim(ham, ne):
         raise TanimHatasi(f"{ne}.tur: {ADIM_TURLERI}")
     ortak_alanlar = ("id", "tur", "ad", "sonraki", "bagimli", "hata", "zaman_asimi_sn")
     ozel = {
-        "agent_task": ("ajan", "gorev", "model", "cikti_alanlari", "yan_etkili", "tahmini_usd"),
+        "agent_task": ("ajan", "gorev", "model", "cikti_alanlari", "yan_etkili", "tahmini_usd", "her_biri"),
         "gelistirme_gorevi": ("mod", "proje", "baslik", "istek", "model", "hedef_adim", "geri_bildirim", "tahmini_usd"),
         "quality_gate": ("kontroller", "kosullar", "kaynak_adim", "basarisizsa"),
         "condition": ("kosullar", "dogru", "yanlis"),
@@ -246,6 +255,15 @@ def _adim(ham, ne):
             raise TanimHatasi(f"{ne}.yan_etkili: true | false")
         a["yan_etkili"] = ham.get("yan_etkili", True)   # bilinmiyorsa yan etkili say: körlemesine tekrar yok
         a["tahmini_usd"] = _sayi(ham["tahmini_usd"], f"{ne}.tahmini_usd", 0, 50, tam=False) if "tahmini_usd" in ham else None
+        if ham.get("her_biri") is not None:
+            # V2 fan-out: kaynak liste alanının her öğesi için bu ajan adımı ayrı bir çağrıyla (sıralı) koşar
+            if not isinstance(ham["her_biri"], str) or not re.fullmatch(r"adim\.[a-z0-9_-]+\.[a-z0-9_-]+", ham["her_biri"]):
+                raise TanimHatasi(f"{ne}.her_biri: adim.<id>.<liste alanı>")
+            if any(t["tur"] == "liste" for t in a["cikti_alanlari"].values()):
+                raise TanimHatasi(f"{ne}: her_biri adımının çıktı alanı liste olamaz (iç içe fan-out yok)")
+            if a["hata"]["eylem"] == "loop":
+                raise TanimHatasi(f"{ne}: her_biri adımında hata.eylem loop olamaz")
+            a["her_biri"] = ham["her_biri"]
     elif tur == "gelistirme_gorevi":
         a["mod"] = ham.get("mod", "yeni")
         if a["mod"] not in ("yeni", "duzeltme"):
@@ -314,12 +332,12 @@ def gecisler(a):
     return g
 
 
-def _ref_dogrula(tanim, adimlar, metin, ne):
+def _ref_dogrula(tanim, adimlar, metin, ne, oge_izinli=False):
     for ref in SABLON_REF.findall(metin or ""):
-        _alan_ref_dogrula(tanim, adimlar, ref, ne)
+        _alan_ref_dogrula(tanim, adimlar, ref, ne, oge_izinli)
 
 
-def _alan_ref_dogrula(tanim, adimlar, ref, ne):
+def _alan_ref_dogrula(tanim, adimlar, ref, ne, oge_izinli=False):
     parca = ref.split(".")
     if parca[0] == "girdi" and len(parca) == 2:
         if parca[1] not in tanim["girdiler"]:
@@ -329,11 +347,23 @@ def _alan_ref_dogrula(tanim, adimlar, ref, ne):
         kaynak = adimlar.get(parca[1])
         if not kaynak:
             raise TanimHatasi(f"{ne}: bilinmeyen adım {ref}")
-        alanlar = kaynak.get("cikti_alanlari") if kaynak["tur"] == "agent_task" else YERLESIK_CIKTILAR[kaynak["tur"]]
-        if parca[2] not in alanlar:
+        if parca[2] not in cikti_turleri(kaynak):
             raise TanimHatasi(f"{ne}: {parca[1]} adımının {parca[2]} çıktısı yok")
         return
+    if ref == "oge":
+        if not oge_izinli:
+            raise TanimHatasi(f"{ne}: {{{{oge}}}} yalnız her_biri adımının görevinde kullanılır")
+        return
     raise TanimHatasi(f"{ne}: geçersiz başvuru {ref}")
+
+
+def cikti_turleri(adim):
+    """Adımın dışa açık çıktı alanları → tür. her_biri adımı öğe çıktılarını {sonuclar, adet} olarak birleştirir."""
+    if adim["tur"] == "agent_task":
+        if adim.get("her_biri"):
+            return dict(FANOUT_CIKTILARI)
+        return {ad: t["tur"] for ad, t in adim["cikti_alanlari"].items()}
+    return YERLESIK_CIKTILAR[adim["tur"]]
 
 
 def dogrula(ham, beklenen_id=None):
@@ -350,7 +380,7 @@ def dogrula(ham, beklenen_id=None):
     t["surum"] = _sayi(ham.get("surum"), "surum", 1, 1_000_000)
     t["ad"] = _metin(ham.get("ad"), "ad", 80)
     t["aciklama"] = _metin(ham.get("aciklama"), "aciklama", 1000, zorunlu=False) or ""
-    t["girdiler"] = _alanlar(ham.get("girdiler"), "girdiler")
+    t["girdiler"] = _alanlar(ham.get("girdiler"), "girdiler", GIRDI_TURLERI)
     izinli = ham.get("izinli_ajanlar") or []
     if not isinstance(izinli, list) or len(izinli) > 20:
         raise TanimHatasi("izinli_ajanlar: en çok 20 ajan id'si")
@@ -404,9 +434,19 @@ def dogrula(ham, beklenen_id=None):
         if a["tur"] == "agent_task" and a["ajan"] not in t["izinli_ajanlar"]:
             raise TanimHatasi(f"{ne}: ajan {a['ajan']} izinli_ajanlar listesinde yok")
         for alan in ("gorev", "baslik", "istek", "geri_bildirim", "mesaj"):
-            _ref_dogrula(t, adimlar, a.get(alan), ne)
+            _ref_dogrula(t, adimlar, a.get(alan), ne, oge_izinli=alan == "gorev" and bool(a.get("her_biri")))
         for k in a.get("kosullar") or []:
             _alan_ref_dogrula(t, adimlar, k["alan"], ne)
+            p = k["alan"].split(".")
+            if p[0] == "adim" and cikti_turleri(adimlar[p[1]]).get(p[2]) in ("liste", "liste_nesne"):
+                # in/not_in liste değeri üzerinde yanlış anlam taşır: koşul için sayı (ör. adet) kullan
+                raise TanimHatasi(f"{ne}: liste çıktısı koşulda kullanılamaz ({k['alan']})")
+        if a.get("her_biri"):
+            p = a["her_biri"].split(".")
+            kaynak = adimlar.get(p[1])
+            if not kaynak or kaynak["id"] == a["id"] or kaynak["tur"] != "agent_task" or kaynak.get("her_biri") \
+                    or kaynak["cikti_alanlari"].get(p[2], {}).get("tur") != "liste":
+                raise TanimHatasi(f"{ne}.her_biri: başka bir ajan adımının liste çıktısı olmalı")
         for alan in ("kaynak_adim", "hedef_adim", "izle_adim"):
             if a.get(alan) and (a[alan] not in adimlar or adimlar[a[alan]]["tur"] != "gelistirme_gorevi"
                                 or adimlar[a[alan]].get("mod") != "yeni"):

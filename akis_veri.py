@@ -83,6 +83,20 @@ def alan_dogrula(ad, tanim, deger):
         if not isinstance(deger, bool):
             raise VeriHatasi("cikti_gecersiz", f"{ad}: true/false olmalı")
         return deger
+    if tur == "liste":
+        # fan-out kaynağı: kısa metin öğeleri; boş öğe atılır, tekrar eden öğe bir kez sayılır (sıra korunur)
+        if not isinstance(deger, list) or not all(isinstance(x, str) for x in deger):
+            raise VeriHatasi("cikti_gecersiz", f"{ad}: metin listesi olmalı")
+        temiz = []
+        for x in deger:
+            x = kontrol_karakteri_temizle(x).strip()
+            if len(x) > int(tanim.get("maks", 500)):
+                raise VeriHatasi("cikti_gecersiz", f"{ad}: öğe başına en fazla {tanim.get('maks', 500)} karakter")
+            if x and x not in temiz:
+                temiz.append(x)
+        if len(temiz) > int(tanim.get("maks_oge", 10)):
+            raise VeriHatasi("cikti_gecersiz", f"{ad}: en fazla {tanim.get('maks_oge', 10)} öğe")
+        return temiz
     raise VeriHatasi("cikti_gecersiz", f"{ad}: bilinmeyen alan türü")
 
 
@@ -126,6 +140,8 @@ def guvenilmeyen_sar(kaynak, alan, deger):
     """Önceki adım verisini istem içine gömülecek biçimde sarar. İçerik talimat olarak okunmamalı."""
     if isinstance(deger, bool):
         deger = "true" if deger else "false"
+    elif isinstance(deger, (list, dict)):   # liste çıktısı / fan-out sonuçları: JSON olarak (etiketler yine kaçırılır)
+        deger = json.dumps(deger, ensure_ascii=False, indent=1)
     return (f'<onceki_adim_verisi adim="{_kacir(kaynak)}" alan="{_kacir(alan)}">\n'
             f"{_kacir(deger)}\n</onceki_adim_verisi>")
 
@@ -139,5 +155,7 @@ GUVENILMEYEN_UYARI = (
 
 def markdown_alinti(metin, maks=MAKS_SARILI):
     """Görev dosyası gövdesine gömülecek metin: her satır '> ' ile başlar (frontmatter/alan satırı olamaz)."""
+    if isinstance(metin, (list, dict)):
+        metin = json.dumps(metin, ensure_ascii=False, indent=1)
     metin = kontrol_karakteri_temizle(str(metin))[:maks]
     return "\n".join("> " + satir.replace("---", "—") for satir in metin.splitlines() or [""])

@@ -39,6 +39,7 @@ ETKIN_AKISLAR = ("ornek-arastirma-ozeti", "homeos-ozellik-gelistirme")
 HAT_ADIMLARI_ACIK = True         # gelistirme_gorevi, quality_gate (yerel komut); HAT_KORUMA_SURUMU canlıda değilse yine kapalı
 DAGITIM_ONAYI_ACIK = True       # dagitim/yayin onayı: ayrı karar (onay/mühür kimlik bağı canlıda olmalı)
 YAZAN_AJAN_ACIK = False          # aşama 1 salt okunur: yan etki üretebilen ajan (ajan_yazabilir) adım olamaz
+FANOUT_ACIK = False              # V2 fan-out (her_biri): açmak ayrı karar; migration 5 bayraktan bağımsız uygulanır
 KAPALI_ONAY_KATEGORILERI = ("dagitim", "yayin")
 DIS_ETKILI_ADIMLAR = ("agent_task", "gelistirme_gorevi", "quality_gate")
 
@@ -49,6 +50,8 @@ def adim_kapali_mi(adim):
         return f"{adim['tur']} adımları bu sürümde kapalı"
     if not DAGITIM_ONAYI_ACIK and adim["tur"] == "approval" and adim.get("kategori") in KAPALI_ONAY_KATEGORILERI:
         return f"{adim['kategori']} onayı bu sürümde kapalı"
+    if not FANOUT_ACIK and adim.get("her_biri"):
+        return "fan-out (her_biri) adımları bu sürümde kapalı"
     return None
 
 
@@ -111,6 +114,12 @@ def yuzdelik(degerler, p):
 
 def sonuc_dizini():
     return os.path.join(ortak.DURUM_DIZINI, "akis-sonuc")
+
+
+def _kisa_json(deger, maks=2000):
+    """Görünüm için: küçük liste/nesne olduğu gibi, büyüğü kırpılmış JSON metni (SSE/detay yükü sınırlı kalsın)."""
+    metin = json.dumps(deger, ensure_ascii=False)
+    return deger if len(metin) <= maks else metin[:maks] + "…"
 
 
 def _json_oku(yol):
@@ -255,6 +264,8 @@ class Motor:
         parca = yol.split(".")
         if parca[0] == "girdi":
             return baglam["girdi"].get(parca[1])
+        if parca[0] == "oge":   # fan-out adımının o anki öğesi (model çıktısından gelir: güvenilmeyen veri)
+            return baglam.get("oge")
         return (baglam["adim"].get(parca[1]) or {}).get(parca[2])
 
     @classmethod
@@ -298,7 +309,14 @@ class Motor:
                 return str(d)
             sarili[0] = True
             parca = yol.split(".")
-            s = akis_veri.markdown_alinti(d) if alinti else akis_veri.guvenilmeyen_sar(parca[1], parca[2], d)
+            kaynak, alan = (parca[1], parca[2]) if len(parca) == 3 else ("oge", "deger")
+            if isinstance(d, (list, dict)):
+                # liste/fan-out sonucu: bütünüyle düşmek yerine kalan sınıra göre kırpılır (birleştirme adımı işe yarasın)
+                metin = json.dumps(d, ensure_ascii=False, indent=1)
+                kalan = akis_veri.MAKS_SARILI - toplam[0] - 300
+                if len(metin) > kalan:
+                    d = metin[:max(kalan, 0)] + "\n…(önceki adım verisi sınırı nedeniyle kırpıldı)"
+            s = akis_veri.markdown_alinti(d) if alinti else akis_veri.guvenilmeyen_sar(kaynak, alan, d)
             toplam[0] += len(s)
             if toplam[0] > akis_veri.MAKS_SARILI:
                 return "(önceki adım verisi sınırı aşıldı, kırpıldı)"
@@ -522,6 +540,9 @@ class Motor:
             if not adim or adim["tur"] != "agent_task":
                 raise AkisHatasi(409, "yalnız ajan adımı başarılı sayılabilir (kapı, onay ve hat adımının kanıtı komut "
                                       "çıkışı ya da insan onayıdır)")
+            if adim.get("her_biri"):
+                raise AkisHatasi(409, "fan-out (her_biri) adımı başarılı sayılamaz: öğe sonuçları ajan çıktısıdır; "
+                                      "yeniden dene, başarısız say ya da iptal")
             satir = self._adim_al(b, kosu_id, adim_id)
             if satir["durum"] != "inceleme":
                 raise AkisHatasi(409, "adım incelemede değil")
@@ -722,10 +743,13 @@ class Motor:
                 **({"ajan": a["ajan"]} if a.get("ajan") else {}),
                 # operatörün "başarılı say" formu için alan şeması (tanım verisi; değer değil)
                 **({"cikti_alanlari": a["cikti_alanlari"]} if a["tur"] == "agent_task" else {}),
+                **({"her_biri": a["her_biri"], "ogeler": self._oge_ozeti(kosu_id, a["id"], d["iterasyon"])}
+                   if a.get("her_biri") else {}),
                 **({"kategori": a["kategori"], "mesaj": a["mesaj"], "izle": bool(a.get("izle_adim"))} if a["tur"] == "approval" else {}),
-                # çıktı değerleri kısaltılır; ham çıktı ve istem gösterilmez
-                "cikti": {kk: (vv[:600] if isinstance(vv, str) else vv) for kk, vv in (cikti or {}).items()},
-                "denemeler": [{"deneme": x["deneme"], "iterasyon": x["iterasyon"], "durum": x["durum"],
+                # çıktı değerleri kısaltılır; ham çıktı ve istem gösterilmez (liste/fan-out sonucu da: JSON'u 2000 karakter)
+                "cikti": {kk: (vv[:600] if isinstance(vv, str) else
+                               _kisa_json(vv) if isinstance(vv, (list, dict)) else vv) for kk, vv in (cikti or {}).items()},
+                "denemeler": [{"deneme": x["deneme"], "iterasyon": x["iterasyon"], "durum": x["durum"], "oge": x.get("oge"),
                                "siniflama": x["siniflama"], "hata": x["hata"], "maliyet_usd": x["maliyet_usd"],
                                "sure_sn": round(x["bitis_ts"] - x["baslangic_ts"], 1) if x["bitis_ts"] else None,
                                "tutamac": {kk: vv for kk, vv in json.loads(x["tutamac_json"]).items()
@@ -734,6 +758,10 @@ class Motor:
         sonuc["olaylar"] = [{"tur": o["tur"], "zaman": o["zaman_ts"], **json.loads(o["veri_json"])}
                             for o in self.depo.olaylar(kosu_id, 100)]
         return sonuc
+
+    def _oge_ozeti(self, kosu_id, adim_id, iterasyon):
+        ogeler = self._ogeler(self.depo.baglanti(), kosu_id, adim_id, iterasyon)
+        return {"toplam": len(ogeler), "biten": sum(1 for o in ogeler if o["durum"] == "basarili")}
 
     def hat_karti_durumu(self, ref):
         """Geliştirme kartı için (V1.1 #6): workflow'un açtığı hat görevinin kapı durumu. Salt okuma, motor kilidi yok.
@@ -1021,7 +1049,9 @@ class Motor:
             return bekle(f"{adim['id']}: kaynak/yetki belirsizliği: {hata}", "kaynak")
         if siniflama == "erken_onay":
             return bekle(f"{adim['id']}: {hata}", "erken_onay")
-        sayac = self._deneme_sayisi(b, kosu["id"], adim["id"], a["iterasyon"])
+        aktif = self._aktif_oge(b, kosu["id"], adim["id"], a["iterasyon"]) if adim.get("her_biri") else None
+        # fan-out: deneme sınırı ve geri çekilme öğe başınadır (önceki öğelerin denemeleri sayılmaz)
+        sayac = self._deneme_sayisi(b, kosu["id"], adim["id"], a["iterasyon"], aktif["sira"] if aktif else None)
         if siniflama == "baslamadi":
             if sayac < BASLAMADI_MAKS:
                 return yeniden(sayac)
@@ -1050,9 +1080,63 @@ class Motor:
             return self._gecisler_uygula(b, kosu, tanim, p["hedef"], adim["id"])
         return bekle(f"{adim['id']}: {hata or siniflama}")
 
-    def _deneme_sayisi(self, b, kosu_id, adim_id, iterasyon):
+    def _deneme_sayisi(self, b, kosu_id, adim_id, iterasyon, oge=None):
+        if oge is not None:
+            return b.execute("SELECT COUNT(*) FROM denemeler WHERE kosu_id=? AND adim_id=? AND iterasyon=? AND oge=? "
+                             "AND durum NOT IN ('iptal','yok_sayildi')", (kosu_id, adim_id, iterasyon, oge)).fetchone()[0]
         return b.execute("SELECT COUNT(*) FROM denemeler WHERE kosu_id=? AND adim_id=? AND iterasyon=? "
                          "AND durum NOT IN ('iptal','yok_sayildi')", (kosu_id, adim_id, iterasyon)).fetchone()[0]
+
+    # ---- fan-out (her_biri): öğeler sırayla, her öğe ayrı ajan çağrısı ve deneme; adım hepsi bitince başarılı
+    @staticmethod
+    def _ogeler(b, kosu_id, adim_id, iterasyon):
+        return [dict(r) for r in b.execute("SELECT * FROM ogeler WHERE kosu_id=? AND adim_id=? AND iterasyon=? ORDER BY sira",
+                                           (kosu_id, adim_id, iterasyon)).fetchall()]
+
+    def _aktif_oge(self, b, kosu_id, adim_id, iterasyon):
+        """Sıradaki (bitmemiş) öğe ya da None. Sıralı yürütmede başarısız olan öğe de budur."""
+        return next((o for o in self._ogeler(b, kosu_id, adim_id, iterasyon) if o["durum"] != "basarili"), None)
+
+    def _fanout_hazirla(self, b, kosu, tanim, adim, r):
+        """İlk gönderimde kaynak listeyi bu iterasyon için dondurur. Dönen: (öğeler, bitti_mi). Döngü kaynağı değiştirse
+        de süren adımın öğe sırası kaymaz; yeni iterasyon yeni anlık görüntü alır."""
+        ogeler = self._ogeler(b, kosu["id"], adim["id"], r["iterasyon"])
+        if ogeler:
+            return ogeler, False
+        liste = self._deger(self._baglam(b, kosu), adim["her_biri"])
+        if not isinstance(liste, list):
+            neden = f"her_biri kaynağı ({adim['her_biri']}) yok ya da liste değil"
+            self._adim_yaz(b, kosu["id"], adim["id"], durum="inceleme", hata=neden)
+            self._incelemeye_al(b, kosu, "kaynak", f"{adim['id']}: {neden}", adim["id"])
+            return [], True
+        liste = liste[:akis_tanim.MAKS_FANOUT]
+        for i, x in enumerate(liste):
+            b.execute("INSERT INTO ogeler(kosu_id, adim_id, iterasyon, sira, deger, durum, guncelleme_ts) "
+                      "VALUES (?,?,?,?,?,?,?)", (kosu["id"], adim["id"], r["iterasyon"], i,
+                                                 json.dumps(x, ensure_ascii=False), "bekliyor", self.saat()))
+        self._olay(b, kosu, "fanout_basladi", adim=adim["id"], durum="hazir", iterasyon=r["iterasyon"], adet=len(liste))
+        if not liste:   # boş liste: çağrı yok, adım boş sonuçla başarılı (bulunacak öğe yoktu)
+            self._adim_basarili(b, kosu, tanim, adim, {"sonuclar": [], "adet": 0})
+            return [], True
+        return self._ogeler(b, kosu["id"], adim["id"], r["iterasyon"]), False
+
+    def _oge_basarili(self, b, kosu, tanim, adim, d, cikti):
+        oge = d.get("oge")
+        if oge is None:
+            aktif = self._aktif_oge(b, kosu["id"], adim["id"], d["iterasyon"])
+            oge = aktif["sira"] if aktif else None
+        b.execute("UPDATE ogeler SET durum='basarili', cikti_json=?, guncelleme_ts=? WHERE kosu_id=? AND adim_id=? "
+                  "AND iterasyon=? AND sira=?", (json.dumps(cikti, ensure_ascii=False), self.saat(), kosu["id"],
+                                                 adim["id"], d["iterasyon"], oge))
+        ogeler = self._ogeler(b, kosu["id"], adim["id"], d["iterasyon"])
+        kalan = sum(1 for o in ogeler if o["durum"] != "basarili")
+        self._olay(b, kosu, "oge_bitti", adim=adim["id"], deneme=d["deneme"], durum="basarili", iterasyon=d["iterasyon"],
+                   oge=oge, kalan=kalan)
+        if kalan:
+            self._adim_yaz(b, kosu["id"], adim["id"], durum="hazir", sonraki_ts=0, hata=None)
+            return
+        sonuclar = [{"oge": json.loads(o["deger"]), **json.loads(o["cikti_json"] or "{}")} for o in ogeler]
+        self._adim_basarili(b, kosu, tanim, adim, {"sonuclar": sonuclar, "adet": len(sonuclar)})
 
     # ------------------------------------------------------------------ adım çalıştırma
     def _adim_calistir(self, kosu_id, adim_id):
@@ -1119,16 +1203,30 @@ class Motor:
                 self._olay(b, kosu, "yeniden_izleniyor", adim=adim_id, deneme=r["deneme"], durum="calisiyor",
                            iterasyon=r["iterasyon"], dosya=yeniden_izle["dosya"])
                 return True
-            # ajan/hat adımları: bütçe ve çağrı sınırı başlatmadan önce
+            oge = None
+            if adim["tur"] == "agent_task" and adim.get("her_biri"):
+                ogeler, bitti = self._fanout_hazirla(b, kosu, tanim, adim, r)
+                if bitti:
+                    return True
+                oge = next((o for o in ogeler if o["durum"] != "basarili"), None)
+                if oge is None:   # hepsi bitmiş ama adım kapanmamış (yarım işlem sonrası): birleştir
+                    sonuclar = [{"oge": json.loads(o["deger"]), **json.loads(o["cikti_json"] or "{}")} for o in ogeler]
+                    self._adim_basarili(b, kosu, tanim, adim, {"sonuclar": sonuclar, "adet": len(sonuclar)})
+                    return True
+            # ajan/hat adımları: bütçe ve çağrı sınırı başlatmadan önce. Fan-out'ta kalan öğelerin hepsi sığmalı:
+            # yarım kalmış bir dağılım hiç başlamamış olandan kötüdür (öğe başı kontrol de sürer).
             if adim["tur"] in ("agent_task", "gelistirme_gorevi"):
                 tahmin, tahmin_kaynagi = self._tahmin(adim, b, kosu["akis_id"])
                 s = self.etkin_sinirlar(kosu, tanim)
-                if kosu["ajan_cagrisi"] + 1 > s["max_ajan_cagrisi"]:
-                    self._incelemeye_al(b, kosu, "butce", f"ajan çağrısı sınırı ({s['max_ajan_cagrisi']}) aşılacaktı", adim_id)
+                n = sum(1 for o in ogeler if o["durum"] != "basarili") if oge else 1
+                if kosu["ajan_cagrisi"] + n > s["max_ajan_cagrisi"]:
+                    self._incelemeye_al(b, kosu, "butce", f"ajan çağrısı sınırı ({s['max_ajan_cagrisi']}) aşılacaktı"
+                                        + (f" (kalan {n} öğe)" if oge else ""), adim_id)
                     return True
-                if kosu["maliyet_usd"] + kosu["tahmini_usd"] + tahmin > s["max_maliyet_usd"] + 1e-9:
+                if kosu["maliyet_usd"] + kosu["tahmini_usd"] + tahmin * n > s["max_maliyet_usd"] + 1e-9:
                     self._incelemeye_al(b, kosu, "butce",
-                                        f"tahmini maliyet sınırı ({s['max_maliyet_usd']} $) aşılacaktı", adim_id)
+                                        f"tahmini maliyet sınırı ({s['max_maliyet_usd']} $) aşılacaktı"
+                                        + (f" (kalan {n} öğe)" if oge else ""), adim_id)
                     return True
             else:
                 tahmin, tahmin_kaynagi = 0.0, None
@@ -1139,15 +1237,18 @@ class Motor:
                 return False
             r = self._adim_al(b, kosu_id, adim_id)
             ref = "ak-" + secrets.token_hex(6)
-            b.execute("INSERT INTO denemeler(kosu_id, adim_id, iterasyon, deneme, ref, durum, tahmini_usd, baslangic_ts) "
-                      "VALUES (?,?,?,?,?,?,?,?)", (kosu_id, adim_id, r["iterasyon"], r["deneme"], ref,
-                                                   "gonderiliyor", tahmin, self.saat()))
+            b.execute("INSERT INTO denemeler(kosu_id, adim_id, iterasyon, deneme, ref, durum, tahmini_usd, baslangic_ts, oge) "
+                      "VALUES (?,?,?,?,?,?,?,?,?)", (kosu_id, adim_id, r["iterasyon"], r["deneme"], ref,
+                                                     "gonderiliyor", tahmin, self.saat(), oge["sira"] if oge else None))
             deneme_id = b.execute("SELECT id FROM denemeler WHERE ref=?", (ref,)).fetchone()[0]
             if adim["tur"] in ("agent_task", "gelistirme_gorevi"):
                 self._kosu_yaz(b, kosu_id, ajan_cagrisi=kosu["ajan_cagrisi"] + 1, tahmini_usd=kosu["tahmini_usd"] + tahmin)
             self._olay(b, kosu, "adim_basladi", adim=adim_id, deneme=r["deneme"], durum="gonderiliyor",
-                       iterasyon=r["iterasyon"], tahmini_usd=tahmin, tahmin_kaynagi=tahmin_kaynagi)
+                       iterasyon=r["iterasyon"], tahmini_usd=tahmin, tahmin_kaynagi=tahmin_kaynagi,
+                       **({"oge": oge["sira"], "oge_adet": len(ogeler)} if oge else {}))
             baglam = self._baglam(b, kosu)
+            if oge:
+                baglam["oge"] = json.loads(oge["deger"])
             hazirlik = None
             if adim["tur"] == "gelistirme_gorevi" and adim["mod"] == "duzeltme":
                 hazirlik = self._son_tutamac(b, kosu_id, adim["hedef_adim"])
@@ -1339,7 +1440,9 @@ class Motor:
             for ad, t in adim["cikti_alanlari"].items():
                 ek = {"metin": f"metin, en çok {t.get('maks')} karakter",
                       "secim": "şunlardan biri: " + " | ".join(t.get("secenekler", [])),
-                      "sayi": "sayı", "evet_hayir": "true/false"}[t["tur"]]
+                      "sayi": "sayı", "evet_hayir": "true/false",
+                      "liste": f"metin listesi (JSON dizi), en çok {t.get('maks_oge')} öğe, öğe başına en çok "
+                               f"{t.get('maks')} karakter"}[t["tur"]]
                 tarif.append(f"- {ad}: {ek}" + (f" — {t['aciklama']}" if t.get("aciklama") else ""))
             parcalar.append("## Workflow çıktısı\nCevabının en sonuna tek bir blok yaz: "
                             "<akis_cikti>{\"alan\": değer, ...}</akis_cikti> (geçerli JSON). Alanlar:\n" + "\n".join(tarif) +
@@ -1758,7 +1861,9 @@ class Motor:
                 self._olay(b, kosu, "deneme_bitti", adim=d["adim_id"], deneme=d["deneme"], durum=sinif,
                            iterasyon=d["iterasyon"], cost_usd=maliyet,
                            duration_sn=veri.get("sure_sn") if isinstance(veri.get("sure_sn"), (int, float)) else None)
-                if sinif == "basarili":
+                if sinif == "basarili" and adim.get("her_biri"):
+                    self._oge_basarili(b, kosu, tanim, adim, d, cikti)
+                elif sinif == "basarili":
                     self._adim_basarili(b, kosu, tanim, adim, cikti)
                 else:
                     self._adim_hatasi(b, kosu, tanim, adim, sinif, hata)
