@@ -1,0 +1,29 @@
+{
+  "sema_surumu": 1,
+  "id": "ornek-alt-akis-cagrisi",
+  "surum": 1,
+  "ad": "Örnek: alt akış çağrısı (workflow_call)",
+  "aciklama": "V2 workflow_call örneği: 'ornek-arastirma-ozeti v3'yi kendi payıyla (4 $, 4 çağrı) çağırır, özetini alıp kısa bir başlık önerir. WORKFLOW_CALL_ACIK ve ETKIN_AKISLAR açılmadan başlatılamaz.",
+  "girdiler": {"konu": {"tur": "metin", "maks": 300}},
+  "izinli_ajanlar": ["akis-okuyucu"],
+  "sinirlar": {"max_ajan_cagrisi": 6, "max_sure_sn": 10800, "max_maliyet_usd": 8},
+  "baslangic": "arastir",
+  "adimlar": [
+    {
+      "id": "arastir", "tur": "workflow_call", "ad": "Araştırma alt akışı",
+      "akis": "ornek-arastirma-ozeti", "surum": 3,
+      "girdiler": {"konu": "{{girdi.konu}}"},
+      "butce_usd": 4, "max_ajan_cagrisi": 4,
+      "ciktilar": {"ozet": {"kaynak": "adim.ozetle.ozet", "tur": "metin"}},
+      "hata": {"eylem": "pause"},
+      "sonraki": "baslik"
+    },
+    {
+      "id": "baslik", "tur": "agent_task", "ad": "Başlık öner", "ajan": "akis-okuyucu", "yan_etkili": false,
+      "gorev": "Aşağıdaki özete 3 kısa başlık öner; dosya yazma: {{adim.arastir.ozet}}",
+      "cikti_alanlari": {"basliklar": {"tur": "metin", "maks": 600}},
+      "sonraki": "son"
+    },
+    {"id": "son", "tur": "end", "sonuc": "basarili"}
+  ]
+}

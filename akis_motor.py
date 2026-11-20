@@ -40,8 +40,9 @@ HAT_ADIMLARI_ACIK = True         # gelistirme_gorevi, quality_gate (yerel komut)
 DAGITIM_ONAYI_ACIK = True       # dagitim/yayin onayı: ayrı karar (onay/mühür kimlik bağı canlıda olmalı)
 YAZAN_AJAN_ACIK = False          # aşama 1 salt okunur: yan etki üretebilen ajan (ajan_yazabilir) adım olamaz
 FANOUT_ACIK = False              # V2 fan-out (her_biri): açmak ayrı karar; migration 5 bayraktan bağımsız uygulanır
+WORKFLOW_CALL_ACIK = False       # V2 alt workflow çağrısı: açmak ayrı karar; migration 6 bayraktan bağımsız uygulanır
 KAPALI_ONAY_KATEGORILERI = ("dagitim", "yayin")
-DIS_ETKILI_ADIMLAR = ("agent_task", "gelistirme_gorevi", "quality_gate")
+DIS_ETKILI_ADIMLAR = ("agent_task", "gelistirme_gorevi", "quality_gate", "workflow_call")
 
 
 def adim_kapali_mi(adim):
@@ -52,12 +53,42 @@ def adim_kapali_mi(adim):
         return f"{adim['kategori']} onayı bu sürümde kapalı"
     if not FANOUT_ACIK and adim.get("her_biri"):
         return "fan-out (her_biri) adımları bu sürümde kapalı"
+    if not WORKFLOW_CALL_ACIK and adim["tur"] == "workflow_call":
+        return "alt workflow çağrısı (workflow_call) bu sürümde kapalı"
     return None
 
 
-def zamanlama_engeli(tanim):
+def alt_akislar(tanim, tanimlar):
+    """workflow_call ile (dolaylı) çağrılan bütün tanımlar. Bulunamayan/sürümü tutmayan varsa AkisHatasi değil
+    metin döner (engel). Dönen: (liste, engel|None)."""
+    sonuc, yigin, gorulen = [], [tanim], {tanim["id"]}
+    while yigin:
+        t = yigin.pop()
+        for a in t["adimlar"]:
+            if a["tur"] != "workflow_call":
+                continue
+            alt = (tanimlar or {}).get(a["akis"])
+            if not alt or alt["surum"] != a["surum"]:
+                return sonuc, f"{a['id']}: çağrılan akış {a['akis']} v{a['surum']} yok ya da sürümü değişti"
+            if alt["id"] not in gorulen:
+                gorulen.add(alt["id"])
+                sonuc.append(alt)
+                yigin.append(alt)
+    return sonuc, None
+
+
+def zamanlama_engeli(tanim, tanimlar=None):
     """V2 zamanlayıcı/olay tetiklemesi: hat görevi, kalite kapısı ya da dağıtım/yayın onayı içeren akış aşama
-    bayraklarından BAĞIMSIZ olarak kendiliğinden başlatılamaz (kademeli otonomi; açmak ayrı kullanıcı kararı)."""
+    bayraklarından BAĞIMSIZ olarak kendiliğinden başlatılamaz (kademeli otonomi; açmak ayrı kullanıcı kararı).
+    Çağrılan alt akışlara da bakılır; çağrısı olan akış tanımlar verilmeden zamanlanamaz (fail-closed)."""
+    if any(a["tur"] == "workflow_call" for a in tanim["adimlar"]):
+        altlar, engel = alt_akislar(tanim, tanimlar)
+        if engel:
+            return engel
+        for alt in altlar:
+            e = zamanlama_engeli({**alt, "adimlar": [a for a in alt["adimlar"] if a["tur"] != "workflow_call"]})
+            if e:
+                return f"alt akış {alt['id']}: {e}"
     for a in tanim["adimlar"]:
         if a["tur"] in ("gelistirme_gorevi", "quality_gate"):
             return f"{a['id']}: {a['tur']} içeren akış zamanlanamaz"
@@ -66,14 +97,23 @@ def zamanlama_engeli(tanim):
     return None
 
 
-def akis_engeli(tanim):
-    """Başlatma engeli (metin) ya da None. Hem id izin listesi hem adım türü: yeniden adlandırılmış bir tanım geçemez."""
+def akis_engeli(tanim, tanimlar=None):
+    """Başlatma engeli (metin) ya da None. Hem id izin listesi hem adım türü: yeniden adlandırılmış bir tanım geçemez.
+    Alt akışlar da etkin ve açık olmalı (çağrı, kapalı bir akışı dolaylı açamaz)."""
     if tanim["id"] not in ETKIN_AKISLAR:
         return "akış bu sürümde etkin değil (kademeli devreye alma)"
     for a in tanim["adimlar"]:
         neden = adim_kapali_mi(a)
         if neden:
             return f"{a['id']}: {neden}"
+    if any(a["tur"] == "workflow_call" for a in tanim["adimlar"]):
+        altlar, engel = alt_akislar(tanim, tanimlar)
+        if engel:
+            return engel
+        for alt in altlar:
+            e = akis_engeli({**alt, "adimlar": [a for a in alt["adimlar"] if a["tur"] != "workflow_call"]})
+            if e:
+                return f"alt akış {alt['id']}: {e}"
     return None
 MAKS_ISTEM = ortak.MAKS_GIRDI
 GRAF_OKU = os.path.expanduser("~/beyin/bin/graf-oku")   # kosucu'nun ajana verdiği salt okunur geçitlerle aynı yollar
@@ -366,23 +406,34 @@ class Motor:
                 r = b.execute("SELECT id FROM kosular WHERE idem_anahtari=?", (idem_anahtari,)).fetchone()
                 if r:
                     return {"run_id": r["id"], "tekrar": True}
-            aktif = b.execute(f"SELECT COUNT(*) FROM kosular WHERE durum IN ({','.join('?' * len(akis_db.AKTIF_KOSU))})",
-                              akis_db.AKTIF_KOSU).fetchone()[0]
+            # alt koşular (workflow_call) üstün payıyla sınırlı: sınıra yalnız üst düzey koşular sayılır
+            aktif = b.execute(f"SELECT COUNT(*) FROM kosular WHERE ust_kosu_id IS NULL AND durum IN "
+                              f"({','.join('?' * len(akis_db.AKTIF_KOSU))})", akis_db.AKTIF_KOSU).fetchone()[0]
             if aktif >= MAKS_AKTIF_KOSU:
                 raise AkisHatasi(429, f"en çok {MAKS_AKTIF_KOSU} etkin workflow koşusu")
-            kosu_id = "r" + secrets.token_hex(6)
-            simdi = self.saat()
-            b.execute("INSERT INTO kosular(id, akis_id, akis_surum, tanim_ozet, tanim_json, girdi_json, idem_anahtari, "
-                      "durum, olusturma_ts, guncelleme_ts) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                      (kosu_id, tanim["id"], tanim["surum"], tanim["ozet"], json.dumps(tanim, ensure_ascii=False),
-                       json.dumps(girdi, ensure_ascii=False), idem_anahtari, "calisiyor", simdi, simdi))
-            for a in tanim["adimlar"]:
-                b.execute("INSERT INTO adimlar(kosu_id, adim_id, durum, guncelleme_ts) VALUES (?,?,?,?)",
-                          (kosu_id, a["id"], "hazir" if a["id"] == tanim["baslangic"] else "bekliyor", simdi))
-            kosu = self._kosu_al(b, kosu_id)
-            self._olay(b, kosu, "kosu_basladi", durum="calisiyor", surum=tanim["surum"])
+            kosu_id = self._kosu_olustur(b, tanim, girdi, idem_anahtari)
         self._uyandir.set()
         return {"run_id": kosu_id, "tekrar": False}
+
+    def _kosu_olustur(self, b, tanim, girdi, idem_anahtari, ust=None):
+        """Koşu + adım satırları (işlem içinde). ust: {kosu_id, adim_id, derinlik, maliyet, cagri, sure} (alt koşu)."""
+        kosu_id = "r" + secrets.token_hex(6)
+        simdi = self.saat()
+        ust = ust or {}
+        b.execute("INSERT INTO kosular(id, akis_id, akis_surum, tanim_ozet, tanim_json, girdi_json, idem_anahtari, "
+                  "durum, olusturma_ts, guncelleme_ts, ust_kosu_id, ust_adim_id, derinlik, tavan_maliyet_usd, "
+                  "tavan_ajan_cagrisi, tavan_sure_sn) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                  (kosu_id, tanim["id"], tanim["surum"], tanim["ozet"], json.dumps(tanim, ensure_ascii=False),
+                   json.dumps(girdi, ensure_ascii=False), idem_anahtari, "calisiyor", simdi, simdi,
+                   ust.get("kosu_id"), ust.get("adim_id"), ust.get("derinlik", 0), ust.get("maliyet"),
+                   ust.get("cagri"), ust.get("sure")))
+        for a in tanim["adimlar"]:
+            b.execute("INSERT INTO adimlar(kosu_id, adim_id, durum, guncelleme_ts) VALUES (?,?,?,?)",
+                      (kosu_id, a["id"], "hazir" if a["id"] == tanim["baslangic"] else "bekliyor", simdi))
+        kosu = self._kosu_al(b, kosu_id)
+        self._olay(b, kosu, "kosu_basladi", durum="calisiyor", surum=tanim["surum"],
+                   **({"ust_run_id": ust["kosu_id"], "derinlik": ust.get("derinlik", 0)} if ust.get("kosu_id") else {}))
+        return kosu_id
 
     def _kosu_kontrol(self, b, kosu_id):
         if not isinstance(kosu_id, str) or not KOSU_ID_DESENI.match(kosu_id):
@@ -499,6 +550,13 @@ class Motor:
         s = dict(tanim["sinirlar"])
         s["max_maliyet_usd"] = s["max_maliyet_usd"] + float(kosu.get("ek_maliyet_usd") or 0)
         s["max_ajan_cagrisi"] = s["max_ajan_cagrisi"] + int(kosu.get("ek_ajan_cagrisi") or 0)
+        # alt koşu: üstün ayırdığı pay tavandır (tanım anlık görüntüsü değişmez)
+        if kosu.get("tavan_maliyet_usd") is not None:
+            s["max_maliyet_usd"] = min(s["max_maliyet_usd"], float(kosu["tavan_maliyet_usd"]))
+        if kosu.get("tavan_ajan_cagrisi") is not None:
+            s["max_ajan_cagrisi"] = min(s["max_ajan_cagrisi"], int(kosu["tavan_ajan_cagrisi"]))
+        if kosu.get("tavan_sure_sn") is not None:
+            s["max_sure_sn"] = min(s["max_sure_sn"], float(kosu["tavan_sure_sn"]))
         return s
 
     @staticmethod
@@ -588,6 +646,9 @@ class Motor:
             kosu = self._kosu_kontrol(b, kosu_id)
             if kosu["durum"] != "inceleme":
                 raise AkisHatasi(409, f"koşu incelemede değil (durum: {kosu['durum']})")
+            if kosu.get("ust_kosu_id"):
+                raise AkisHatasi(409, "alt koşuya ek bütçe verilmez (üst koşunun payını aşardı): alt koşuyu başarısız say "
+                                      "ya da iptal et; üst koşu kendi politikasıyla karar verir")
             neden = json.loads(kosu["neden"] or "{}")
             if neden.get("sebep") != "butce":
                 raise AkisHatasi(409, "ek bütçe yalnız bütçe/çağrı sınırı incelemesinde verilir")
@@ -613,14 +674,14 @@ class Motor:
         self._uyandir.set()
         return self.detay(kosu_id)
 
-    def iptal(self, kosu_id):
+    def iptal(self, kosu_id, iptal_nedeni=None):
         """Kilit sırası: motor kilidi → başlatma kilidi (BASLATMA_KILIDI + baslatma.lock) → DB commit → kuyruk temizliği.
         Kuyruğu işleyen taraf (kuyrugu_isle) geçerlilik kontrolünü ve tmux başlatmayı aynı başlatma kilidi altında yapar;
         böylece iptal commit'i ya kontrolden önce olur (iş düşürülür) ya da başlatma bittikten sonra (koşu açılmıştır,
         sonucu yok sayılır). Kontrol ile başlatma arasına iptal giremez. Kuyruk tarafı motor kilidini hiç almaz: kilitlenme yok."""
         notlar, ajan_denemeleri = [], []
         with self._kilit, self.ortam.baslatma_kilidi():
-            self._iptal_commit(kosu_id, notlar, ajan_denemeleri)
+            self._iptal_commit(kosu_id, notlar, ajan_denemeleri, iptal_nedeni)
             iade = 0.0
             for d in ajan_denemeleri:
                 try:
@@ -646,9 +707,23 @@ class Motor:
                                   "yarım kalmış yan etki olabilir, kontrol et")
                 else:
                     notlar.append(f"{d['adim_id']}: çalışan ajan koşusu durdurulamadı ({neden}); bitince sonucu yok sayılır")
+        # alt koşular (workflow_call) hemen zincirleme iptal; kalan olursa motor turu süpürür (_yetim_alt_kosular)
+        try:
+            alt_idler = [r[0] for r in self.depo.baglanti().execute(
+                f"SELECT id FROM kosular WHERE ust_kosu_id=? AND durum IN ({','.join('?' * len(akis_db.AKTIF_KOSU))})",
+                (kosu_id, *akis_db.AKTIF_KOSU))]
+            for alt_id in alt_idler:
+                try:
+                    self.iptal(alt_id, iptal_nedeni={"sebep": "ust_kosu", "metin": f"üst koşu {kosu_id} iptal edildi"})
+                    notlar.append(f"alt koşu {alt_id} iptal edildi")
+                except AkisHatasi:
+                    pass
+        except Exception as e:  # noqa: BLE001 - motor turu yine süpürür
+            notlar.append(f"alt koşu iptali ertelendi ({type(e).__name__})")
         # iptal commit edildi: bundan sonraki hata yanıtı 500'e çevirmemeli (tekrar deneyen 409 alırdı)
         try:
-            self._islem_iade(kosu_id, iade, "; ".join(notlar) or "operatör iptal etti")
+            self._islem_iade(kosu_id, iade, "; ".join(notlar) or (iptal_nedeni or {}).get("metin") or "operatör iptal etti",
+                             (iptal_nedeni or {}).get("sebep", "operator"))
         except Exception as e:  # noqa: BLE001
             kaydedilecek = "; ".join(notlar) or "operatör iptal etti"
             notlar.append(f"not/iade yazılamadı ({type(e).__name__}); motor bunları yeniden yazmayı deneyecek")
@@ -665,7 +740,7 @@ class Motor:
         except Exception:  # noqa: BLE001 - yanıt biçimi docs/akis-motoru.md'de: en az run_id, durum, notlar
             return {"run_id": kosu_id, "durum": "iptal", "notlar": notlar, "adimlar": [], "kismi": True}
 
-    def _iptal_commit(self, kosu_id, notlar, ajan_denemeleri):
+    def _iptal_commit(self, kosu_id, notlar, ajan_denemeleri, neden=None):
         with self._islem() as b:
             kosu = self._kosu_kontrol(b, kosu_id)
             if kosu["durum"] in akis_db.SON_KOSU:
@@ -680,7 +755,7 @@ class Motor:
                 b.execute("UPDATE denemeler SET durum='iptal', bitis_ts=? WHERE id=?", (self.saat(), d["id"]))
             b.execute("UPDATE adimlar SET durum='iptal' WHERE kosu_id=? AND durum IN ('hazir','calisiyor','onay_bekliyor','bekliyor','inceleme')",
                       (kosu_id,))
-            self._kosu_bitir(b, kosu, "iptal", {"sebep": "operator", "metin": "operatör iptal etti"})
+            self._kosu_bitir(b, kosu, "iptal", neden or {"sebep": "operator", "metin": "operatör iptal etti"})
 
     def onayla(self, kosu_id, adim_id, karar, not_=None, kapi_ok=False):
         if karar not in ("evet", "hayir"):
@@ -724,6 +799,7 @@ class Motor:
                 "maliyet_usd": round(k["maliyet_usd"], 4), "tahmini_usd": round(k["tahmini_usd"], 2),
                 "ilerleme": {"biten": biten, "toplam": len(tanim["adimlar"])},
                 "dongu": json.loads(k["dongu_json"]), "sinirlar": self.etkin_sinirlar(k, tanim),
+                "ust_run_id": k.get("ust_kosu_id"), "ust_adim": k.get("ust_adim_id"), "derinlik": int(k.get("derinlik") or 0),
                 "ek": {"maliyet_usd": float(k.get("ek_maliyet_usd") or 0), "ajan_cagrisi": int(k.get("ek_ajan_cagrisi") or 0)}}
 
     def detay(self, kosu_id):
@@ -756,7 +832,7 @@ class Motor:
                                "siniflama": x["siniflama"], "hata": x["hata"], "maliyet_usd": x["maliyet_usd"],
                                "sure_sn": round(x["bitis_ts"] - x["baslangic_ts"], 1) if x["bitis_ts"] else None,
                                "tutamac": {kk: vv for kk, vv in json.loads(x["tutamac_json"]).items()
-                                           if kk in ("kosu_id", "kuyruk_id", "dosya", "hat")}}
+                                           if kk in ("kosu_id", "kuyruk_id", "dosya", "hat", "alt_kosu")}}
                               for x in denemeler if x["adim_id"] == a["id"]]})
         sonuc["olaylar"] = [{"tur": o["tur"], "zaman": o["zaman_ts"], **json.loads(o["veri_json"])}
                             for o in self.depo.olaylar(kosu_id, 100)]
@@ -831,6 +907,10 @@ class Motor:
                 self._iptal_maliyetleri()
             except Exception as e:  # noqa: BLE001 - muhasebe taraması motoru durdurmaz
                 self._motor_hatasi("iptal-maliyet", e)
+            try:
+                self._yetim_alt_kosular()
+            except Exception as e:  # noqa: BLE001
+                self._motor_hatasi("alt-kosu", e)
             for k in self.depo.kosular(durumlar=akis_db.AKTIF_KOSU, sinir=MAKS_AKTIF_KOSU * 4):
                 try:
                     self._kosu_isle(k["id"])
@@ -892,12 +972,12 @@ class Motor:
             import sys
             sys.stderr.write(f"akis motoru: {kosu_id} {type(e).__name__}\n")
 
-    def _islem_iade(self, kosu_id, iade, metin):
+    def _islem_iade(self, kosu_id, iade, metin, sebep="operator"):
         with self._islem() as b:
             kosu = self._kosu_al(b, kosu_id)
             alan = {"tahmini_usd": max(kosu["tahmini_usd"] - iade, 0)}
             if metin is not None:
-                alan["neden"] = json.dumps({"sebep": "operator", "metin": metin}, ensure_ascii=False)
+                alan["neden"] = json.dumps({"sebep": sebep, "metin": metin}, ensure_ascii=False)
             self._kosu_yaz(b, kosu_id, **alan)
 
     def bekleyen_isler(self):
@@ -938,7 +1018,7 @@ class Motor:
                 if not kosu or kosu["durum"] != "calisiyor":
                     return
                 tanim = self._tanim(kosu)
-                if self.saat() - kosu["olusturma_ts"] - (kosu.get("bekleme_sn") or 0) > tanim["sinirlar"]["max_sure_sn"]:
+                if self.saat() - kosu["olusturma_ts"] - (kosu.get("bekleme_sn") or 0) > self.etkin_sinirlar(kosu, tanim)["max_sure_sn"]:
                     self._incelemeye_al(b, kosu, "sure", "süre sınırı aşıldı (max_sure_sn)")
                     return
                 self._izlenen_onaylar(b, kosu, tanim)
@@ -1001,7 +1081,8 @@ class Motor:
                 if h != INCELEME and h not in gorulen and not g["dongu"]:
                     gorulen.add(h)
                     yigin.append(h)
-                    if akis_tanim.adim_bul(tanim, h)["tur"] in ("quality_gate", "agent_task", "approval", "condition"):
+                    if akis_tanim.adim_bul(tanim, h)["tur"] in ("quality_gate", "agent_task", "approval", "condition",
+                                                                 "workflow_call"):
                         self._adim_yaz(b, kosu["id"], h, cikti_json=None)
 
     def _ardillari_sifirla(self, b, kosu, tanim, baslangic):
@@ -1206,6 +1287,8 @@ class Motor:
                 self._olay(b, kosu, "yeniden_izleniyor", adim=adim_id, deneme=r["deneme"], durum="calisiyor",
                            iterasyon=r["iterasyon"], dosya=yeniden_izle["dosya"])
                 return True
+            if adim["tur"] == "workflow_call":
+                return self._alt_akis_baslat(b, kosu, tanim, adim, r)
             oge = None
             if adim["tur"] == "agent_task" and adim.get("her_biri"):
                 ogeler, bitti = self._fanout_hazirla(b, kosu, tanim, adim, r)
@@ -1280,6 +1363,113 @@ class Motor:
                 self._kapi_isleri[ref] = t
                 t.start()
         return True
+
+    # ---- workflow_call (V2): alt koşu aynı DB işleminde açılır; dış çağrı yok, yeniden başlatmada yarım gönderim yok
+    def _alt_akis_baslat(self, b, kosu, tanim, adim, r):
+        def incele(sebep, metin):
+            self._adim_yaz(b, kosu["id"], adim["id"], durum="inceleme", hata=metin)
+            self._incelemeye_al(b, kosu, sebep, f"{adim['id']}: {metin}", adim["id"])
+            return True
+        alt = self.tanimlar()[0].get(adim["akis"])
+        if not alt or alt["surum"] != adim["surum"]:
+            return incele("kaynak", f"çağrılan akış {adim['akis']} v{adim['surum']} yok ya da sürümü değişti")
+        engel = self.akis_engeli(alt)
+        if engel:
+            return incele("kapali", f"çağrılan akış kapalı: {engel}")
+        derinlik = int(kosu.get("derinlik") or 0) + 1
+        if derinlik > akis_tanim.MAKS_DERINLIK:
+            return incele("kaynak", f"çağrı derinliği {akis_tanim.MAKS_DERINLIK}'yi aşıyor")
+        baglam = self._baglam(b, kosu)
+        ham = {}
+        for ad, v in adim["girdiler"].items():
+            tek = akis_tanim.SABLON_REF.fullmatch(v.strip()) if isinstance(v, str) else None
+            # tek başına {{girdi.x}}: türü korunur (sayı/evet-hayır); karışık metin şablonla (yalnız girdi.*) dolar
+            ham[ad] = self._deger(baglam, tek.group(1)) if tek else (self._sablon(v, baglam)[0] if isinstance(v, str) else v)
+            if ham[ad] is None:
+                ham.pop(ad)
+        try:
+            girdi = akis_tanim.girdileri_dogrula(alt, ham)
+        except akis_tanim.TanimHatasi as e:
+            return incele("kaynak", f"alt akış girdisi geçersiz: {e}")
+        s = self.etkin_sinirlar(kosu, tanim)
+        n, pay = adim["max_ajan_cagrisi"], adim["butce_usd"]
+        if kosu["ajan_cagrisi"] + n > s["max_ajan_cagrisi"]:
+            self._incelemeye_al(b, kosu, "butce", f"ajan çağrısı sınırı ({s['max_ajan_cagrisi']}) alt akış payına "
+                                                  f"({n}) yetmiyor", adim["id"])
+            return True
+        if kosu["maliyet_usd"] + kosu["tahmini_usd"] + pay > s["max_maliyet_usd"] + 1e-9:
+            self._incelemeye_al(b, kosu, "butce", f"tahmini maliyet sınırı ({s['max_maliyet_usd']} $) alt akış payına "
+                                                  f"({pay} $) yetmiyor", adim["id"])
+            return True
+        kalan_sure = s["max_sure_sn"] - (self.saat() - kosu["olusturma_ts"] - (kosu.get("bekleme_sn") or 0))
+        c = b.execute("UPDATE adimlar SET durum='calisiyor', deneme=deneme+1, guncelleme_ts=? "
+                      "WHERE kosu_id=? AND adim_id=? AND durum='hazir'", (self.saat(), kosu["id"], adim["id"]))
+        if c.rowcount != 1:
+            return False
+        r = self._adim_al(b, kosu["id"], adim["id"])
+        alt_id = self._kosu_olustur(b, alt, girdi, f"cagri:{kosu['id']}:{adim['id']}:{r['iterasyon']}:{r['deneme']}",
+                                    ust={"kosu_id": kosu["id"], "adim_id": adim["id"], "derinlik": derinlik,
+                                         "maliyet": pay, "cagri": n, "sure": max(kalan_sure, 60.0)})
+        b.execute("INSERT INTO denemeler(kosu_id, adim_id, iterasyon, deneme, ref, durum, tutamac_json, tahmini_usd, "
+                  "baslangic_ts) VALUES (?,?,?,?,?,?,?,?,?)",
+                  (kosu["id"], adim["id"], r["iterasyon"], r["deneme"], "ak-" + secrets.token_hex(6), "calisiyor",
+                   json.dumps({"alt_kosu": alt_id}), pay, self.saat()))
+        self._kosu_yaz(b, kosu["id"], ajan_cagrisi=kosu["ajan_cagrisi"] + n, tahmini_usd=kosu["tahmini_usd"] + pay)
+        self._olay(b, kosu, "adim_basladi", adim=adim["id"], deneme=r["deneme"], durum="calisiyor",
+                   iterasyon=r["iterasyon"], tahmini_usd=pay, tahmin_kaynagi="pay", alt_run_id=alt_id)
+        self._uyandir.set()
+        return True
+
+    def _alt_akis_uzlastir(self, b, kosu, tanim, adim, d):
+        """Alt koşu bitince: maliyet ve çağrı payı gerçekleşenle değişir; başarılıysa bildirilen çıktılar aktarılır,
+        başarısız/iptalse adım 'kalici' hata (üst adımın politikası karar verir). Sürerken (incelemede olsa da) bekler:
+        zaman aşımı alt koşunun kendi (üstün kalan süresiyle sınırlı) süresindedir."""
+        t = json.loads(d["tutamac_json"] or "{}")
+        alt = self._kosu_al(b, t["alt_kosu"]) if t.get("alt_kosu") else None
+        if alt and alt["durum"] not in akis_db.SON_KOSU:
+            return
+        maliyet = float(alt["maliyet_usd"]) if alt else 0.0
+        if kosu["durum"] in akis_db.SON_KOSU:   # üst kapanmış: yalnız muhasebe
+            if self._deneme_bitir(b, d["id"], "yok_sayildi", maliyet_usd=maliyet) and maliyet:
+                self._kosu_yaz(b, kosu["id"], maliyet_usd=kosu["maliyet_usd"] + maliyet)
+                self._olay(b, self._kosu_al(b, kosu["id"]), "gec_maliyet", adim=d["adim_id"], deneme=d["deneme"],
+                           durum="yok_sayildi", iterasyon=d["iterasyon"], cost_usd=maliyet)
+            return
+        basarili = bool(alt) and alt["durum"] == "basarili"
+        hata = None if basarili else (f"alt koşu {alt['id']} {alt['durum']} bitti" if alt else "alt koşu bulunamadı")
+        if not self._deneme_bitir(b, d["id"], "basarili" if basarili else "basarisiz",
+                                  siniflama="basarili" if basarili else "kalici", hata=hata, maliyet_usd=maliyet):
+            return
+        self._kosu_yaz(b, kosu["id"], maliyet_usd=kosu["maliyet_usd"] + maliyet,
+                       tahmini_usd=max(kosu["tahmini_usd"] - (d["tahmini_usd"] or 0), 0),
+                       ajan_cagrisi=max(kosu["ajan_cagrisi"] - adim["max_ajan_cagrisi"]
+                                        + (int(alt["ajan_cagrisi"]) if alt else 0), 0))
+        kosu = self._kosu_al(b, kosu["id"])
+        self._olay(b, kosu, "deneme_bitti", adim=d["adim_id"], deneme=d["deneme"],
+                   durum="basarili" if basarili else "kalici", iterasyon=d["iterasyon"], cost_usd=maliyet,
+                   alt_run_id=alt["id"] if alt else None)
+        if not basarili:
+            return self._adim_hatasi(b, kosu, tanim, adim, "kalici", hata)
+        alt_baglam = self._baglam(b, alt)
+        cikti = {"durum": "basarili", "run_id": alt["id"]}
+        for ad, c in adim["ciktilar"].items():
+            v = self._deger(alt_baglam, c["kaynak"])
+            if v is not None:
+                cikti[ad] = v
+        self._adim_basarili(b, kosu, tanim, adim, cikti)
+
+    def _yetim_alt_kosular(self):
+        """Üstü kapanmış (bitti, başarısız sayıldı, sınırda bitti, iptal) etkin alt koşular iptal edilir (zincirleme)."""
+        soru = ",".join("?" * len(akis_db.AKTIF_KOSU))
+        son = ",".join("?" * len(akis_db.SON_KOSU))
+        rows = self.depo.baglanti().execute(
+            f"SELECT c.id, p.id AS ust, p.durum AS ust_durum FROM kosular c JOIN kosular p ON p.id=c.ust_kosu_id "
+            f"WHERE c.durum IN ({soru}) AND p.durum IN ({son})", (*akis_db.AKTIF_KOSU, *akis_db.SON_KOSU)).fetchall()
+        for r in rows:
+            try:
+                self.iptal(r["id"], iptal_nedeni={"sebep": "ust_kosu", "metin": f"üst koşu {r['ust']} {r['ust_durum']} bitti"})
+            except AkisHatasi:
+                pass
 
     def _gonderilebilir(self, kosu_id, deneme_id):
         with self._islem() as b:
@@ -1368,14 +1558,16 @@ class Motor:
     SALT_OKUR_ARACLAR = ("Read", "Glob", "Grep", "WebSearch", "WebFetch", "TodoWrite")
 
     def akis_engeli(self, tanim):
-        """Modül kapısı + aşama 1 salt okunur kuralı (yazabilen ajan adımı kapalı)."""
-        engel = akis_engeli(tanim)
+        """Modül kapısı + aşama 1 salt okunur kuralı (yazabilen ajan adımı kapalı); alt akışlar dahil."""
+        tanimlar = self.tanimlar()[0] if any(a["tur"] == "workflow_call" for a in tanim["adimlar"]) else {}
+        engel = akis_engeli(tanim, tanimlar)
         if engel:
             return engel
-        for a in tanim["adimlar"]:
-            neden = self.adim_engeli(a)
-            if neden:
-                return f"{a['id']}: {neden}"
+        for t in [tanim] + alt_akislar(tanim, tanimlar)[0]:
+            for a in t["adimlar"]:
+                neden = self.adim_engeli(a)
+                if neden:
+                    return f"{a['id']}: {neden}" if t is tanim else f"alt akış {t['id']}: {a['id']}: {neden}"
         return None
 
     def adim_engeli(self, adim):
@@ -1826,6 +2018,8 @@ class Motor:
                 if self._deneme_bitir(b, deneme_id, "bilinmeyen", siniflama="bilinmeyen", hata="kapı yarıda kaldı"):
                     self._adim_hatasi(b, kosu, tanim, adim, "baslamadi", "kalite kapısı yarıda kaldı (yeniden koşulacak)")
                 return
+            if adim["tur"] == "workflow_call":
+                return self._alt_akis_uzlastir(b, kosu, tanim, adim, d)
             if d["durum"] == "gonderiliyor" and self.saat() - d["baslangic_ts"] < BASLAMA_TOLERANS_SN \
                     and adim["tur"] == "gelistirme_gorevi":
                 return

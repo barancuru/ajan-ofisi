@@ -13,7 +13,9 @@ import ortak
 TANIM_DIZINI = os.environ.get("OFIS_AKISLAR") or os.path.join(ortak.KOK, "akislar")   # kabul testi: ayrı tanım klasörü
 SEMA_SURUMU = 1
 ID_DESENI = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
-ADIM_TURLERI = ("agent_task", "gelistirme_gorevi", "quality_gate", "condition", "approval", "end")
+ADIM_TURLERI = ("agent_task", "gelistirme_gorevi", "quality_gate", "condition", "approval", "end", "workflow_call")
+MAKS_DERINLIK = 2       # workflow_call: üst koşu 0; çağrılan en çok 2 kat aşağıda (üst → alt → alt-alt)
+CAGRI_CIKTILARI = {"durum": "secim", "run_id": "metin"}   # workflow_call adımının yerleşik çıktıları
 INCELEME = "@inceleme"   # özel hedef: koşu PAUSED / manual_review
 MAKS_ADIM = 30
 MAKS_SABLON = 8000
@@ -236,6 +238,7 @@ def _adim(ham, ne):
         "condition": ("kosullar", "dogru", "yanlis"),
         "approval": ("kategori", "mesaj", "izle_adim", "reddedilirse"),
         "end": ("sonuc",),
+        "workflow_call": ("akis", "surum", "girdiler", "butce_usd", "max_ajan_cagrisi", "ciktilar"),
     }[tur]
     _bilinmeyen_anahtar(ham, ortak_alanlar + ozel, ne)
     a = {"id": _id(ham.get("id"), f"{ne}.id"), "tur": tur, "ad": _metin(ham.get("ad") or ham.get("id"), f"{ne}.ad", 80)}
@@ -312,6 +315,43 @@ def _adim(ham, ne):
             # dağıtım onayı yalnız mevcut Geliştirme kartında verilir; workflow kendi dağıtım onayını üretemez
             raise TanimHatasi(f"{ne}: dagitim onayı izle_adim (gelistirme_gorevi) ister")
         a["reddedilirse"] = _gecis(ham.get("reddedilirse"), f"{ne}.reddedilirse") or [{"hedef": INCELEME, "dongu": None}]
+    elif tur == "workflow_call":
+        # V2 alt workflow: sürüm sabitli, ayrı bütçe payı. Çapraz kontroller (var mı, sürüm, döngü, derinlik, çıktı
+        # türleri) tanimlari_yukle'nin ikinci geçişinde (capraz_dogrula) yapılır.
+        a["akis"] = _id(ham.get("akis"), f"{ne}.akis")
+        a["surum"] = _sayi(ham.get("surum"), f"{ne}.surum", 1, 1_000_000)
+        g = ham.get("girdiler") or {}
+        if not isinstance(g, dict) or len(g) > 12:
+            raise TanimHatasi(f"{ne}.girdiler: en çok 12 alanlı nesne")
+        a["girdiler"] = {}
+        for ad, v in g.items():
+            _id(ad, f"{ne}.girdiler.{ad}")
+            if isinstance(v, str):
+                _metin(v, f"{ne}.girdiler.{ad}", 2000)
+            elif v is None or isinstance(v, (dict, list)) or (isinstance(v, float) and v != v):
+                raise TanimHatasi(f"{ne}.girdiler.{ad}: metin, sayı ya da true/false")
+            a["girdiler"][ad] = v
+        a["butce_usd"] = _sayi(ham.get("butce_usd"), f"{ne}.butce_usd", 0.01, SINIR_TAVANLARI["max_maliyet_usd"], tam=False)
+        a["max_ajan_cagrisi"] = _sayi(ham.get("max_ajan_cagrisi"), f"{ne}.max_ajan_cagrisi", 1,
+                                      SINIR_TAVANLARI["max_ajan_cagrisi"])
+        c = ham.get("ciktilar") or {}
+        if not isinstance(c, dict) or len(c) > 12:
+            raise TanimHatasi(f"{ne}.ciktilar: en çok 12 alanlı nesne")
+        a["ciktilar"] = {}
+        for ad, t in c.items():
+            _id(ad, f"{ne}.ciktilar.{ad}")
+            if ad in CAGRI_CIKTILARI:
+                raise TanimHatasi(f"{ne}.ciktilar.{ad}: yerleşik çıktı adı")
+            if not isinstance(t, dict):
+                raise TanimHatasi(f"{ne}.ciktilar.{ad}: {{kaynak, tur}} olmalı")
+            _bilinmeyen_anahtar(t, ("kaynak", "tur"), f"{ne}.ciktilar.{ad}")
+            if not isinstance(t.get("kaynak"), str) or not re.fullmatch(r"adim\.[a-z0-9_-]+\.[a-z0-9_-]+", t["kaynak"]):
+                raise TanimHatasi(f"{ne}.ciktilar.{ad}.kaynak: adim.<alt adım>.<alan>")
+            if t.get("tur") not in ALAN_TURLERI + ("liste_nesne",):
+                raise TanimHatasi(f"{ne}.ciktilar.{ad}.tur: {ALAN_TURLERI + ('liste_nesne',)}")
+            a["ciktilar"][ad] = {"kaynak": t["kaynak"], "tur": t["tur"]}
+        a["yan_etkili"] = True        # alt akışın ne yaptığı bilinmez: körlemesine tekrar yok
+        a["tahmini_usd"] = a["butce_usd"]
     elif tur == "end":
         a["sonuc"] = ham.get("sonuc", "basarili")
         if a["sonuc"] not in ("basarili", "basarisiz"):
@@ -359,6 +399,8 @@ def _alan_ref_dogrula(tanim, adimlar, ref, ne, oge_izinli=False):
 
 def cikti_turleri(adim):
     """Adımın dışa açık çıktı alanları → tür. her_biri adımı öğe çıktılarını {sonuclar, adet} olarak birleştirir."""
+    if adim["tur"] == "workflow_call":
+        return {**CAGRI_CIKTILARI, **{ad: t["tur"] for ad, t in adim["ciktilar"].items()}}
     if adim["tur"] == "agent_task":
         if adim.get("her_biri"):
             return dict(FANOUT_CIKTILARI)
@@ -433,6 +475,16 @@ def dogrula(ham, beklenen_id=None):
                 raise TanimHatasi(f"{ne}: bilinmeyen bağımlılık {b}")
         if a["tur"] == "agent_task" and a["ajan"] not in t["izinli_ajanlar"]:
             raise TanimHatasi(f"{ne}: ajan {a['ajan']} izinli_ajanlar listesinde yok")
+        if a["tur"] == "workflow_call":
+            # alt koşu girdileri istemlere ham (güvenilir girdi gibi) yazılır: model çıktısı ({{adim.*}}) taşınamaz
+            for ad, v in a["girdiler"].items():
+                for ref in SABLON_REF.findall(v if isinstance(v, str) else ""):
+                    if not ref.startswith("girdi."):
+                        raise TanimHatasi(f"{ne}.girdiler.{ad}: yalnız {{{{girdi.*}}}} ve sabit değer (adım çıktısı alt "
+                                          "akışa girdi olamaz)")
+                    _alan_ref_dogrula(t, adimlar, ref, ne)
+            if a["akis"] == t["id"]:
+                raise TanimHatasi(f"{ne}: akış kendini çağıramaz")
         for alan in ("gorev", "baslik", "istek", "geri_bildirim", "mesaj"):
             _ref_dogrula(t, adimlar, a.get(alan), ne, oge_izinli=alan == "gorev" and bool(a.get("her_biri")))
         for k in a.get("kosullar") or []:
@@ -509,7 +561,52 @@ def tanimlari_yukle(dizin=None):
             tanimlar[t["id"]] = t
         except (OSError, ValueError, TanimHatasi) as e:
             hatalar[ad] = str(e)[:300] if isinstance(e, TanimHatasi) else f"okunamadı ({type(e).__name__})"
+    tanimlar, capraz = capraz_dogrula(tanimlar)
+    hatalar.update(capraz)
     return tanimlar, hatalar
+
+
+def cagrilanlar(tanim):
+    return [a for a in tanim["adimlar"] if a["tur"] == "workflow_call"]
+
+
+def capraz_dogrula(tanimlar):
+    """İkinci geçiş: workflow_call hedefi var mı, sürüm sabiti tutuyor mu, döngü/derinlik, çıktı kaynakları ve türleri.
+    Dönen: (geçerli tanımlar, {dosya: hata}). Geçersiz alt akış onu çağıranı da geçersiz yapar (sabit noktaya dek)."""
+    gecerli, hatalar = dict(tanimlar), {}
+
+    def derinlik(tid, yol):
+        if tid in yol:
+            raise TanimHatasi("çağrı döngüsü: " + " → ".join(yol + [tid]))
+        t = gecerli.get(tid)
+        if not t:
+            raise TanimHatasi(f"çağrılan akış yok ya da geçersiz: {tid}")
+        return max([0] + [1 + derinlik(a["akis"], yol + [tid]) for a in cagrilanlar(t)])
+
+    degisti = True
+    while degisti:
+        degisti = False
+        for tid, t in list(gecerli.items()):
+            try:
+                for a in cagrilanlar(t):
+                    alt = gecerli.get(a["akis"])
+                    if not alt:
+                        raise TanimHatasi(f"adım {a['id']}: çağrılan akış yok ya da geçersiz: {a['akis']}")
+                    if alt["surum"] != a["surum"]:
+                        raise TanimHatasi(f"adım {a['id']}: {a['akis']} sürümü {alt['surum']}, tanım {a['surum']} bekliyor")
+                    for ad, c in a["ciktilar"].items():
+                        _, sa, sf = c["kaynak"].split(".")
+                        kaynak = adim_bul(alt, sa)
+                        if not kaynak or cikti_turleri(kaynak).get(sf) != c["tur"]:
+                            raise TanimHatasi(f"adım {a['id']}.ciktilar.{ad}: {a['akis']} akışında {c['kaynak']} "
+                                              f"({c['tur']}) yok")
+                if derinlik(tid, []) > MAKS_DERINLIK:
+                    raise TanimHatasi(f"çağrı derinliği {MAKS_DERINLIK}'yi aşıyor")
+            except TanimHatasi as e:
+                hatalar[f"{tid}.json"] = str(e)[:300]
+                gecerli.pop(tid)
+                degisti = True
+    return gecerli, hatalar
 
 
 def adim_bul(tanim, adim_id):

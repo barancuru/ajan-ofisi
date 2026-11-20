@@ -110,6 +110,17 @@ MIGRATIONLAR = [
         PRIMARY KEY (kosu_id, adim_id, iterasyon, sira)
     )
     """,
+    # 6 (V2 workflow_call): alt koşunun üstü, derinliği ve üstün ayırdığı pay (etkin sınır = min(tanım, pay)).
+    # Yalnız ekleme: eski kod sütunları okumaz. Geri dönüşten önce alt akış çağıran koşular iptal edilmeli.
+    """
+    ALTER TABLE kosular ADD COLUMN ust_kosu_id TEXT;
+    ALTER TABLE kosular ADD COLUMN ust_adim_id TEXT;
+    ALTER TABLE kosular ADD COLUMN derinlik INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE kosular ADD COLUMN tavan_maliyet_usd REAL;
+    ALTER TABLE kosular ADD COLUMN tavan_ajan_cagrisi INTEGER;
+    ALTER TABLE kosular ADD COLUMN tavan_sure_sn REAL;
+    CREATE INDEX kosular_ust ON kosular(ust_kosu_id)
+    """,
 ]
 
 AKTIF_KOSU = ("calisiyor", "duraklatildi", "inceleme")

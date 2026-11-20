@@ -170,7 +170,8 @@ def kapiyi_ac(test):
               mock.patch.object(akis_motor, "HAT_ADIMLARI_ACIK", True),
               mock.patch.object(akis_motor, "DAGITIM_ONAYI_ACIK", True),
               mock.patch.object(akis_motor, "YAZAN_AJAN_ACIK", True),
-              mock.patch.object(akis_motor, "FANOUT_ACIK", True)):
+              mock.patch.object(akis_motor, "FANOUT_ACIK", True),
+              mock.patch.object(akis_motor, "WORKFLOW_CALL_ACIK", True)):
         y.start()
         test.addCleanup(y.stop)
 
