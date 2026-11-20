@@ -4349,7 +4349,7 @@ function akisDugmeler(dt) {
   if (dt.durum === 'inceleme') {
     const sebep = dt.neden && dt.neden.sebep;
     const adim = dt.neden && dt.adimlar.find(a => a.id === dt.neden.adim);
-    if (['adim', 'sir'].includes(sebep) && adim && adim.tur === 'agent_task' && adim.durum === 'inceleme') {
+    if (['adim', 'sir'].includes(sebep) && adim && adim.tur === 'agent_task' && !adim.her_biri && adim.durum === 'inceleme') {
       const b = el('button', 'mini', 'Adımı başarılı say…'); b.type = 'button';
       b.onclick = () => { b.disabled = true; kutu.after(akisBasariliSayFormu(dt, adim)); };
       kutu.append(b);
@@ -4390,6 +4390,7 @@ function akisBasariliSayFormu(dt, adim) {
     if (t.tur === 'secim') { x = el('select'); ['', ...(t.secenekler || [])].forEach(v => { const o = el('option', null, v || '— seç —'); o.value = v; x.append(o); }); }
     else if (t.tur === 'evet_hayir') { x = el('select'); [['', '— seç —'], ['true', 'evet'], ['false', 'hayır']].forEach(([v, m]) => { const o = el('option', null, m); o.value = v; x.append(o); }); }
     else if (t.tur === 'sayi') { x = el('input'); x.type = 'number'; x.step = 'any'; }
+    else if (t.tur === 'liste') { x = el('textarea'); x.rows = 3; x.placeholder = 'Her satıra bir öğe (en çok ' + (t.maks_oge || 10) + ')'; }
     else { x = el('textarea'); x.rows = 2; x.maxLength = t.maks || 2000; }
     x.name = ad; x.required = t.zorunlu !== false; x.setAttribute('aria-label', ad);
     const l = el('label', 'akis-alan'); l.append(el('span', null, ad + (x.required ? ' *' : '')), x); l.dataset.tur = t.tur || 'metin';
@@ -4399,7 +4400,8 @@ function akisBasariliSayFormu(dt, adim) {
     girdiler, () => {
       const cikti = {};
       for (const l of girdiler) { const x = l.querySelector('[name]'); if (x.value === '') continue;
-        cikti[x.name] = l.dataset.tur === 'sayi' ? Number(x.value) : l.dataset.tur === 'evet_hayir' ? x.value === 'true' : x.value; }
+        cikti[x.name] = l.dataset.tur === 'sayi' ? Number(x.value) : l.dataset.tur === 'evet_hayir' ? x.value === 'true'
+          : l.dataset.tur === 'liste' ? x.value.split('\n').map(v => v.trim()).filter(Boolean) : x.value; }
       return { run_id: dt.run_id, karar: 'basarili_say', adim: adim.id, cikti };
     }, 'Adım başarılı sayıldı');
 }
@@ -4421,13 +4423,13 @@ function akisAdimlar(dt) {
   const liste = el('ol', 'akis-adimlar');
   for (const a of dt.adimlar) {
     const li = el('li', 'akis-adim'); const ust = el('div', 'ust');
-    ust.append(el('b', null, a.ad), akisRozet(a.durum), el('small', null, a.tur + (a.ajan ? ' · ' + a.ajan : '') + (a.iterasyon ? ' · iterasyon ' + (a.iterasyon + 1) : '') + (a.denemeler.length ? ' · ' + a.denemeler.length + ' deneme' : '')));
+    ust.append(el('b', null, a.ad), akisRozet(a.durum), el('small', null, a.tur + (a.ajan ? ' · ' + a.ajan : '') + (a.iterasyon ? ' · iterasyon ' + (a.iterasyon + 1) : '') + (a.denemeler.length ? ' · ' + a.denemeler.length + ' deneme' : '') + (a.ogeler && a.ogeler.toplam ? ' · öğe ' + a.ogeler.biten + '/' + a.ogeler.toplam : '')));
     li.append(ust);
     if (a.sonraki_ts && a.durum === 'hazir' && a.sonraki_ts * 1000 > Date.now()) li.append(el('small', null, 'Yeniden deneme: ' + new Date(a.sonraki_ts * 1000).toLocaleTimeString('tr-TR')));
     if (a.tur === 'approval' && a.durum === 'onay_bekliyor') li.append(el('small', null, a.mesaj));
     if (a.hata) li.append(el('small', 'ong-hata', a.hata));
     const son = a.denemeler[a.denemeler.length - 1];
-    if (a.denemeler.length) li.append(el('small', null, a.denemeler.map(x => '#' + x.deneme + ' ' + (AKIS_DURUM[x.durum] || x.durum) + (x.siniflama && x.siniflama !== 'basarili' ? ' (' + x.siniflama + ')' : '') + (x.sure_sn != null ? ' ' + x.sure_sn + ' sn' : '') + (x.maliyet_usd != null ? ' ' + akisPara(x.maliyet_usd) : '')).join(' · ')));
+    if (a.denemeler.length) li.append(el('small', null, a.denemeler.map(x => '#' + x.deneme + (x.oge != null ? ' [öğe ' + (x.oge + 1) + ']' : '') + ' ' + (AKIS_DURUM[x.durum] || x.durum) + (x.siniflama && x.siniflama !== 'basarili' ? ' (' + x.siniflama + ')' : '') + (x.sure_sn != null ? ' ' + x.sure_sn + ' sn' : '') + (x.maliyet_usd != null ? ' ' + akisPara(x.maliyet_usd) : '')).join(' · ')));
     if (son && son.tutamac && son.tutamac.dosya) {
       const h = AKIS_UCUSTA.includes(son.durum) && son.tutamac.hat;
       const hd = h ? ({ hazir:'sırada', sirada:'sırada', calisiyor:'çalışıyor', uat:'UAT', ret_isleniyor:'ret işleniyor, yeni paket bekleniyor' }[h.durum] || h.durum) : '';

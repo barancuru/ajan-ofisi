@@ -1,0 +1,35 @@
+{
+  "sema_surumu": 1,
+  "id": "ornek-notlari-tek-tek-ozetle",
+  "surum": 1,
+  "ad": "Örnek: notları tek tek özetle (fan-out)",
+  "aciklama": "V2 fan-out örneği: konuyla ilgili en çok 5 beyin notunu bulur, her notu ayrı salt okunur çağrıyla özetler, sonra birleştirir. FANOUT_ACIK ve ETKIN_AKISLAR açılmadan başlatılamaz.",
+  "girdiler": {"konu": {"tur": "metin", "maks": 300}},
+  "izinli_ajanlar": ["akis-okuyucu"],
+  "sinirlar": {"max_ajan_cagrisi": 8, "max_sure_sn": 10800, "max_maliyet_usd": 12},
+  "baslangic": "bul",
+  "adimlar": [
+    {
+      "id": "bul", "tur": "agent_task", "ad": "İlgili notları bul", "ajan": "akis-okuyucu", "yan_etkili": false,
+      "gorev": "Beyin notlarında (~/beyin/notlar) şu konuyla en ilgili en çok 5 notu bul; dosya yazma: {{girdi.konu}}. Her öğe notun göreli yolu olsun.",
+      "cikti_alanlari": {"notlar": {"tur": "liste", "maks_oge": 5, "maks": 300, "aciklama": "notların göreli yolları"}},
+      "hata": {"eylem": "retry", "max_deneme": 2, "geri_cekilme_sn": 30},
+      "sonraki": "ozetle"
+    },
+    {
+      "id": "ozetle", "tur": "agent_task", "ad": "Her notu özetle", "ajan": "akis-okuyucu", "yan_etkili": false,
+      "her_biri": "adim.bul.notlar",
+      "gorev": "Aşağıdaki beyin notunu oku ve konuyla ilgisini 3 maddede özetle; dosya yazma. Not yolu: {{oge}}",
+      "cikti_alanlari": {"ozet": {"tur": "metin", "maks": 1200}},
+      "hata": {"eylem": "retry", "max_deneme": 2, "geri_cekilme_sn": 30},
+      "sonraki": "birlestir"
+    },
+    {
+      "id": "birlestir", "tur": "agent_task", "ad": "Birleştir", "ajan": "akis-okuyucu", "yan_etkili": false,
+      "gorev": "Not özetlerini tek bir kısa rapora birleştir (tekrarları çıkar, kaynak notu belirt): {{adim.ozetle.sonuclar}}",
+      "cikti_alanlari": {"rapor": {"tur": "metin", "maks": 3000}},
+      "sonraki": "son"
+    },
+    {"id": "son", "tur": "end", "sonuc": "basarili"}
+  ]
+}

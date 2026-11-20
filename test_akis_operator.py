@@ -163,12 +163,29 @@ class MigrationGeriUyumTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             yol = os.path.join(d, "akis.db")
             akis_db.Depo(yol).kapat()
-            self.assertEqual(sqlite3.connect(yol).execute("PRAGMA user_version").fetchone()[0], 4)
+            son = len(akis_db.MIGRATIONLAR)
+            self.assertEqual(sqlite3.connect(yol).execute("PRAGMA user_version").fetchone()[0], son)
             eski = akis_db.MIGRATIONLAR[:3]
             from unittest import mock
             with mock.patch.object(akis_db, "MIGRATIONLAR", eski):
                 depo = akis_db.Depo(yol)
-                self.assertEqual(depo.surum(), 4)
+                self.assertEqual(depo.surum(), son)
+                depo.kapat()
+
+    def test_eski_kod_surum_5_db_ile_deneme_yazar(self):
+        """1.0.90'a geri dönüş: migration 5 yalnız ekler; eski INSERT (oge sütunu olmadan) ve okuma çalışır."""
+        with tempfile.TemporaryDirectory() as d:
+            yol = os.path.join(d, "akis.db")
+            akis_db.Depo(yol).kapat()
+            from unittest import mock
+            with mock.patch.object(akis_db, "MIGRATIONLAR", akis_db.MIGRATIONLAR[:4]):
+                depo = akis_db.Depo(yol)
+                with depo.islem() as b:
+                    b.execute("INSERT INTO kosular(id, akis_id, akis_surum, tanim_ozet, tanim_json, girdi_json, durum, "
+                              "olusturma_ts, guncelleme_ts) VALUES ('r000000000001','x',1,'o','{}','{}','calisiyor',1,1)")
+                    b.execute("INSERT INTO denemeler(kosu_id, adim_id, iterasyon, deneme, ref, durum, tahmini_usd, "
+                              "baslangic_ts) VALUES ('r000000000001','a',0,1,'ak-000000000001','gonderiliyor',0,1)")
+                self.assertIsNone(depo.denemeler("r000000000001")[0]["oge"])
                 depo.kapat()
 
 
