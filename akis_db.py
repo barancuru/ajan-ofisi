@@ -94,10 +94,12 @@ MIGRATIONLAR = [
     """,
     # 5 (V2 fan-out): her_biri adımının öğe anlık görüntüsü ve denemenin öğesi. Yalnız ekleme: eski kod (1.0.90)
     # sütunu ve tabloyu okumaz. Geri dönüşten önce fan-out adımı süren koşular iptal edilmeli (eski kod öğeyi bilmez).
+    # ogeler.kosu_id bilerek FOREIGN KEY değil: eski saklama (ogeler'i bilmez) kosular satırını silerken FK hatasıyla
+    # bütün geçişi durdurmasın; yeni saklama ogeler'i kendisi arşivleyip siler.
     """
     ALTER TABLE denemeler ADD COLUMN oge INTEGER;
     CREATE TABLE ogeler (
-        kosu_id TEXT NOT NULL REFERENCES kosular(id),
+        kosu_id TEXT NOT NULL,
         adim_id TEXT NOT NULL,
         iterasyon INTEGER NOT NULL,
         sira INTEGER NOT NULL,

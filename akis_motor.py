@@ -116,6 +116,12 @@ def sonuc_dizini():
     return os.path.join(ortak.DURUM_DIZINI, "akis-sonuc")
 
 
+def _kisa_json(deger, maks=2000):
+    """Görünüm için: küçük liste/nesne olduğu gibi, büyüğü kırpılmış JSON metni (SSE/detay yükü sınırlı kalsın)."""
+    metin = json.dumps(deger, ensure_ascii=False)
+    return deger if len(metin) <= maks else metin[:maks] + "…"
+
+
 def _json_oku(yol):
     try:
         with open(yol, encoding="utf-8") as f:
@@ -740,8 +746,9 @@ class Motor:
                 **({"her_biri": a["her_biri"], "ogeler": self._oge_ozeti(kosu_id, a["id"], d["iterasyon"])}
                    if a.get("her_biri") else {}),
                 **({"kategori": a["kategori"], "mesaj": a["mesaj"], "izle": bool(a.get("izle_adim"))} if a["tur"] == "approval" else {}),
-                # çıktı değerleri kısaltılır; ham çıktı ve istem gösterilmez
-                "cikti": {kk: (vv[:600] if isinstance(vv, str) else vv) for kk, vv in (cikti or {}).items()},
+                # çıktı değerleri kısaltılır; ham çıktı ve istem gösterilmez (liste/fan-out sonucu da: JSON'u 2000 karakter)
+                "cikti": {kk: (vv[:600] if isinstance(vv, str) else
+                               _kisa_json(vv) if isinstance(vv, (list, dict)) else vv) for kk, vv in (cikti or {}).items()},
                 "denemeler": [{"deneme": x["deneme"], "iterasyon": x["iterasyon"], "durum": x["durum"], "oge": x.get("oge"),
                                "siniflama": x["siniflama"], "hata": x["hata"], "maliyet_usd": x["maliyet_usd"],
                                "sure_sn": round(x["bitis_ts"] - x["baslangic_ts"], 1) if x["bitis_ts"] else None,

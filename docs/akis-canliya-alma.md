@@ -174,7 +174,8 @@ Davranış değişmez: `FANOUT_ACIK = False`, örnek akış `ETKIN_AKISLAR`'da d
 2. Merge → `git -C ~/ajan-ofisi pull --ff-only` → **hemen** `systemctl --user restart ofis` (tekrar timer'ı
    `zamanlayici.py --tetikle` çalışma ağacından `Depo` açıp migrate eder; eski süreç yeni şemayla sorunsuz çalışır,
    migration yalnız ekler).
-3. Kontrol: `PRAGMA user_version` = 5, testler 571/571.
+3. Kontrol: `PRAGMA user_version` = 5, testler 573/573.
 Geri dönüş: `git reset --hard $(cat ~/ajan-ofisi-onceki-sha)` + restart. Eski kod sürüm 5 DB'de migration çalıştırmaz
-ve `oge`/`ogeler`'i okumaz (test edildi). Fan-out bayrağı açıldıysa süren fan-out koşuları önce iptal edilir.
+ve `oge`/`ogeler`'i okumaz (eski INSERT/okuma test edildi). `ogeler.kosu_id` bilerek FK değildir: eski saklama koşuyu
+silince `ogeler` satırları sahipsiz kalır (zararsız, yeni kod geri gelince okunmaz). Fan-out bayrağı açıldıysa süren fan-out koşuları önce iptal edilir.
 Bayrağı açmak (`FANOUT_ACIK = True` + örneği `ETKIN_AKISLAR`'a eklemek) ayrı kod değişikliği ve kullanıcı kararıdır.

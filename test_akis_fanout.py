@@ -332,3 +332,31 @@ class SaklamaTest(MotorTabani):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GeriDonusSaklamaTest(MotorTabani):
+    def test_eski_saklama_fk_hatasi_vermez(self):
+        """1.0.90 saklaması ogeler'i bilmez: kosular satırını silerken FK hatası almamalı."""
+        self.tanim(fanout_tanim())
+        k = self.m.baslat("fan", {"konu": "x"})["run_id"]
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), cikti(notlar=["a"]))
+        self.m.tur()
+        self.m.iptal(k)
+        with self.depo.islem() as b:
+            for t in ("olaylar", "denemeler", "adimlar"):
+                b.execute(f"DELETE FROM {t} WHERE kosu_id=?", (k,))
+            b.execute("DELETE FROM kosular WHERE id=?", (k,))
+
+    def test_detayda_buyuk_sonuc_kirpilir(self):
+        self.tanim(fanout_tanim())
+        k = self.m.baslat("fan", {"konu": "x"})["run_id"]
+        self.m.tur()
+        self.ajan_bitir(self.son_ref(), cikti(notlar=[f"n{i}" for i in range(5)]))
+        self.m.tur()
+        for i in range(5):
+            self.ajan_bitir(self.son_ref(), cikti(ozet="y" * 1500))
+            self.m.tur()
+        s = self.adim(k, "her")["cikti"]["sonuclar"]
+        self.assertIsInstance(s, str)
+        self.assertLessEqual(len(s), 2001)
