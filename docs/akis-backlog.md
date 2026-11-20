@@ -14,7 +14,7 @@ Her kalem ayrı dal + PR; Aşama 1/2 sabitleri V2 PR'larında değişmez. Kalem 
 5. [x] İptal edilen denemenin maliyeti (kosucu kısmi maliyet + motor `gec_maliyet` taraması): claude öldürülünce `total_cost_usd` yok → deneme 0/None sayılır. Bütçede
        iptal anına dek harcama görünmez (koşu zaten iptal, risk düşük); `stream-json` usage'tan kısmi maliyet.
 6. [x] V2 zamanlayıcı tetiklemesi → 7. [ ] olay tetiklemesi (yeni yetki eklemez; beyin `bin/calistir` değişikliği ister → yalnız beyin dalında, #5 canlıya alınınca anlamlı).
-8. [x] V2 dinamik fan-out (dal `akis-fanout`, 1.0.91, taslak PR; `FANOUT_ACIK=False`; sıralı, migration 5 eklemeli) — eski not: (liste çıktı türü + DB migration 5; dağıtımda tekrar timer'ları durdurulur ya da merge'den hemen sonra restart: `zamanlayici.py --tetikle` çalışma ağacından `Depo` açıp migrate eder) → 9. [ ] `workflow_call` (derinlik ≤ 2).
+8. [x] V2 dinamik fan-out (dal `akis-fanout`, 1.0.91, taslak PR; `FANOUT_ACIK=False`; sıralı, migration 5 eklemeli) — eski not: (liste çıktı türü + DB migration 5; dağıtımda tekrar timer'ları durdurulur ya da merge'den hemen sonra restart: `zamanlayici.py --tetikle` çalışma ağacından `Depo` açıp migrate eder) → 9. [x] `workflow_call` (dal `akis-workflow-call`, 1.0.94, taslak PR; `WORKFLOW_CALL_ACIK=False`; migration 6).
 10. [ ] V2 değerlendirici-iyileştirici döngüsü.
 11. [ ] V2 `plan_step` → 12. [ ] CEO workflow önerisi (model çıktısı yol seçtiği için en son).
 13. [ ] V3 görsel editör / replay.

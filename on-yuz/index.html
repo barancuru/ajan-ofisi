@@ -4429,6 +4429,7 @@ function akisAdimlar(dt) {
     if (a.tur === 'approval' && a.durum === 'onay_bekliyor') li.append(el('small', null, a.mesaj));
     if (a.hata) li.append(el('small', 'ong-hata', a.hata));
     const son = a.denemeler[a.denemeler.length - 1];
+    if (a.tur === 'workflow_call' && son && son.tutamac && son.tutamac.alt_kosu) li.append(el('small', null, 'Alt koşu: ' + son.tutamac.alt_kosu));
     if (a.denemeler.length) li.append(el('small', null, a.denemeler.map(x => '#' + x.deneme + (x.oge != null ? ' [öğe ' + (x.oge + 1) + ']' : '') + ' ' + (AKIS_DURUM[x.durum] || x.durum) + (x.siniflama && x.siniflama !== 'basarili' ? ' (' + x.siniflama + ')' : '') + (x.sure_sn != null ? ' ' + x.sure_sn + ' sn' : '') + (x.maliyet_usd != null ? ' ' + akisPara(x.maliyet_usd) : '')).join(' · ')));
     if (son && son.tutamac && son.tutamac.dosya) {
       const h = AKIS_UCUSTA.includes(son.durum) && son.tutamac.hat;

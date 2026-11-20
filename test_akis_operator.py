@@ -189,5 +189,23 @@ class MigrationGeriUyumTest(unittest.TestCase):
                 depo.kapat()
 
 
+class MigrationAltiTest(unittest.TestCase):
+    def test_eski_kod_surum_6_db_ile_kosu_yazar(self):
+        """1.0.93'e geri dönüş: migration 6 yalnız ekler; eski INSERT (üst/tavan sütunları olmadan) çalışır."""
+        with tempfile.TemporaryDirectory() as d:
+            yol = os.path.join(d, "akis.db")
+            akis_db.Depo(yol).kapat()
+            from unittest import mock
+            with mock.patch.object(akis_db, "MIGRATIONLAR", akis_db.MIGRATIONLAR[:5]):
+                depo = akis_db.Depo(yol)
+                self.assertEqual(depo.surum(), 6)
+                with depo.islem() as b:
+                    b.execute("INSERT INTO kosular(id, akis_id, akis_surum, tanim_ozet, tanim_json, girdi_json, durum, "
+                              "olusturma_ts, guncelleme_ts) VALUES ('r000000000002','x',1,'o','{}','{}','calisiyor',1,1)")
+                k = depo.kosu("r000000000002")
+                self.assertEqual((k["derinlik"], k["ust_kosu_id"], k["tavan_maliyet_usd"]), (0, None, None))
+                depo.kapat()
+
+
 if __name__ == "__main__":
     unittest.main()

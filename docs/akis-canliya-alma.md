@@ -179,3 +179,10 @@ Geri dönüş: `git reset --hard $(cat ~/ajan-ofisi-onceki-sha)` + restart. Eski
 ve `oge`/`ogeler`'i okumaz (eski INSERT/okuma test edildi). `ogeler.kosu_id` bilerek FK değildir: eski saklama koşuyu
 silince `ogeler` satırları sahipsiz kalır (zararsız, yeni kod geri gelince okunmaz). Fan-out bayrağı açıldıysa süren fan-out koşuları önce iptal edilir.
 Bayrağı açmak (`FANOUT_ACIK = True` + örneği `ETKIN_AKISLAR`'a eklemek) ayrı kod değişikliği ve kullanıcı kararıdır.
+
+## V2 workflow_call (dal `akis-workflow-call`, 1.0.94, taslak PR; PR #9 `akis-graf` üstüne kurulu)
+Davranış değişmez: `WORKFLOW_CALL_ACIK = False`, örnek akış `ETKIN_AKISLAR`'da değil. Tek etkisi DB migration 6 (yalnız ekleme).
+Sıra: önce PR #9 (1.0.93), sonra bu PR. Adımlar fan-out ile aynı: yedek (`~/akis.db.1.0.93.bak`), önceki SHA, merge,
+**hemen** `systemctl --user restart ajan-ofisi.service`, `PRAGMA user_version` = 6.
+Geri dönüş: önceki SHA + restart. Bayrak açıldıysa önce alt akış çağıran üst koşular iptal edilir (eski kod
+`workflow_call` adımını tanımaz; iptal alt koşuları da kapatır). Eski kod v6 DB'de çalışır (sütunlar eklemeli).

@@ -1,7 +1,7 @@
 {
   "sema_surumu": 1,
   "id": "homeos-ozellik-gelistirme",
-  "surum": 3,
+  "surum": 4,
   "ad": "HomeOS özellik geliştirme",
   "aciklama": "Planlama → Uygulama (beyin hattı) → Test → Güvenlik kontrolü → Kalite kapısı. Kapı geçmezse düzeltme ve yeniden test, en çok 3 tur. Kapı geçince dağıtım onayı mevcut Geliştirme kartından verilir (workflow onay vermez, oto-onay kapalı). Belirsizlikte manual_review.",
   "girdiler": {
@@ -16,7 +16,7 @@
     {
       "id": "planlama", "tur": "agent_task", "ad": "Planlama", "ajan": "akis-okuyucu", "model": "sonnet",
       "yan_etkili": false, "tahmini_usd": 1.5,
-      "gorev": "HomeOS için aşağıdaki özelliğin uygulama planını çıkar. Kod yazma, dosya değiştirme, not ekleme; yalnız oku (kod grafı ve git-oku ile homeos projesine bak).\n\nBaşlık: {{girdi.baslik}}\n\nİstek:\n{{girdi.istek}}\n\nPlan: değişecek dosyalar, migration gerekip gerekmediği (yalnız ekleme; silme/ad değiştirme yok), test yaklaşımı, riskler. Üretim sunucusu, sır, ödeme ya da yetki gerektiren bir adım varsa yetki_gerekli=true yaz. Emin değilsen risk=belirsiz.",
+      "gorev": "HomeOS için aşağıdaki özelliğin uygulama planını çıkar. Kod yazma, dosya değiştirme, not ekleme; yalnız oku: önce graf-oku homeos ile ilgili sembolleri ve çağıranlarını bul, sonra gerekirse dosyayı oku; geçmiş için git-oku. İlgili beyin kararları için not-oku bul \"HomeOS <konu>\".\n\nBaşlık: {{girdi.baslik}}\n\nİstek:\n{{girdi.istek}}\n\nPlan: değişecek dosyalar, migration gerekip gerekmediği (yalnız ekleme; silme/ad değiştirme yok), test yaklaşımı, riskler. Üretim sunucusu, sır, ödeme ya da yetki gerektiren bir adım varsa yetki_gerekli=true yaz. Emin değilsen risk=belirsiz.",
       "cikti_alanlari": {
         "plan": {"tur": "metin", "maks": 4000, "aciklama": "uygulama planı, madde madde"},
         "risk": {"tur": "secim", "secenekler": ["dusuk", "orta", "yuksek", "belirsiz"]},
@@ -54,7 +54,7 @@
     {
       "id": "guvenlik", "tur": "agent_task", "ad": "Güvenlik kontrolü", "ajan": "akis-okuyucu", "model": "sonnet",
       "yan_etkili": false, "tahmini_usd": 1.5,
-      "gorev": "HomeOS'ta {{adim.uygulama.dal}} dalındaki değişikliği güvenlik açısından incele (git-oku homeos diff main...<dal>; kod grafı). Kod yazma, dosya değiştirme. Bak: yetki kontrolü, girdi doğrulama, SQL enjeksiyonu, XSS, CSRF, sır sızıntısı, yıkıcı migration, kişisel veri. Kanıtlı bulgu varsa karar=kaldi; değişikliği göremiyorsan ya da emin değilsen karar=belirsiz.",
+      "gorev": "HomeOS'ta {{adim.uygulama.dal}} dalındaki değişikliği güvenlik açısından incele (git-oku homeos diff main...<dal>; değişen her fonksiyon/uç için graf-oku homeos query ya da explain ile çağıranları ve etki alanını bul — yetki kontrolü atlanan bir yol çağıranda olabilir). Kod yazma, dosya değiştirme. Bak: yetki kontrolü, girdi doğrulama, SQL enjeksiyonu, XSS, CSRF, sır sızıntısı, yıkıcı migration, kişisel veri. Kanıtlı bulgu varsa karar=kaldi; değişikliği göremiyorsan ya da emin değilsen karar=belirsiz.",
       "cikti_alanlari": {
         "karar": {"tur": "secim", "secenekler": ["gecti", "kaldi", "belirsiz"]},
         "bulgular": {"tur": "metin", "maks": 3000, "aciklama": "bulgular, dosya:satır ile"}

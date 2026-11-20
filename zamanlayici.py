@@ -234,7 +234,7 @@ def akis_is_dogrula(ham, tanimlar=None):
     tanim = tanimlar.get(akis_id)
     if not tanim:
         raise ValueError("bilinmeyen akış")
-    engel = akis_motor.zamanlama_engeli(tanim) or akis_motor.akis_engeli(tanim)
+    engel = akis_motor.zamanlama_engeli(tanim, tanimlar) or akis_motor.akis_engeli(tanim, tanimlar)
     if engel:
         raise ValueError(f"akış etkin değil: {engel}"[:200])
     try:

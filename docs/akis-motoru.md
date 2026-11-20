@@ -216,6 +216,33 @@ Bir ajan adımının **liste** çıktısındaki her öğe için başka bir ajan 
 - DB: migration 5 (yalnız ekleme: `denemeler.oge`, `ogeler`). Saklama `ogeler` satırlarını da arşivler/siler.
 - Örnek: `akislar/ornek-notlari-tek-tek-ozetle.json` (salt okunur; `ETKIN_AKISLAR`'da değil).
 
+## Alt workflow: `workflow_call` (V2, bayrak `WORKFLOW_CALL_ACIK`, varsayılan kapalı)
+```json
+{"id": "arastir", "tur": "workflow_call", "akis": "<alt akış id>", "surum": 3,
+ "girdiler": {"konu": "{{girdi.konu}}"}, "butce_usd": 4, "max_ajan_cagrisi": 4,
+ "ciktilar": {"ozet": {"kaynak": "adim.ozetle.ozet", "tur": "metin"}}, "sonraki": "..."}
+```
+- **Sürüm sabiti:** `surum` alt akışın yüklü sürümüne eşit olmalı (yüklemede ikinci geçiş `capraz_dogrula`; başlatmada
+  ve gönderimde yeniden). Tutmazsa tanım geçersiz / başlatma 403 / süren koşu `inceleme/kaynak`.
+- **Derinlik ≤ 2** (üst 0 → alt 1 → alt-alt 2), döngü ve kendini çağırma reddedilir (statik + çalışma anı `derinlik`).
+- **Girdiler yalnız `{{girdi.*}}` ve sabit değer:** alt akış girdisi istemlere ham yazılır; model çıktısı (`{{adim.*}}`)
+  alt akışa taşınamaz. Tek başına `{{girdi.x}}` türünü korur (sayı/evet-hayır). Alt akışın girdi doğrulaması uygulanır.
+- **Engeller çağrıdan geçer:** `akis_engeli`, yazabilen ajan kontrolü ve `zamanlama_engeli` çağrılan akışlara özyinelemeli
+  bakar; alt akış da `ETKIN_AKISLAR`'da olmalı. Hat/kapı/dağıtım içeren alt akışı çağıran akış zamanlanamaz.
+- **Bütçe payı:** gönderimde üst koşuda pay ayrılır (`tahmini += butce_usd`, çağrı `+= max_ajan_cagrisi`); sığmazsa
+  `inceleme/butce`, alt koşu açılmaz. Alt koşunun etkin sınırı `min(tanım, pay)` (+ üstün kalan süresi); tanım anlık
+  görüntüsü değişmez. Alt koşuya **ek bütçe verilmez** (409). Alt bitince pay gerçekleşenle (maliyet, çağrı) değişir.
+- **Yürütme:** alt koşu, üst adımı sahiplenen aynı DB işleminde açılır (idem `cagri:<üst>:<adım>:<iter>:<deneme>`); dış
+  çağrı ve yarım gönderim yoktur. Üst adım alt koşu sürerken (incelemede olsa da) bekler; zaman aşımı alt koşunun sınırıdır.
+- **Sonuç:** alt `basarili` → çıktı `{durum, run_id, <ciktilar>}` (alt koşuda olmayan alan atlanır; `var` koşuluyla bakılır).
+  Alt `basarisiz`/`iptal` → üst adımda `kalici` hata, üst adımın politikası karar verir. Adım yan etkili sayılır
+  (körlemesine tekrar yok), başarılı sayılamaz, `her_biri` alamaz.
+- **Kademeli iptal:** üst iptal edilince alt koşular hemen, üst başka yoldan kapanınca (başarısız say, sınır, `end`)
+  motor turunda iptal edilir (`ust_kosu` sebebi). Üst kapandıktan sonra gelen alt maliyeti üst koşuya `gec_maliyet`
+  olarak yazılır; iptal sonrası alt koşuda süren ajanın geç maliyeti üste yansımaz (bilinen eksik sayım).
+- **Etkin koşu sınırı (5)** yalnız üst düzey koşuları sayar.
+- DB: migration 6 (yalnız ekleme: `ust_kosu_id`, `ust_adim_id`, `derinlik`, `tavan_*`). Örnek: `ornek-alt-akis-cagrisi`.
+
 ## Zamanlayıcı tetiklemesi (V2)
 Öngörülebilirlik'te tekrar eden iş türü **Workflow**: `{akis, girdiler, cron}` (`durum/tekrarlar.json`, aynı systemd
 timer'ı). Hat görevi, kalite kapısı ya da dağıtım/yayın onayı içeren akış aşama bayraklarından bağımsız olarak
@@ -249,6 +276,14 @@ sonra tek işlemde koşulları yeniden kontrol edip DB satırlarını, ardından
 Arşiv yazılamazsa koşu silinmez. Yalnız bitmiş (`basarili|basarisiz|iptal`) ve uçuşta denemesi kalmamış koşular;
 `--gun` en az 7. Sahipsiz sonuç dosyası (ref DB'de yok) yalnız süreden eskiyse. Silinen koşunun idempotency anahtarı
 serbest kalır; ona bağlı eski Geliştirme kartı "kapı durumu okunamadı" gösterir. Zamanlanmış değildir.
+
+## Okuma yolu: graf önce (1.0.93)
+Her `agent_task` istemine, ajanın açık okuma geçitlerine göre (kosucu `gecit_var` kuralı: araçlı ajan geçitleri alır,
+`git_okuma`/`not_okuma: false` kapatır) tam yollu bir bölüm eklenir: kod için önce `graf-oku <proje> query|path|explain`
+(etki alanı/çağıranlar), commit/diff için `git-oku`; beyin notları için önce `not-oku bul`, sonra `not-oku komsu`.
+Graf eksikse Grep'le tamamlanır ve bu yazılır. Tanımlar da adımı özelinde ister (HomeOS planlama/güvenlik `graf-oku homeos`,
+örnekler `not-oku komsu`). Kanıt (2026-11-19 koşuları): araştırma adımı yalnız `not-oku bul` + Grep, HomeOS güvenlik adımı
+yalnız `git-oku` kullanmıştı.
 
 ## Veri güvenliği
 
