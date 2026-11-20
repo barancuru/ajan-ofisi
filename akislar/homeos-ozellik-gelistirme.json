@@ -1,7 +1,7 @@
 {
   "sema_surumu": 1,
   "id": "homeos-ozellik-gelistirme",
-  "surum": 2,
+  "surum": 3,
   "ad": "HomeOS özellik geliştirme",
   "aciklama": "Planlama → Uygulama (beyin hattı) → Test → Güvenlik kontrolü → Kalite kapısı. Kapı geçmezse düzeltme ve yeniden test, en çok 3 tur. Kapı geçince dağıtım onayı mevcut Geliştirme kartından verilir (workflow onay vermez, oto-onay kapalı). Belirsizlikte manual_review.",
   "girdiler": {
@@ -64,7 +64,7 @@
     },
     {
       "id": "guvenlik_kontrol", "tur": "condition", "ad": "Güvenlik belirsizliği yok mu",
-      "kosullar": [{"alan": "adim.guvenlik.karar", "op": "ne", "deger": "belirsiz"}, {"alan": "adim.uygulama.uyari", "op": "eq", "deger": 0}],
+      "kosullar": [{"alan": "adim.guvenlik.karar", "op": "ne", "deger": "belirsiz"}, {"alan": "adim.uygulama.uyari", "op": "ge", "deger": 0}],
       "dogru": "kalite", "yanlis": "@inceleme"
     },
     {
@@ -89,7 +89,7 @@
     },
     {
       "id": "uat_onayi", "tur": "approval", "ad": "UAT / dağıtım onayı", "kategori": "dagitim", "izle_adim": "uygulama",
-      "mesaj": "Kalite kapısı geçti. Dağıtım onayı Geliştirme sekmesindeki UAT kartından verilir (ofis girişiyle). Workflow yalnız izler.",
+      "mesaj": "Kalite kapısı geçti. Dağıtım onayı Geliştirme sekmesindeki UAT kartından verilir (ofis girişiyle). Kartta ⚠️ satırı varsa onaydan önce değerlendir (bilgi amaçlı olanlar da sayılır). Workflow yalnız izler.",
       "reddedilirse": "@inceleme",
       "sonraki": "son"
     },
