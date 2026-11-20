@@ -1903,6 +1903,31 @@ class PilotTest(MotorTabani):
         with self.assertRaises(akis_motor.AkisHatasi):
             self.m.devam(self.k, "yeniden_dene")
 
+    def test_bilgi_uyarisi_kaliteye_engel_degil(self):
+        """Pilot bulgusu (rd978c2f6707c, 2026-11-20): kartın uyari sayısı bilgi satırlarını da sayar ("README pakete
+        girmez"); uyari>0 koşuyu incelemeye düşürmemeli. Uyarıları kullanıcı UAT kartında değerlendirir."""
+        self.planla()
+        self.ortam.hat_uat("G0.md", sha="a" * 64, uyari=4)
+        self.m.tur()
+        self.guvenlik("gecti")
+        self.m.tur()
+        self.assertEqual(self.detay(self.k)["durum"], "calisiyor")
+        self.assertEqual(self.adim(self.k, "uat_onayi")["durum"], "onay_bekliyor")
+
+    def test_okunamayan_kart_uyarisi_incelemeye(self):
+        self.planla()
+        self.ortam.hat_uat("G0.md", sha="a" * 64)
+        self.m.tur()
+        with self.m._islem() as b:   # kart okunamadı: uygulama çıktısında uyari=-1
+            c = json.loads(b.execute("SELECT cikti_json FROM adimlar WHERE kosu_id=? AND adim_id='uygulama'",
+                                     (self.k,)).fetchone()[0])
+            c["uyari"] = -1
+            b.execute("UPDATE adimlar SET cikti_json=? WHERE kosu_id=? AND adim_id='uygulama'", (json.dumps(c), self.k))
+        self.guvenlik("gecti")
+        self.m.tur()
+        d = self.detay(self.k)
+        self.assertEqual((d["durum"], d["neden"]["adim"]), ("inceleme", "guvenlik_kontrol"))
+
     def test_duzeltme_sonrasi_kapi_guncel_paketi_kullanir(self):
         """Regresyon: düzeltme turu yeni paket üretir; kapılar ve koşullar eski sha/uyarıyı değil yenisini görmeli."""
         self.planla()

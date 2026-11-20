@@ -18,6 +18,10 @@ Her kalem ayrı dal + PR; Aşama 1/2 sabitleri V2 PR'larında değişmez. Kalem 
 10. [ ] V2 değerlendirici-iyileştirici döngüsü.
 11. [ ] V2 `plan_step` → 12. [ ] CEO workflow önerisi (model çıktısı yol seçtiği için en son).
 13. [ ] V3 görsel editör / replay.
+- [x] Pilot bulgusu (2026-11-20, `rd978c2f6707c`): `guvenlik_kontrol` `uyari eq 0` istiyordu; kartın uyari sayısı bilgi satırlarını da
+  sayar ("README pakete girmez") → güvenlik geçtiği hâlde inceleme. 1.0.92 / akış surum 3: `uyari ge 0` (yalnız okunamayan kart = -1
+  incelemeye). Kullanıcı kartı Geliştirme'den onayladı, dağıtım oldu; akış kapı/UAT adımına ulaşmadı → koşu başarısız sayıldı.
+- [ ] Koşu incelemedeyken izlediği kart onaylanıp yayına çıkarsa motor bunu olay olarak göstersin (bugün yalnız kart uyarısı).
 - #5 (dış çağrıda kilit) ertelendi: yalnız eşzamanlılık testiyle birlikte ele alınır.
 
 ## V1.1 (öncelikli)
