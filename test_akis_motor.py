@@ -433,7 +433,7 @@ class SiraliTest(MotorTabani):
         self.ajan_bitir(refs["gunlukcu"], "ok")
         self.m.tur()
         self.assertEqual(len(self.ortam.baslatilan), 4)
-        self.assertEqual(self.ortam.baslatilan[-1][1], "C")
+        self.assertEqual(self.ortam.baslatilan[-1][1].split("\n\n")[0], "C")   # + graf okuma yolu bölümü
         self.ajan_bitir(self.son_ref(), "ok")
         self.m.tur()
         self.assertEqual(self.detay(k)["durum"], "basarili")
@@ -2026,6 +2026,40 @@ class PilotTest(MotorTabani):
         m2.tur()
         self.assertEqual(len(self.ortam.gorevler), 1)               # ikinci görev açılmadı
         self.assertEqual(self.adim(self.k, "uygulama")["denemeler"][0]["durum"], "calisiyor")
+
+
+class GrafYoluTest(MotorTabani):
+    """Workflow ajanı kod ve notta önce grafa bakar: geçidi açık ajanın istemine tam yollu talimat eklenir."""
+
+    def istem(self, ajan):
+        return self.m._istem({"gorev": "G", "cikti_alanlari": {}, "ajan": ajan}, {"girdi": {}, "adim": {}})
+
+    def test_gecitli_ajan_graf_ve_not_yolu_alir(self):
+        i = self.istem("akis-okuyucu")
+        self.assertIn(akis_motor.GRAF_OKU + " <proje> query", i)
+        self.assertIn(akis_motor.NOT_OKU + " komsu", i)
+        self.assertIn(akis_motor.GIT_OKU, i)
+
+    def test_not_gecidi_kapaliysa_yalniz_kod(self):
+        self.ortam.ajanlar["akis-okuyucu"]["not_okuma"] = False
+        i = self.istem("akis-okuyucu")
+        self.assertIn(akis_motor.GRAF_OKU, i)
+        self.assertNotIn(akis_motor.NOT_OKU, i)
+
+    def test_aracsiz_ya_da_bilinmeyen_ajan_talimat_almaz(self):
+        self.ortam.ajanlar["bos"] = {"id": "bos", "kurulu": True}
+        self.assertNotIn("Okuma yolu", self.istem("bos"))
+        self.assertNotIn("Okuma yolu", self.istem("yok"))
+
+    def test_tanimlar_grafi_acikca_ister(self):
+        tanimlar, hatalar = akis_tanim.tanimlari_yukle()
+        self.assertEqual(hatalar, {})
+        for akis, adim, beklenen in (("ornek-arastirma-ozeti", "arastir", "not-oku komsu"),
+                                     ("homeos-ozellik-gelistirme", "planlama", "graf-oku homeos"),
+                                     ("homeos-ozellik-gelistirme", "guvenlik", "graf-oku homeos"),
+                                     ("ornek-notlari-tek-tek-ozetle", "bul", "not-oku komsu"),
+                                     ("ornek-notlari-tek-tek-ozetle", "ozetle", "not-oku komsu")):
+            self.assertIn(beklenen, akis_tanim.adim_bul(tanimlar[akis], adim)["gorev"], (akis, adim))
 
 
 if __name__ == "__main__":

@@ -250,6 +250,14 @@ Arşiv yazılamazsa koşu silinmez. Yalnız bitmiş (`basarili|basarisiz|iptal`)
 `--gun` en az 7. Sahipsiz sonuç dosyası (ref DB'de yok) yalnız süreden eskiyse. Silinen koşunun idempotency anahtarı
 serbest kalır; ona bağlı eski Geliştirme kartı "kapı durumu okunamadı" gösterir. Zamanlanmış değildir.
 
+## Okuma yolu: graf önce (1.0.93)
+Her `agent_task` istemine, ajanın açık okuma geçitlerine göre (kosucu `gecit_var` kuralı: araçlı ajan geçitleri alır,
+`git_okuma`/`not_okuma: false` kapatır) tam yollu bir bölüm eklenir: kod için önce `graf-oku <proje> query|path|explain`
+(etki alanı/çağıranlar), commit/diff için `git-oku`; beyin notları için önce `not-oku bul`, sonra `not-oku komsu`.
+Graf eksikse Grep'le tamamlanır ve bu yazılır. Tanımlar da adımı özelinde ister (HomeOS planlama/güvenlik `graf-oku homeos`,
+örnekler `not-oku komsu`). Kanıt (2026-11-19 koşuları): araştırma adımı yalnız `not-oku bul` + Grep, HomeOS güvenlik adımı
+yalnız `git-oku` kullanmıştı.
+
 ## Veri güvenliği
 
 - Ajan çıktısından yalnız tanımda bildirilen alanlar, yalnız son `<akis_cikti>{...}</akis_cikti>` bloğundan,
